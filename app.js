@@ -309,11 +309,16 @@ function renderTraceSection(tasks) {
 }
 
 function renderLogSection(runPath, logFiles) {
-    const links = logFiles.map(fname => {
+    const buttons = logFiles.map(fname => {
         const filePath = `${runPath}/logs/${fname}`;
         const isHtml   = fname.endsWith('.html');
+        const label    = logLabel(fname);
         const href     = isHtml ? blobUrl(filePath) : cdnUrl(filePath);
-        return `<a href="${e(href)}" class="log-link" target="_blank" rel="noopener">${e(logLabel(fname))}</a>`;
+        return `<button class="log-link"
+            data-log-path="${e(filePath)}"
+            data-log-label="${e(label)}"
+            data-log-html="${isHtml}"
+            data-log-external="${e(href)}">${e(label)}</button>`;
     }).join('');
 
     return `
@@ -322,7 +327,7 @@ function renderLogSection(runPath, logFiles) {
         Logs
         <span class="count-badge">${logFiles.length}</span>
     </summary>
-    <div class="log-links">${links}</div>
+    <div class="log-links">${buttons}</div>
 </details>`;
 }
 
@@ -362,6 +367,81 @@ function renderVizSection(vizByRecording) {
 </details>`;
 }
 
+/* ─── Log modal ─────────────────────────────────────────────── */
+let _modalGeneration = 0;
+
+function initModal() {
+    document.getElementById('log-modal-close').addEventListener('click', closeLogModal);
+    document.getElementById('log-modal').addEventListener('click', evt => {
+        if (evt.target === document.getElementById('log-modal')) closeLogModal();
+    });
+    document.addEventListener('keydown', evt => {
+        if (evt.key === 'Escape' && !document.getElementById('log-modal').hidden) closeLogModal();
+    });
+
+    document.getElementById('runs').addEventListener('click', evt => {
+        const btn = evt.target.closest('.log-link');
+        if (!btn) return;
+        openLogModal(
+            btn.dataset.logPath,
+            btn.dataset.logLabel,
+            btn.dataset.logHtml === 'true',
+            btn.dataset.logExternal
+        );
+    });
+}
+
+function openLogModal(filePath, label, isHtml, externalHref) {
+    const overlay = document.getElementById('log-modal');
+    const titleEl = document.getElementById('log-modal-title');
+    const bodyEl  = document.getElementById('log-modal-body');
+    const extLink = document.getElementById('log-modal-external');
+
+    const generation = ++_modalGeneration;
+
+    titleEl.textContent = label;
+    extLink.href = externalHref;
+    overlay.hidden = false;
+    document.body.style.overflow = 'hidden';
+
+    if (isHtml) {
+        const src = cdnUrl(filePath);
+        bodyEl.innerHTML = `<iframe class="log-modal-iframe" src="${e(src)}" sandbox="allow-scripts" title="${e(label)}"></iframe>`;
+    } else {
+        bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
+        fetchLogText(filePath).then(text => {
+            if (_modalGeneration !== generation) return;
+            if (text === null) {
+                bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
+            } else {
+                const pre = document.createElement('pre');
+                pre.className = 'log-modal-text';
+                pre.textContent = text;
+                bodyEl.innerHTML = '';
+                bodyEl.appendChild(pre);
+            }
+        });
+    }
+}
+
+function closeLogModal() {
+    _modalGeneration++;
+    const overlay = document.getElementById('log-modal');
+    overlay.hidden = true;
+    document.body.style.overflow = '';
+    document.getElementById('log-modal-body').innerHTML = '';
+}
+
+async function fetchLogText(filePath) {
+    try {
+        const resp = await fetch(cdnUrl(filePath));
+        if (!resp.ok) return null;
+        return resp.text();
+    } catch {
+        return null;
+    }
+}
+
 /* ─── Page state helpers ────────────────────────────────────── */
 function showLoading() {
     document.getElementById('loading').style.display = '';
@@ -395,6 +475,7 @@ function e(str) {
 /* ─── Main ──────────────────────────────────────────────────── */
 async function init() {
     initTheme();
+    initModal();
     showLoading();
 
     try {
