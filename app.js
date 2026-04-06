@@ -64,6 +64,22 @@ async function fetchTraceText(runPath) {
     }
 }
 
+async function fetchDandiAssetId(dandisetId, subject, session) {
+    const assetPath = `sub-${subject}/sub-${subject}_ses-${session}.nwb`;
+    const url = `https://api.dandiarchive.org/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (data.results && data.results.length > 0) {
+            return data.results[0].asset_id;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 /* ─── Path parsing ──────────────────────────────────────────── */
 // Run paths are: derivatives/{dandiset}/{subject}/{session}/{pipeline}/{runId}
 function parseRuns(tree) {
@@ -218,6 +234,12 @@ function blobUrl(filePath) {
     return `https://github.com/${OWNER}/${REPO}/blob/${BRANCH}/${filePath.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+/* Build a Neurosift URL for a DANDI asset */
+function neurosiftUrl(dandisetId, assetId) {
+    const assetDownloadUrl = `https://api.dandiarchive.org/api/assets/${assetId}/download/`;
+    return `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
+}
+
 function renderRunCard(run) {
     const sc   = run.status === 'success' ? 'status-success'
                : run.status === 'failed'  ? 'status-failed'
@@ -261,9 +283,13 @@ function renderRunCard(run) {
                 <a class="run-dandiset-link" href="https://dandiarchive.org/dandiset/${e(run.dandisetId)}"
                    target="_blank" rel="noopener">Dandiset ${e(run.dandisetId)}</a>
                 <span class="run-sep">·</span>
-                <span class="run-subject">Sub: <strong>${e(run.subject)}</strong></span>
+                <a class="run-subject-link" href="https://dandiarchive.org/dandiset/${e(run.dandisetId)}/draft/files?location=sub-${e(run.subject)}"
+                   target="_blank" rel="noopener">Sub: <strong>${e(run.subject)}</strong></a>
                 <span class="run-sep">·</span>
-                <span class="run-session">Ses: <strong>${e(run.session)}</strong></span>
+                ${run.assetId
+                    ? `<a class="run-session-link" href="${neurosiftUrl(run.dandisetId, run.assetId)}"
+                          target="_blank" rel="noopener">Ses: <strong>${e(run.session)}</strong></a>`
+                    : `<span class="run-session">Ses: <strong>${e(run.session)}</strong></span>`}
             </div>
             <div class="run-pipeline-info">
                 <span class="pipeline-name">${e(run.pipelineName.replace(/\+/g, '-'))}</span>
@@ -606,11 +632,14 @@ async function init() {
             return;
         }
 
-        // Fetch trace.txt for all runs in parallel
+        // Fetch trace.txt and DANDI asset IDs for all runs in parallel
         const runsWithStatus = await Promise.all(runs.map(async run => {
-            const text   = await fetchTraceText(run.path);
+            const [text, assetId] = await Promise.all([
+                fetchTraceText(run.path),
+                fetchDandiAssetId(run.dandisetId, run.subject, run.session),
+            ]);
             const parsed = parseTrace(text);
-            return { ...run, ...parsed };
+            return { ...run, ...parsed, assetId };
         }));
 
         // Newest first by date, then attempt
