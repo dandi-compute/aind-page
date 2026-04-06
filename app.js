@@ -5,6 +5,9 @@ const BRANCH = 'main';
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
+/* Dandisets hosted on the sandbox archive instead of the production archive */
+const SANDBOX_DANDISETS = new Set(['214527']);
+
 /* ─── Theme toggle ──────────────────────────────────────────── */
 function initTheme() {
     const btn = document.getElementById('theme_toggle_btn');
@@ -258,7 +261,7 @@ function renderRunCard(run) {
         <span class="status-badge ${sc}">${slbl}</span>
         <div class="run-meta">
             <div class="run-identity">
-                <a class="run-dandiset-link" href="https://dandiarchive.org/dandiset/${e(run.dandisetId)}"
+                <a class="run-dandiset-link" href="${SANDBOX_DANDISETS.has(run.dandisetId) ? 'https://sandbox.dandiarchive.org' : 'https://dandiarchive.org'}/dandiset/${e(run.dandisetId)}"
                    target="_blank" rel="noopener">Dandiset ${e(run.dandisetId)}</a>
                 <span class="run-sep">·</span>
                 <span class="run-subject">Sub: <strong>${e(run.subject)}</strong></span>
