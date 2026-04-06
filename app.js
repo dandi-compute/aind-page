@@ -176,6 +176,9 @@ function renderSummary(runs) {
         </div>`;
 }
 
+/* Log files rendered as always-open inline iframes (not modal buttons) */
+const INLINE_REPORT_FILES = new Set(['report.html', 'timeline.html']);
+
 /* Pretty-print a log file name */
 const LOG_LABELS = {
     'dag.html':      'Pipeline DAG',
@@ -242,9 +245,12 @@ function renderRunCard(run) {
         vizByRecording[rec].push({ path: f, name: fname });
     }
 
-    const hasViz  = Object.keys(vizByRecording).length > 0;
-    const hasLogs = logFiles.length > 0;
-    const hasTasks = run.tasks && run.tasks.length > 0;
+    const hasViz      = Object.keys(vizByRecording).length > 0;
+    const inlineLogs  = logFiles.filter(f => INLINE_REPORT_FILES.has(f));
+    const buttonLogs  = logFiles.filter(f => !INLINE_REPORT_FILES.has(f));
+    const hasLogs     = buttonLogs.length > 0;
+    const hasInline   = inlineLogs.length > 0;
+    const hasTasks    = run.tasks && run.tasks.length > 0;
 
     return `
 <div class="run-card ${sc}">
@@ -271,9 +277,10 @@ function renderRunCard(run) {
         </div>
     </div>
 
-    ${hasTasks ? renderTraceSection(run.tasks) : ''}
-    ${hasLogs  ? renderLogSection(run.path, logFiles) : ''}
-    ${hasViz   ? renderVizSection(vizByRecording) : ''}
+    ${hasTasks  ? renderTraceSection(run.tasks) : ''}
+    ${hasLogs   ? renderLogSection(run.path, buttonLogs) : ''}
+    ${hasInline ? renderReportSection(run.path, inlineLogs) : ''}
+    ${hasViz    ? renderVizSection(vizByRecording) : ''}
 </div>`;
 }
 
@@ -328,6 +335,33 @@ function renderLogSection(runPath, logFiles) {
         <span class="count-badge">${logFiles.length}</span>
     </summary>
     <div class="log-links">${buttons}</div>
+</details>`;
+}
+
+function renderReportSection(runPath, reportFiles) {
+    const frames = reportFiles.map(fname => {
+        const filePath = `${runPath}/logs/${fname}`;
+        const label    = logLabel(fname);
+        const href     = cdnUrl(filePath);
+        return `<div class="inline-report-wrap">
+            <div class="inline-report-header">
+                <span class="inline-report-label">${e(label)}</span>
+                <a class="log-modal-btn-external" href="${e(href)}" target="_blank" rel="noopener">↗ Open</a>
+            </div>
+            <iframe class="inline-report-iframe"
+                data-srcdoc-path="${e(filePath)}"
+                sandbox="allow-scripts"
+                title="${e(label)}"></iframe>
+        </div>`;
+    }).join('');
+
+    return `
+<details class="run-section" open>
+    <summary class="run-section-title">
+        Reports
+        <span class="count-badge">${reportFiles.length}</span>
+    </summary>
+    <div class="inline-reports">${frames}</div>
 </details>`;
 }
 
@@ -447,6 +481,17 @@ async function fetchLogText(filePath) {
     }
 }
 
+/* Fetch and inject srcdoc for all inline report iframes in the page */
+function initInlineHtmlFrames() {
+    const frames = Array.from(document.querySelectorAll('iframe[data-srcdoc-path]'));
+    Promise.all(frames.map(async (iframe) => {
+        const content = await fetchLogText(iframe.dataset.srcdocPath);
+        iframe.srcdoc = content !== null
+            ? content
+            : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
+    }));
+}
+
 /* ─── Page state helpers ────────────────────────────────────── */
 function showLoading() {
     document.getElementById('loading').style.display = '';
@@ -507,6 +552,7 @@ async function init() {
 
         renderSummary(runsWithStatus);
         document.getElementById('runs').innerHTML = runsWithStatus.map(renderRunCard).join('');
+        initInlineHtmlFrames();
         showResults();
 
     } catch (err) {
