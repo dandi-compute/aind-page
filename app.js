@@ -8,6 +8,12 @@ const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 const PIPELINE_REPO_URL = 'https://github.com/CodyCBakerPhD/aind-ephys-pipeline';
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(['214527']);
+function dandiBaseUrl(dandisetId) {
+    return SANDBOX_DANDISETS.has(dandisetId) ? 'https://sandbox.dandiarchive.org' : 'https://dandiarchive.org';
+}
+function dandiApiBaseUrl(dandisetId) {
+    return SANDBOX_DANDISETS.has(dandisetId) ? 'https://api-staging.dandiarchive.org' : 'https://api.dandiarchive.org';
+}
 
 /* ─── Theme toggle ──────────────────────────────────────────── */
 function initTheme() {
@@ -63,6 +69,27 @@ async function fetchTraceText(runPath) {
         const resp = await fetch(url);
         if (!resp.ok) return null;
         return resp.text();
+    } catch {
+        return null;
+    }
+}
+
+async function fetchDandiAssetId(dandisetId, subject, session) {
+    const apiBase = dandiApiBaseUrl(dandisetId);
+    async function queryPath(assetPath) {
+        const url = `${apiBase}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return (data.results && data.results.length > 0) ? data.results[0].asset_id : null;
+    }
+    try {
+        const nwbName = `sub-${subject}_ses-${session}.nwb`;
+        const assetId = await queryPath(`sub-${subject}/${nwbName}`);
+        if (assetId) return { assetId, inSourcedata: false };
+        const sourcedataAssetId = await queryPath(`sourcedata/sub-${subject}/${nwbName}`);
+        if (sourcedataAssetId) return { assetId: sourcedataAssetId, inSourcedata: true };
+        return null;
     } catch {
         return null;
     }
@@ -222,6 +249,14 @@ function blobUrl(filePath) {
     return `https://github.com/${OWNER}/${REPO}/blob/${BRANCH}/${filePath.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+/* Build a Neurosift URL for a DANDI asset */
+function neurosiftUrl(dandisetId, assetId) {
+    const isSandbox = SANDBOX_DANDISETS.has(dandisetId);
+    const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
+    const url = `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
+    return isSandbox ? `${url}&staging=true` : url;
+}
+
 function renderRunCard(run) {
     const sc   = run.status === 'success' ? 'status-success'
                : run.status === 'failed'  ? 'status-failed'
@@ -262,12 +297,16 @@ function renderRunCard(run) {
         <span class="status-badge ${sc}">${slbl}</span>
         <div class="run-meta">
             <div class="run-identity">
-                <a class="run-dandiset-link" href="${SANDBOX_DANDISETS.has(run.dandisetId) ? 'https://sandbox.dandiarchive.org' : 'https://dandiarchive.org'}/dandiset/${e(run.dandisetId)}"
+                <a class="run-dandiset-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}"
                    target="_blank" rel="noopener">Dandiset ${e(run.dandisetId)}</a>
                 <span class="run-sep">·</span>
-                <span class="run-subject">Sub: <strong>${e(run.subject)}</strong></span>
+                <a class="run-subject-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`)}"
+                   target="_blank" rel="noopener">Sub: <strong>${e(run.subject)}</strong></a>
                 <span class="run-sep">·</span>
-                <span class="run-session">Ses: <strong>${e(run.session)}</strong></span>
+                ${run.assetId
+                    ? `<a class="run-session-link" href="${neurosiftUrl(run.dandisetId, run.assetId)}"
+                          target="_blank" rel="noopener">Ses: <strong>${e(run.session)}</strong></a>`
+                    : `<span class="run-session">Ses: <strong>${e(run.session)}</strong></span>`}
             </div>
             <div class="run-pipeline-info">
                 ${renderPipelineInfo(run.pipelineName, run.pipelineVersion)}
@@ -635,11 +674,16 @@ async function init() {
             return;
         }
 
-        // Fetch trace.txt for all runs in parallel
+        // Fetch trace.txt and DANDI asset IDs for all runs in parallel
         const runsWithStatus = await Promise.all(runs.map(async run => {
-            const text   = await fetchTraceText(run.path);
+            const [text, dandiResult] = await Promise.all([
+                fetchTraceText(run.path),
+                fetchDandiAssetId(run.dandisetId, run.subject, run.session),
+            ]);
             const parsed = parseTrace(text);
-            return { ...run, ...parsed };
+            const assetId = dandiResult?.assetId ?? null;
+            const inSourcedata = dandiResult?.inSourcedata ?? false;
+            return { ...run, ...parsed, assetId, inSourcedata };
         }));
 
         // Newest first by date, then attempt
