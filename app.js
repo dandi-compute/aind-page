@@ -75,15 +75,20 @@ async function fetchTraceText(runPath) {
 }
 
 async function fetchDandiAssetId(dandisetId, subject, session) {
-    const assetPath = `sub-${subject}/sub-${subject}_ses-${session}.nwb`;
-    const url = `${dandiApiBaseUrl(dandisetId)}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
-    try {
+    const apiBase = dandiApiBaseUrl(dandisetId);
+    async function queryPath(assetPath) {
+        const url = `${apiBase}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
         const resp = await fetch(url);
         if (!resp.ok) return null;
         const data = await resp.json();
-        if (data.results && data.results.length > 0) {
-            return data.results[0].asset_id;
-        }
+        return (data.results && data.results.length > 0) ? data.results[0].asset_id : null;
+    }
+    try {
+        const nwbName = `sub-${subject}_ses-${session}.nwb`;
+        const assetId = await queryPath(`sub-${subject}/${nwbName}`);
+        if (assetId) return { assetId, inSourcedata: false };
+        const sourcedataAssetId = await queryPath(`sourcedata/sub-${subject}/${nwbName}`);
+        if (sourcedataAssetId) return { assetId: sourcedataAssetId, inSourcedata: true };
         return null;
     } catch {
         return null;
@@ -295,7 +300,7 @@ function renderRunCard(run) {
                 <a class="run-dandiset-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}"
                    target="_blank" rel="noopener">Dandiset ${e(run.dandisetId)}</a>
                 <span class="run-sep">·</span>
-                <a class="run-subject-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=sub-${e(run.subject)}"
+                <a class="run-subject-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`)}"
                    target="_blank" rel="noopener">Sub: <strong>${e(run.subject)}</strong></a>
                 <span class="run-sep">·</span>
                 ${run.assetId
@@ -671,12 +676,14 @@ async function init() {
 
         // Fetch trace.txt and DANDI asset IDs for all runs in parallel
         const runsWithStatus = await Promise.all(runs.map(async run => {
-            const [text, assetId] = await Promise.all([
+            const [text, dandiResult] = await Promise.all([
                 fetchTraceText(run.path),
                 fetchDandiAssetId(run.dandisetId, run.subject, run.session),
             ]);
             const parsed = parseTrace(text);
-            return { ...run, ...parsed, assetId };
+            const assetId = dandiResult?.assetId ?? null;
+            const inSourcedata = dandiResult?.inSourcedata ?? false;
+            return { ...run, ...parsed, assetId, inSourcedata };
         }));
 
         // Newest first by date, then attempt
