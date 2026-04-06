@@ -486,13 +486,19 @@ function initInlineHtmlFrames() {
     const frames = Array.from(document.querySelectorAll('iframe[data-srcdoc-path]'));
     const frameSet = new Set(frames);
 
-    // Resize iframes to their full content height via postMessage (avoids allow-same-origin).
+    // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
+    // message from the parent. The parent re-requests when a collapsed <details> is opened,
+    // because the iframe layout is zero-height while the section is hidden.
     // Sandboxed srcdoc iframes have opaque origin so evt.origin === 'null'; we also verify
     // evt.source is one of our known iframe windows as an additional guard.
     const heightScript = `<script>
-(function(){function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
-if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}})();
+(function(){
+function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
+if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
+window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
+})();
 </script>`;
+
     window.addEventListener('message', (evt) => {
         if (typeof evt.origin !== 'string' ||
             (evt.origin !== 'null' && evt.origin !== window.location.origin)) return;
@@ -502,6 +508,25 @@ if(document.readyState==='complete'){send();}else{window.addEventListener('load'
                 iframe.style.height = evt.data.h + 'px';
             }
         }
+    });
+
+    // When a <details> containing inline frames is opened, request a fresh height
+    // measurement after layout has settled (the iframe was hidden while collapsed).
+    document.querySelectorAll('details').forEach((details) => {
+        if (!details.querySelector('iframe[data-srcdoc-path]')) return;
+        details.addEventListener('toggle', () => {
+            if (!details.open) return;
+            requestAnimationFrame(() => {
+                details.querySelectorAll('iframe[data-srcdoc-path]').forEach((iframe) => {
+                    if (iframe.contentWindow) {
+                        // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
+                        // which is not a valid targetOrigin — only '*' reaches them.
+                        // The message contains no sensitive data ({type:'requestHeight'} only).
+                        iframe.contentWindow.postMessage({ type: 'requestHeight' }, '*');
+                    }
+                });
+            });
+        });
     });
 
     Promise.all(frames.map(async (iframe) => {
