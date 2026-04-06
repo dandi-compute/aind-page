@@ -356,7 +356,7 @@ function renderReportSection(runPath, reportFiles) {
     }).join('');
 
     return `
-<details class="run-section" open>
+<details class="run-section">
     <summary class="run-section-title">
         Reports
         <span class="count-badge">${reportFiles.length}</span>
@@ -484,11 +484,36 @@ async function fetchLogText(filePath) {
 /* Fetch and inject srcdoc for all inline report iframes in the page */
 function initInlineHtmlFrames() {
     const frames = Array.from(document.querySelectorAll('iframe[data-srcdoc-path]'));
+    const frameSet = new Set(frames);
+
+    // Resize iframes to their full content height via postMessage (avoids allow-same-origin).
+    // Sandboxed srcdoc iframes have opaque origin so evt.origin === 'null'; we also verify
+    // evt.source is one of our known iframe windows as an additional guard.
+    const heightScript = `<script>
+(function(){function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
+if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}})();
+</script>`;
+    window.addEventListener('message', (evt) => {
+        if (typeof evt.origin !== 'string' ||
+            (evt.origin !== 'null' && evt.origin !== window.location.origin)) return;
+        if (!evt.data || evt.data.type !== 'iframeHeight') return;
+        for (const iframe of frameSet) {
+            if (iframe.contentWindow === evt.source && evt.data.h > 0) {
+                iframe.style.height = evt.data.h + 'px';
+            }
+        }
+    });
+
     Promise.all(frames.map(async (iframe) => {
         const content = await fetchLogText(iframe.dataset.srcdocPath);
-        iframe.srcdoc = content !== null
+        const html = content !== null
             ? content
             : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
+        // Insert height-reporter before the last </body> tag (case-insensitive); fall back to appending.
+        const bodyClose = html.toLowerCase().lastIndexOf('</body>');
+        iframe.srcdoc = bodyClose !== -1
+            ? html.slice(0, bodyClose) + heightScript + html.slice(bodyClose)
+            : html + heightScript;
     }));
 }
 

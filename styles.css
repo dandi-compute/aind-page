@@ -572,7 +572,7 @@ details[open] > .run-section-title::before { transform: rotate(90deg); }
 .inline-report-iframe {
     display: block;
     width: 100%;
-    height: 480px;
+    height: 200px;   /* placeholder; JS sets exact content height after load */
     border: none;
     background: var(--color-bg);
 }
