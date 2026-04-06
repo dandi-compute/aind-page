@@ -8,6 +8,12 @@ const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 const PIPELINE_REPO_URL = 'https://github.com/CodyCBakerPhD/aind-ephys-pipeline';
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(['214527']);
+function dandiBaseUrl(dandisetId) {
+    return SANDBOX_DANDISETS.has(dandisetId) ? 'https://sandbox.dandiarchive.org' : 'https://dandiarchive.org';
+}
+function dandiApiBaseUrl(dandisetId) {
+    return SANDBOX_DANDISETS.has(dandisetId) ? 'https://api-staging.dandiarchive.org' : 'https://api.dandiarchive.org';
+}
 
 /* ─── Theme toggle ──────────────────────────────────────────── */
 function initTheme() {
@@ -70,7 +76,7 @@ async function fetchTraceText(runPath) {
 
 async function fetchDandiAssetId(dandisetId, subject, session) {
     const assetPath = `sub-${subject}/sub-${subject}_ses-${session}.nwb`;
-    const url = `https://api.dandiarchive.org/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
+    const url = `${dandiApiBaseUrl(dandisetId)}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
     try {
         const resp = await fetch(url);
         if (!resp.ok) return null;
@@ -240,8 +246,10 @@ function blobUrl(filePath) {
 
 /* Build a Neurosift URL for a DANDI asset */
 function neurosiftUrl(dandisetId, assetId) {
-    const assetDownloadUrl = `https://api.dandiarchive.org/api/assets/${assetId}/download/`;
-    return `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
+    const isSandbox = SANDBOX_DANDISETS.has(dandisetId);
+    const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
+    const url = `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
+    return isSandbox ? `${url}&staging=true` : url;
 }
 
 function renderRunCard(run) {
@@ -284,10 +292,10 @@ function renderRunCard(run) {
         <span class="status-badge ${sc}">${slbl}</span>
         <div class="run-meta">
             <div class="run-identity">
-                <a class="run-dandiset-link" href="${SANDBOX_DANDISETS.has(run.dandisetId) ? 'https://sandbox.dandiarchive.org' : 'https://dandiarchive.org'}/dandiset/${e(run.dandisetId)}"
+                <a class="run-dandiset-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}"
                    target="_blank" rel="noopener">Dandiset ${e(run.dandisetId)}</a>
                 <span class="run-sep">·</span>
-                <a class="run-subject-link" href="https://dandiarchive.org/dandiset/${e(run.dandisetId)}/draft/files?location=sub-${e(run.subject)}"
+                <a class="run-subject-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=sub-${e(run.subject)}"
                    target="_blank" rel="noopener">Sub: <strong>${e(run.subject)}</strong></a>
                 <span class="run-sep">·</span>
                 ${run.assetId
