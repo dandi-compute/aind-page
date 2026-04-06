@@ -53,6 +53,20 @@
         <div id="runs"    style="display:none;"></div>
     </div>
 
+    <!-- Log file modal -->
+    <div id="log-modal" class="log-modal-overlay" hidden>
+        <div class="log-modal-box" role="dialog" aria-modal="true" aria-labelledby="log-modal-title">
+            <div class="log-modal-header">
+                <span id="log-modal-title" class="log-modal-title"></span>
+                <div class="log-modal-actions">
+                    <a id="log-modal-external" href="#" class="log-modal-btn-external" target="_blank" rel="noopener">↗ Open</a>
+                    <button id="log-modal-close" class="log-modal-btn-close" aria-label="Close">✕</button>
+                </div>
+            </div>
+            <div id="log-modal-body" class="log-modal-body"></div>
+        </div>
+    </div>
+
     <script src="app.js" defer></script>
 </body>
 </html>

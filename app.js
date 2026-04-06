@@ -176,6 +176,9 @@ function renderSummary(runs) {
         </div>`;
 }
 
+/* Log files rendered as always-open inline iframes (not modal buttons) */
+const INLINE_REPORT_FILES = new Set(['report.html', 'timeline.html']);
+
 /* Pretty-print a log file name */
 const LOG_LABELS = {
     'dag.html':      'Pipeline DAG',
@@ -242,9 +245,12 @@ function renderRunCard(run) {
         vizByRecording[rec].push({ path: f, name: fname });
     }
 
-    const hasViz  = Object.keys(vizByRecording).length > 0;
-    const hasLogs = logFiles.length > 0;
-    const hasTasks = run.tasks && run.tasks.length > 0;
+    const hasViz      = Object.keys(vizByRecording).length > 0;
+    const inlineLogs  = logFiles.filter(f => INLINE_REPORT_FILES.has(f));
+    const buttonLogs  = logFiles.filter(f => !INLINE_REPORT_FILES.has(f));
+    const hasLogs     = buttonLogs.length > 0;
+    const hasInline   = inlineLogs.length > 0;
+    const hasTasks    = run.tasks && run.tasks.length > 0;
 
     return `
 <div class="run-card ${sc}">
@@ -271,9 +277,10 @@ function renderRunCard(run) {
         </div>
     </div>
 
-    ${hasTasks ? renderTraceSection(run.tasks) : ''}
-    ${hasLogs  ? renderLogSection(run.path, logFiles) : ''}
-    ${hasViz   ? renderVizSection(vizByRecording) : ''}
+    ${hasTasks  ? renderTraceSection(run.tasks) : ''}
+    ${hasLogs   ? renderLogSection(run.path, buttonLogs) : ''}
+    ${hasInline ? renderReportSection(run.path, inlineLogs) : ''}
+    ${hasViz    ? renderVizSection(vizByRecording) : ''}
 </div>`;
 }
 
@@ -309,11 +316,16 @@ function renderTraceSection(tasks) {
 }
 
 function renderLogSection(runPath, logFiles) {
-    const links = logFiles.map(fname => {
+    const buttons = logFiles.map(fname => {
         const filePath = `${runPath}/logs/${fname}`;
         const isHtml   = fname.endsWith('.html');
-        const href     = isHtml ? blobUrl(filePath) : cdnUrl(filePath);
-        return `<a href="${e(href)}" class="log-link" target="_blank" rel="noopener">${e(logLabel(fname))}</a>`;
+        const label    = logLabel(fname);
+        const href     = cdnUrl(filePath);
+        return `<button class="log-link"
+            data-log-path="${e(filePath)}"
+            data-log-label="${e(label)}"
+            data-log-html="${isHtml}"
+            data-log-external="${e(href)}">${e(label)}</button>`;
     }).join('');
 
     return `
@@ -322,7 +334,34 @@ function renderLogSection(runPath, logFiles) {
         Logs
         <span class="count-badge">${logFiles.length}</span>
     </summary>
-    <div class="log-links">${links}</div>
+    <div class="log-links">${buttons}</div>
+</details>`;
+}
+
+function renderReportSection(runPath, reportFiles) {
+    const frames = reportFiles.map(fname => {
+        const filePath = `${runPath}/logs/${fname}`;
+        const label    = logLabel(fname);
+        const href     = cdnUrl(filePath);
+        return `<div class="inline-report-wrap">
+            <div class="inline-report-header">
+                <span class="inline-report-label">${e(label)}</span>
+                <a class="log-modal-btn-external" href="${e(href)}" target="_blank" rel="noopener">↗ Open</a>
+            </div>
+            <iframe class="inline-report-iframe"
+                data-srcdoc-path="${e(filePath)}"
+                sandbox="allow-scripts"
+                title="${e(label)}"></iframe>
+        </div>`;
+    }).join('');
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Reports
+        <span class="count-badge">${reportFiles.length}</span>
+    </summary>
+    <div class="inline-reports">${frames}</div>
 </details>`;
 }
 
@@ -362,6 +401,166 @@ function renderVizSection(vizByRecording) {
 </details>`;
 }
 
+/* ─── Log modal ─────────────────────────────────────────────── */
+let _modalGeneration = 0;
+
+function initModal() {
+    document.getElementById('log-modal-close').addEventListener('click', closeLogModal);
+    document.getElementById('log-modal').addEventListener('click', evt => {
+        if (evt.target === document.getElementById('log-modal')) closeLogModal();
+    });
+    document.addEventListener('keydown', evt => {
+        if (evt.key === 'Escape' && !document.getElementById('log-modal').hidden) closeLogModal();
+    });
+
+    document.getElementById('runs').addEventListener('click', evt => {
+        const btn = evt.target.closest('.log-link');
+        if (!btn) return;
+        openLogModal(
+            btn.dataset.logPath,
+            btn.dataset.logLabel,
+            btn.dataset.logHtml === 'true',
+            btn.dataset.logExternal
+        );
+    });
+}
+
+function openLogModal(filePath, label, isHtml, externalHref) {
+    const overlay = document.getElementById('log-modal');
+    const titleEl = document.getElementById('log-modal-title');
+    const bodyEl  = document.getElementById('log-modal-body');
+    const extLink = document.getElementById('log-modal-external');
+
+    const generation = ++_modalGeneration;
+
+    titleEl.textContent = label;
+    extLink.href = externalHref;
+    overlay.hidden = false;
+    document.body.style.overflow = 'hidden';
+
+    bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
+    fetchLogText(filePath).then(content => {
+        if (_modalGeneration !== generation) return;
+        if (content === null) {
+            bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
+            return;
+        }
+        bodyEl.innerHTML = '';
+        if (isHtml) {
+            // Use srcdoc to bypass X-Frame-Options restrictions on raw.githubusercontent.com
+            const iframe = document.createElement('iframe');
+            iframe.className = 'log-modal-iframe';
+            iframe.setAttribute('sandbox', 'allow-scripts');
+            iframe.setAttribute('title', label);
+            iframe.srcdoc = content;
+            bodyEl.appendChild(iframe);
+        } else {
+            const pre = document.createElement('pre');
+            pre.className = 'log-modal-text';
+            pre.textContent = content;
+            bodyEl.appendChild(pre);
+        }
+    });
+}
+
+function closeLogModal() {
+    _modalGeneration++;
+    const overlay = document.getElementById('log-modal');
+    overlay.hidden = true;
+    document.body.style.overflow = '';
+    document.getElementById('log-modal-body').innerHTML = '';
+}
+
+async function fetchLogText(filePath) {
+    try {
+        const resp = await fetch(cdnUrl(filePath));
+        if (!resp.ok) return null;
+        return resp.text();
+    } catch {
+        return null;
+    }
+}
+
+/* Fetch and inject srcdoc for all inline report iframes in the page */
+function initInlineHtmlFrames() {
+    const frames = Array.from(document.querySelectorAll('iframe[data-srcdoc-path]'));
+    const frameSet = new Set(frames);
+
+    // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
+    // message from the parent. The parent re-requests when a collapsed <details> is opened,
+    // because the iframe layout is zero-height while the section is hidden.
+    // Sandboxed srcdoc iframes have opaque origin so evt.origin === 'null'; we also verify
+    // evt.source is one of our known iframe windows as an additional guard.
+    const heightScript = `<script>
+(function(){
+function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
+if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
+window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
+})();
+</script>`;
+
+    window.addEventListener('message', (evt) => {
+        if (typeof evt.origin !== 'string' ||
+            (evt.origin !== 'null' && evt.origin !== window.location.origin)) return;
+        if (!evt.data || evt.data.type !== 'iframeHeight') return;
+        for (const iframe of frameSet) {
+            if (iframe.contentWindow === evt.source && evt.data.h > 0) {
+                iframe.style.height = evt.data.h + 'px';
+            }
+        }
+    });
+
+    // When a <details> containing inline frames is opened, request a fresh height
+    // measurement after layout has settled (the iframe was hidden while collapsed).
+    document.querySelectorAll('details').forEach((details) => {
+        if (!details.querySelector('iframe[data-srcdoc-path]')) return;
+        details.addEventListener('toggle', () => {
+            if (!details.open) return;
+            requestAnimationFrame(() => {
+                details.querySelectorAll('iframe[data-srcdoc-path]').forEach((iframe) => {
+                    if (iframe.contentWindow) {
+                        // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
+                        // which is not a valid targetOrigin — only '*' reaches them.
+                        // The message contains no sensitive data ({type:'requestHeight'} only).
+                        iframe.contentWindow.postMessage({ type: 'requestHeight' }, '*');
+                    }
+                });
+            });
+        });
+    });
+
+    // Injected into <head> for most reports: nudge the browser's default color-scheme to light
+    // so any unset colors pick up readable dark-on-white defaults.
+    const lightStyle = '<style>html{color-scheme:light;}</style>';
+    // timeline.html (Nextflow-generated) has an *explicit* dark navy background in its own CSS,
+    // so color-scheme alone cannot help — the dark background stays and light-scheme defaults
+    // produce dark text on dark background (invisible). Override background + text explicitly.
+    const timelineLightStyle = '<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>';
+
+    Promise.all(frames.map(async (iframe) => {
+        const content = await fetchLogText(iframe.dataset.srcdocPath);
+        const html = content !== null
+            ? content
+            : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
+        // Insert light-mode override and height-reporter into the document.
+        // Prefer inserting the style in <head> and the script before </body>.
+        const isTimeline = iframe.dataset.srcdocPath.endsWith('timeline.html');
+        const styleToInject = isTimeline ? timelineLightStyle : lightStyle;
+        const lcHtml = html.toLowerCase();
+        const headClose = lcHtml.indexOf('</head>');
+        const bodyClose = lcHtml.lastIndexOf('</body>');
+        let patched = headClose !== -1
+            ? html.slice(0, headClose) + styleToInject + html.slice(headClose)
+            : styleToInject + html;
+        // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
+        const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
+        patched = adjustedBodyClose !== -1
+            ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
+            : patched + heightScript;
+        iframe.srcdoc = patched;
+    }));
+}
+
 /* ─── Page state helpers ────────────────────────────────────── */
 function showLoading() {
     document.getElementById('loading').style.display = '';
@@ -395,6 +594,7 @@ function e(str) {
 /* ─── Main ──────────────────────────────────────────────────── */
 async function init() {
     initTheme();
+    initModal();
     showLoading();
 
     try {
@@ -421,6 +621,7 @@ async function init() {
 
         renderSummary(runsWithStatus);
         document.getElementById('runs').innerHTML = runsWithStatus.map(renderRunCard).join('');
+        initInlineHtmlFrames();
         showResults();
 
     } catch (err) {
