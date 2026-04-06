@@ -5,6 +5,7 @@ const BRANCH = 'main';
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
+const PIPELINE_REPO_URL = 'https://github.com/CodyCBakerPhD/aind-ephys-pipeline';
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(['214527']);
 
@@ -269,8 +270,7 @@ function renderRunCard(run) {
                 <span class="run-session">Ses: <strong>${e(run.session)}</strong></span>
             </div>
             <div class="run-pipeline-info">
-                <span class="pipeline-name">${e(run.pipelineName.replace(/\+/g, '-'))}</span>
-                <span class="pipeline-version">${e(run.pipelineVersion)}</span>
+                ${renderPipelineInfo(run.pipelineName, run.pipelineVersion)}
                 <span class="run-sep">·</span>
                 <span class="run-date">${e(run.runDate)}</span>
                 <span class="run-sep">·</span>
@@ -285,6 +285,32 @@ function renderRunCard(run) {
     ${hasInline ? renderReportSection(run.path, inlineLogs) : ''}
     ${hasViz    ? renderVizSection(vizByRecording) : ''}
 </div>`;
+}
+
+function renderPipelineInfo(pipelineName, pipelineVersion) {
+    const MIN_COMMIT_HASH_LENGTH = 6;
+    const vParts   = pipelineVersion.split('+');
+    const lastPart = vParts[vParts.length - 1];
+    const hasCommit = vParts.length > 1
+        && lastPart.length >= MIN_COMMIT_HASH_LENGTH
+        && /^[0-9a-f]+$/i.test(lastPart);
+
+    const displayName = e(pipelineName.replace(/\+/g, '-'));
+
+    if (hasCommit) {
+        const commitHash    = lastPart;
+        // Version parts use '-' as separator; the final '+' preserves the commit hash as a distinct suffix.
+        const displayVer    = e(vParts.slice(0, -1).join('-') + '+' + commitHash);
+        const url           = e(`${PIPELINE_REPO_URL}/commit/${commitHash}`);
+        return `<a class="pipeline-link" href="${url}" target="_blank" rel="noopener">`
+             + `<span class="pipeline-name">${displayName}</span>`
+             + `<span class="pipeline-version">${displayVer}</span>`
+             + `</a>`;
+    }
+
+    const displayVer = e(pipelineVersion.replace(/\+/g, '-'));
+    return `<span class="pipeline-name">${displayName}</span>`
+         + `<span class="pipeline-version">${displayVer}</span>`;
 }
 
 function renderTraceSection(tasks) {
