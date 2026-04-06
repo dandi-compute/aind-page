@@ -298,6 +298,18 @@ h1 {
     color: var(--color-text-secondary);
 }
 
+.pipeline-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+}
+
+.pipeline-link:hover .pipeline-name,
+.pipeline-link:hover .pipeline-version {
+    text-decoration: underline;
+}
+
 .run-sep { color: var(--color-border); }
 
 /* ─── Collapsible sections ──────────────────────────────────── */
