@@ -529,16 +529,31 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
         });
     });
 
+    // Injected into <head>: force light color-scheme so browser-default colors and charting
+    // libraries (e.g. Plotly timeline) use readable dark-on-white rather than adapting to the
+    // page's dark mode. Files with explicit dark styling (report.html) are unaffected because
+    // their CSS overrides take precedence over color-scheme defaults.
+    const lightStyle = '<style>html{color-scheme:light;}</style>';
+
     Promise.all(frames.map(async (iframe) => {
         const content = await fetchLogText(iframe.dataset.srcdocPath);
         const html = content !== null
             ? content
             : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
-        // Insert height-reporter before the last </body> tag (case-insensitive); fall back to appending.
-        const bodyClose = html.toLowerCase().lastIndexOf('</body>');
-        iframe.srcdoc = bodyClose !== -1
-            ? html.slice(0, bodyClose) + heightScript + html.slice(bodyClose)
-            : html + heightScript;
+        // Insert light-mode override and height-reporter into the document.
+        // Prefer inserting the style in <head> and the script before </body>.
+        const lcHtml = html.toLowerCase();
+        const headClose = lcHtml.indexOf('</head>');
+        const bodyClose = lcHtml.lastIndexOf('</body>');
+        let patched = headClose !== -1
+            ? html.slice(0, headClose) + lightStyle + html.slice(headClose)
+            : lightStyle + html;
+        // lightStyle was inserted at or before bodyClose, so adjust the position by its length.
+        const adjustedBodyClose = bodyClose !== -1 ? bodyClose + lightStyle.length : -1;
+        patched = adjustedBodyClose !== -1
+            ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
+            : patched + heightScript;
+        iframe.srcdoc = patched;
     }));
 }
 
