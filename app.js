@@ -529,11 +529,13 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
         });
     });
 
-    // Injected into <head>: force light color-scheme so browser-default colors and charting
-    // libraries (e.g. Plotly timeline) use readable dark-on-white rather than adapting to the
-    // page's dark mode. Files with explicit dark styling (report.html) are unaffected because
-    // their CSS overrides take precedence over color-scheme defaults.
+    // Injected into <head> for most reports: nudge the browser's default color-scheme to light
+    // so any unset colors pick up readable dark-on-white defaults.
     const lightStyle = '<style>html{color-scheme:light;}</style>';
+    // timeline.html (Nextflow-generated) has an *explicit* dark navy background in its own CSS,
+    // so color-scheme alone cannot help — the dark background stays and light-scheme defaults
+    // produce dark text on dark background (invisible). Override background + text explicitly.
+    const timelineLightStyle = '<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>';
 
     Promise.all(frames.map(async (iframe) => {
         const content = await fetchLogText(iframe.dataset.srcdocPath);
@@ -542,14 +544,16 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
             : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
         // Insert light-mode override and height-reporter into the document.
         // Prefer inserting the style in <head> and the script before </body>.
+        const isTimeline = iframe.dataset.srcdocPath.endsWith('timeline.html');
+        const styleToInject = isTimeline ? timelineLightStyle : lightStyle;
         const lcHtml = html.toLowerCase();
         const headClose = lcHtml.indexOf('</head>');
         const bodyClose = lcHtml.lastIndexOf('</body>');
         let patched = headClose !== -1
-            ? html.slice(0, headClose) + lightStyle + html.slice(headClose)
-            : lightStyle + html;
-        // lightStyle was inserted at or before bodyClose, so adjust the position by its length.
-        const adjustedBodyClose = bodyClose !== -1 ? bodyClose + lightStyle.length : -1;
+            ? html.slice(0, headClose) + styleToInject + html.slice(headClose)
+            : styleToInject + html;
+        // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
+        const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
         patched = adjustedBodyClose !== -1
             ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
             : patched + heightScript;
