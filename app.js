@@ -313,7 +313,7 @@ function renderLogSection(runPath, logFiles) {
         const filePath = `${runPath}/logs/${fname}`;
         const isHtml   = fname.endsWith('.html');
         const label    = logLabel(fname);
-        const href     = isHtml ? blobUrl(filePath) : cdnUrl(filePath);
+        const href     = cdnUrl(filePath);
         return `<button class="log-link"
             data-log-path="${e(filePath)}"
             data-log-label="${e(label)}"
@@ -404,24 +404,29 @@ function openLogModal(filePath, label, isHtml, externalHref) {
     overlay.hidden = false;
     document.body.style.overflow = 'hidden';
 
-    if (isHtml) {
-        const src = cdnUrl(filePath);
-        bodyEl.innerHTML = `<iframe class="log-modal-iframe" src="${e(src)}" sandbox="allow-scripts" title="${e(label)}"></iframe>`;
-    } else {
-        bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
-        fetchLogText(filePath).then(text => {
-            if (_modalGeneration !== generation) return;
-            if (text === null) {
-                bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
-            } else {
-                const pre = document.createElement('pre');
-                pre.className = 'log-modal-text';
-                pre.textContent = text;
-                bodyEl.innerHTML = '';
-                bodyEl.appendChild(pre);
-            }
-        });
-    }
+    bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
+    fetchLogText(filePath).then(content => {
+        if (_modalGeneration !== generation) return;
+        if (content === null) {
+            bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
+            return;
+        }
+        bodyEl.innerHTML = '';
+        if (isHtml) {
+            // Use srcdoc to bypass X-Frame-Options restrictions on raw.githubusercontent.com
+            const iframe = document.createElement('iframe');
+            iframe.className = 'log-modal-iframe';
+            iframe.setAttribute('sandbox', 'allow-scripts');
+            iframe.setAttribute('title', label);
+            iframe.srcdoc = content;
+            bodyEl.appendChild(iframe);
+        } else {
+            const pre = document.createElement('pre');
+            pre.className = 'log-modal-text';
+            pre.textContent = content;
+            bodyEl.appendChild(pre);
+        }
+    });
 }
 
 function closeLogModal() {
