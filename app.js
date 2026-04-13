@@ -468,10 +468,10 @@ function renderGroupBadges(runs) {
     const p = runs.filter(r => r.status === 'partial').length;
     const u = runs.length - s - f - p;
     const parts = [];
-    if (s) parts.push(`<span class="gbadge gbadge-success">${s}&thinsp;✓</span>`);
-    if (f) parts.push(`<span class="gbadge gbadge-failed">${f}&thinsp;✗</span>`);
-    if (p) parts.push(`<span class="gbadge gbadge-partial">${p}&thinsp;⚠</span>`);
-    if (u) parts.push(`<span class="gbadge gbadge-unknown">${u}&thinsp;?</span>`);
+    if (s) parts.push(`<span class="gbadge gbadge-success" title="${s} successful run${s !== 1 ? 's' : ''}">${s}&thinsp;✓</span>`);
+    if (f) parts.push(`<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? 's' : ''}">${f}&thinsp;✗</span>`);
+    if (p) parts.push(`<span class="gbadge gbadge-partial" title="${p} partial run${p !== 1 ? 's' : ''}">${p}&thinsp;⚠</span>`);
+    if (u) parts.push(`<span class="gbadge gbadge-unknown" title="${u} unknown run${u !== 1 ? 's' : ''}">${u}&thinsp;?</span>`);
     return parts.join('');
 }
 
@@ -551,11 +551,13 @@ function renderSessionGroup(dandisetId, session, runs) {
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(session)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(session)}</strong></span>`;
 
-    const byPipeline  = groupBy(runs, r => JSON.stringify([r.pipelineName, r.pipelineVersion]));
+    const byPipeline  = groupBy(runs, r => `${r.pipelineName}\x00${r.pipelineVersion}`);
     const pipelineKeys = [...byPipeline.keys()].sort();
     const pipelineHtml = pipelineKeys
         .map(key => {
-            const [pipelineName, pipelineVersion] = JSON.parse(key);
+            const sep = key.indexOf('\x00');
+            const pipelineName    = key.slice(0, sep);
+            const pipelineVersion = key.slice(sep + 1);
             return renderPipelineVersionGroup(pipelineName, pipelineVersion, byPipeline.get(key));
         })
         .join('');
