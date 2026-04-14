@@ -989,7 +989,12 @@ async function init() {
             return;
         }
 
-        const runsForSummary = filteredRuns.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
+        // On the global view, exclude sandbox dandisets from the summary.
+        // When a specific dandiset (or subject/session within one) is selected,
+        // show the full summary for the filtered scope.
+        const runsForSummary = isFiltered
+            ? filteredRuns
+            : filteredRuns.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
         renderSummary(runsForSummary);
         renderFilterBanner(filter);
         document.getElementById("runs").innerHTML = renderDandisets(filteredRuns);
