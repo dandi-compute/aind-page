@@ -892,7 +892,7 @@ async function init() {
 
         // Newest first by date, then attempt
         runsWithStatus.sort((a, b) => {
-            const d = b.runDate.localeCompare(a.runDate);
+            const d = (b.runDate ?? "").localeCompare(a.runDate ?? "");
             return d !== 0 ? d : b.attempt - a.attempt;
         });
 
