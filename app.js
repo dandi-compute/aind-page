@@ -257,7 +257,7 @@ function neurosiftUrl(dandisetId, assetId) {
     return isSandbox ? `${url}&staging=true` : url;
 }
 
-function renderRunCard(run) {
+function renderRunEntry(run) {
     const sc   = run.status === 'success' ? 'status-success'
                : run.status === 'failed'  ? 'status-failed'
                : run.status === 'partial' ? 'status-partial'
@@ -292,31 +292,13 @@ function renderRunCard(run) {
     const hasTasks    = run.tasks && run.tasks.length > 0;
 
     return `
-<div class="run-card ${sc}">
-    <div class="run-header">
+<div class="run-entry ${sc}">
+    <div class="run-entry-header">
         <span class="status-badge ${sc}">${slbl}</span>
-        <div class="run-meta">
-            <div class="run-identity">
-                <a class="run-dandiset-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}"
-                   target="_blank" rel="noopener">Dandiset ${e(run.dandisetId)}</a>
-                <span class="run-sep">·</span>
-                <a class="run-subject-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`)}"
-                   target="_blank" rel="noopener">Sub: <strong>${e(run.subject)}</strong></a>
-                <span class="run-sep">·</span>
-                ${run.assetId
-                    ? `<a class="run-session-link" href="${neurosiftUrl(run.dandisetId, run.assetId)}"
-                          target="_blank" rel="noopener">Ses: <strong>${e(run.session)}</strong></a>`
-                    : `<span class="run-session">Ses: <strong>${e(run.session)}</strong></span>`}
-            </div>
-            <div class="run-pipeline-info">
-                ${renderPipelineInfo(run.pipelineName, run.pipelineVersion)}
-                <span class="run-sep">·</span>
-                <span class="run-date">${e(run.runDate)}</span>
-                <span class="run-sep">·</span>
-                <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-                ${run.paramsProfile !== 'default' ? `<span class="run-sep">·</span><span class="run-params">Params: ${e(run.paramsProfile)}</span>` : ''}
-            </div>
-        </div>
+        <span class="run-date">${e(run.runDate)}</span>
+        <span class="run-sep">·</span>
+        <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
+        <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
 
     ${hasTasks  ? renderTraceSection(run.tasks) : ''}
@@ -466,6 +448,181 @@ function renderVizSection(vizByRecording) {
         <span class="count-badge">${Object.values(vizByRecording).reduce((s, a) => s + a.length, 0)}</span>
     </summary>
     ${sections}
+</details>`;
+}
+
+/* ─── Grouping helpers ──────────────────────────────────────── */
+function groupBy(arr, keyFn) {
+    const map = new Map();
+    for (const item of arr) {
+        const key = keyFn(item);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(item);
+    }
+    return map;
+}
+
+function renderGroupBadges(runs) {
+    const s = runs.filter(r => r.status === 'success').length;
+    const f = runs.filter(r => r.status === 'failed').length;
+    const p = runs.filter(r => r.status === 'partial').length;
+    const u = runs.length - s - f - p;
+    const parts = [];
+    if (s) parts.push(`<span class="gbadge gbadge-success" title="${s} successful run${s !== 1 ? 's' : ''}">${s}&thinsp;✓</span>`);
+    if (f) parts.push(`<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? 's' : ''}">${f}&thinsp;✗</span>`);
+    if (p) parts.push(`<span class="gbadge gbadge-partial" title="${p} partial run${p !== 1 ? 's' : ''}">${p}&thinsp;⚠</span>`);
+    if (u) parts.push(`<span class="gbadge gbadge-unknown" title="${u} unknown run${u !== 1 ? 's' : ''}">${u}&thinsp;?</span>`);
+    return parts.join('');
+}
+
+/* ─── Nested rendering ──────────────────────────────────────── */
+function renderDandisets(runs) {
+    const byDandiset = groupBy(runs, r => r.dandisetId);
+    // Sort dandisets by most recent run (runs are already sorted newest-first)
+    const dandisetIds = [...byDandiset.keys()].sort((a, b) => {
+        const aDate = byDandiset.get(a)[0]?.runDate ?? '';
+        const bDate = byDandiset.get(b)[0]?.runDate ?? '';
+        return bDate.localeCompare(aDate);
+    });
+    return dandisetIds.map(id => renderDandisetGroup(id, byDandiset.get(id))).join('');
+}
+
+function renderDandisetGroup(dandisetId, runs) {
+    const bySubject = groupBy(runs, r => r.subject);
+    const subjects  = [...bySubject.keys()].sort();
+    const subjectHtml = subjects
+        .map(s => renderSubjectGroup(dandisetId, s, bySubject.get(s)))
+        .join('');
+
+    return `
+<details class="dandiset-group">
+    <summary class="dandiset-summary">
+        <span class="dandiset-summary-inner">
+            <a class="dandiset-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
+            <span class="group-meta">
+                <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? 's' : ''}</span>
+                <span class="run-sep">·</span>
+                <span class="group-count">${runs.length}&nbsp;run${runs.length !== 1 ? 's' : ''}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+        </span>
+    </summary>
+    <div class="dandiset-body">
+        ${subjectHtml}
+    </div>
+</details>`;
+}
+
+function renderSubjectGroup(dandisetId, subject, runs) {
+    // Prefer a run with a known assetId to determine inSourcedata for the DANDI link
+    const rep      = runs.find(r => r.assetId) ?? runs[0];
+    const location = rep.inSourcedata ? `sourcedata/sub-${subject}` : `sub-${subject}`;
+    const subjectUrl = `${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}/draft/files?location=${e(location)}`;
+
+    const bySession  = groupBy(runs, r => r.session);
+    const sessions   = [...bySession.keys()].sort();
+    const sessionHtml = sessions
+        .map(ses => renderSessionGroup(dandisetId, ses, bySession.get(ses)))
+        .join('');
+
+    return `
+<details class="subject-group">
+    <summary class="subject-summary">
+        <span class="group-summary-inner">
+            <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
+               onclick="event.stopPropagation()">Sub:&nbsp;<strong>${e(subject)}</strong></a>
+            <span class="group-meta">
+                <span class="group-count">${sessions.length}&nbsp;session${sessions.length !== 1 ? 's' : ''}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+        </span>
+    </summary>
+    <div class="subject-body">
+        ${sessionHtml}
+    </div>
+</details>`;
+}
+
+function renderSessionGroup(dandisetId, session, runs) {
+    const rep = runs.find(r => r.assetId) ?? runs[0];
+    const sessionLinkHtml = rep.assetId
+        ? `<a class="group-link" href="${e(neurosiftUrl(dandisetId, rep.assetId))}"
+              target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(session)}</strong></a>`
+        : `<span class="group-label">Ses:&nbsp;<strong>${e(session)}</strong></span>`;
+
+    const byPipeline  = groupBy(runs, r => `${r.pipelineName}\x00${r.pipelineVersion}`);
+    const pipelineKeys = [...byPipeline.keys()].sort();
+    const pipelineHtml = pipelineKeys
+        .map(key => {
+            const sep = key.indexOf('\x00');
+            const pipelineName    = key.slice(0, sep);
+            const pipelineVersion = key.slice(sep + 1);
+            return renderPipelineVersionGroup(pipelineName, pipelineVersion, byPipeline.get(key));
+        })
+        .join('');
+
+    return `
+<details class="session-group">
+    <summary class="session-summary">
+        <span class="group-summary-inner">
+            ${sessionLinkHtml}
+            <span class="group-meta">
+                <span class="group-count">${pipelineKeys.length}&nbsp;pipeline${pipelineKeys.length !== 1 ? 's' : ''}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+        </span>
+    </summary>
+    <div class="session-body">
+        ${pipelineHtml}
+    </div>
+</details>`;
+}
+
+function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
+    const byParams      = groupBy(runs, r => r.paramsProfile);
+    const paramsProfiles = [...byParams.keys()].sort();
+    const paramsHtml    = paramsProfiles
+        .map(params => renderParamsGroup(params, byParams.get(params)))
+        .join('');
+
+    return `
+<details class="pipeline-version-group">
+    <summary class="pipeline-version-summary">
+        <span class="group-summary-inner">
+            <span class="group-pipeline">${renderPipelineInfo(pipelineName, pipelineVersion)}</span>
+            <span class="group-meta">
+                <span class="group-count">${paramsProfiles.length}&nbsp;params&nbsp;profile${paramsProfiles.length !== 1 ? 's' : ''}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+        </span>
+    </summary>
+    <div class="pipeline-version-body">
+        ${paramsHtml}
+    </div>
+</details>`;
+}
+
+function renderParamsGroup(paramsProfile, runs) {
+    const runsHtml    = runs.map(renderRunEntry).join('');
+    const paramsLabel = paramsProfile === 'default'
+        ? 'Default params'
+        : `Params: ${e(paramsProfile)}`;
+
+    return `
+<details class="params-group">
+    <summary class="params-summary">
+        <span class="group-summary-inner">
+            <span class="group-label">${paramsLabel}</span>
+            <span class="group-meta">
+                <span class="group-count">${runs.length}&nbsp;run${runs.length !== 1 ? 's' : ''}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+        </span>
+    </summary>
+    <div class="params-body">
+        ${runsHtml}
+    </div>
 </details>`;
 }
 
@@ -693,7 +850,7 @@ async function init() {
         });
 
         renderSummary(runsWithStatus);
-        document.getElementById('runs').innerHTML = runsWithStatus.map(renderRunCard).join('');
+        document.getElementById('runs').innerHTML = renderDandisets(runsWithStatus);
         initInlineHtmlFrames();
         showResults();
 
