@@ -107,9 +107,58 @@ function applyTheme(theme, btn) {
 const MOON_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>`;
 const SUN_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.22 3.22l1.42 1.42M15.36 15.36l1.42 1.42M3.22 16.78l1.42-1.42M15.36 4.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`;
 
+/* ─── ETag-aware fetch cache ────────────────────────────────── */
+// Caches response bodies in sessionStorage keyed by URL together with the
+// server's ETag.  Subsequent requests send "If-None-Match" so the server can
+// respond with 304 Not Modified, avoiding a redundant download.  Storage
+// errors (quota exceeded, private-browsing restrictions) are silently ignored
+// so that a failed cache write never prevents the fetch from succeeding.
+const ETAG_CACHE_PREFIX = "aind_etag:";
+
+async function cachedFetch(url, init = {}) {
+    const cacheKey = ETAG_CACHE_PREFIX + url;
+    let cached = null;
+    try {
+        const raw = sessionStorage.getItem(cacheKey);
+        if (raw) cached = JSON.parse(raw);
+    } catch {
+        /* sessionStorage unavailable or parse error; proceed without cache */
+    }
+
+    const headers = new Headers(init.headers ?? {});
+    if (cached?.etag) {
+        headers.set("If-None-Match", cached.etag);
+    }
+
+    const resp = await fetch(url, { ...init, headers });
+
+    if (resp.status === 304 && cached) {
+        return new Response(cached.body, {
+            status: cached.status ?? 200,
+            headers: { "Content-Type": cached.contentType ?? "" },
+        });
+    }
+
+    if (!resp.ok) return resp;
+
+    const body = await resp.text();
+    const etag = resp.headers.get("ETag");
+    const contentType = resp.headers.get("Content-Type") ?? "";
+
+    if (etag) {
+        try {
+            sessionStorage.setItem(cacheKey, JSON.stringify({ etag, body, contentType, status: resp.status }));
+        } catch {
+            /* Ignore storage errors (e.g., quota exceeded) */
+        }
+    }
+
+    return new Response(body, { status: resp.status, headers: { "Content-Type": contentType } });
+}
+
 /* ─── Data fetching ─────────────────────────────────────────── */
 async function fetchRepoTree() {
-    const resp = await fetch(`${API_BASE}/git/trees/HEAD?recursive=1`);
+    const resp = await cachedFetch(`${API_BASE}/git/trees/HEAD?recursive=1`);
     if (!resp.ok) {
         if (resp.status === 403 || resp.status === 429) {
             throw new Error("GitHub API rate limit exceeded. Please try again in a few minutes.");
@@ -127,7 +176,7 @@ async function fetchTraceText(runPath) {
     const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
     const url = `${CDN_BASE}/${pathParts}/logs/trace.txt`;
     try {
-        const resp = await fetch(url);
+        const resp = await cachedFetch(url);
         if (!resp.ok) return null;
         return resp.text();
     } catch {
@@ -821,7 +870,7 @@ function closeLogModal() {
 
 async function fetchLogText(filePath) {
     try {
-        const resp = await fetch(cdnUrl(filePath));
+        const resp = await cachedFetch(cdnUrl(filePath));
         if (!resp.ok) return null;
         return resp.text();
     } catch {
