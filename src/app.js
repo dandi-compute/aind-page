@@ -96,20 +96,20 @@ async function fetchDandiAssetId(dandisetId, subject, session) {
 }
 
 /* ─── Path parsing ──────────────────────────────────────────── */
-// Run paths are: derivatives/{dandiset}/{subject}/{session}/{pipeline}/{runId}
+// Run paths are: derivatives/{dandiset}/{subject}/{session}/{pipeline}/{version}/{runId}
 function parseRuns(tree) {
     const runItems = tree.filter((item) => {
         if (item.type !== "tree") return false;
         const parts = item.path.split("/");
-        return parts[0] === "derivatives" && parts.length === 6;
+        return parts[0] === "derivatives" && parts.length === 7;
     });
 
     const blobsByRun = {};
     for (const item of tree) {
         if (item.type !== "blob") continue;
         const parts = item.path.split("/");
-        if (parts.length < 7 || parts[0] !== "derivatives") continue;
-        const runPath = parts.slice(0, 6).join("/");
+        if (parts.length < 8 || parts[0] !== "derivatives") continue;
+        const runPath = parts.slice(0, 7).join("/");
         if (!blobsByRun[runPath]) blobsByRun[runPath] = [];
         blobsByRun[runPath].push(item.path);
     }
@@ -125,23 +125,23 @@ function parseRunPath(runPath) {
     //  parts[0] = 'derivatives'
     //  parts[1] = 'dandiset-XXXXXX'
     //  parts[2] = 'sub-NAME'
-    //  parts[3] = 'sub-NAME_ses-SESSION'
-    //  parts[4] = 'pipeline-NAME_version-VER'
-    //  parts[5] = 'params-PROFILE_date-YYYY+MM+DD_attempt-N'
+    //  parts[3] = 'ses-SESSION'
+    //  parts[4] = 'pipeline-NAME'
+    //  parts[5] = 'version-VER'
+    //  parts[6] = 'params-HASH_config-HASH_attempt-N'
 
     const dandisetId = parts[1].replace(/^dandiset-/, "");
     const subject = parts[2].replace(/^sub-/, "");
 
-    const sesMatch = parts[3].match(/_ses-(.+)$/);
+    const sesMatch = parts[3].match(/^ses-(.+)$/);
     const session = sesMatch ? sesMatch[1] : parts[3];
 
-    const pipeMatch = parts[4].match(/^pipeline-(.+?)_version-(.+)$/);
-    const pipelineName = pipeMatch ? pipeMatch[1] : parts[4].replace(/^pipeline-/, "");
-    const pipelineVersion = pipeMatch ? pipeMatch[2] : "";
+    const pipelineName = parts[4].replace(/^pipeline-/, "");
+    const pipelineVersion = parts[5].replace(/^version-/, "");
 
-    const runMatch = parts[5].match(/^params-(.+?)_date-(.+?)_attempt-(\d+)$/);
-    const paramsProfile = runMatch ? runMatch[1] : parts[5];
-    const runDate = runMatch ? runMatch[2].replace(/\+/g, "-") : "";
+    const runMatch = parts[6].match(/^params-(.+?)_config-(.+?)_attempt-(\d+)$/);
+    const paramsProfile = runMatch ? runMatch[1] : parts[6];
+    const configHash = runMatch ? runMatch[2] : "";
     const attempt = runMatch ? parseInt(runMatch[3], 10) : 1;
 
     return {
@@ -152,7 +152,8 @@ function parseRunPath(runPath) {
         pipelineName,
         pipelineVersion,
         paramsProfile,
-        runDate,
+        configHash,
+        runDate: null,
         attempt,
     };
 }
@@ -321,8 +322,7 @@ function renderRunEntry(run) {
 <div class="run-entry ${sc}">
     <div class="run-entry-header">
         <span class="status-badge ${sc}">${slbl}</span>
-        <span class="run-date">${e(run.runDate)}</span>
-        <span class="run-sep">·</span>
+        ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
         <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
@@ -620,9 +620,16 @@ function renderSessionGroup(dandisetId, session, runs) {
 }
 
 function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
-    const byParams = groupBy(runs, (r) => r.paramsProfile);
-    const paramsProfiles = [...byParams.keys()].sort();
-    const paramsHtml = paramsProfiles.map((params) => renderParamsGroup(params, byParams.get(params))).join("");
+    const byParams = groupBy(runs, (r) => `${r.paramsProfile}\x00${r.configHash}`);
+    const paramKeys = [...byParams.keys()].sort();
+    const paramsHtml = paramKeys
+        .map((key) => {
+            const sep = key.indexOf("\x00");
+            const paramsProfile = key.slice(0, sep);
+            const configHash = key.slice(sep + 1);
+            return renderParamsGroup(paramsProfile, configHash, byParams.get(key));
+        })
+        .join("");
 
     return `
 <details class="pipeline-version-group">
@@ -630,7 +637,7 @@ function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
         <span class="group-summary-inner">
             <span class="group-pipeline">${renderPipelineInfo(pipelineName, pipelineVersion)}</span>
             <span class="group-meta">
-                <span class="group-count">${paramsProfiles.length}&nbsp;params&nbsp;profile${paramsProfiles.length !== 1 ? "s" : ""}</span>
+                <span class="group-count">${paramKeys.length}&nbsp;configuration${paramKeys.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
         </span>
@@ -641,15 +648,16 @@ function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
 </details>`;
 }
 
-function renderParamsGroup(paramsProfile, runs) {
+function renderParamsGroup(paramsProfile, configHash, runs) {
     const runsHtml = runs.map(renderRunEntry).join("");
-    const paramsLabel = paramsProfile === "default" ? "Default params" : `Params: ${e(paramsProfile)}`;
+    const paramsLabel = `Params:&nbsp;${e(paramsProfile)}`;
+    const configLabel = configHash ? `&nbsp;·&nbsp;Config:&nbsp;${e(configHash)}` : "";
 
     return `
 <details class="params-group">
     <summary class="params-summary">
         <span class="group-summary-inner">
-            <span class="group-label">${paramsLabel}</span>
+            <span class="group-label">${paramsLabel}${configLabel}</span>
             <span class="group-meta">
                 <span class="group-count">${runs.length}&nbsp;run${runs.length !== 1 ? "s" : ""}</span>
             </span>
