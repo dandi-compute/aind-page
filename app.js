@@ -527,7 +527,7 @@ function renderSubjectGroup(dandisetId, subject, runs) {
         .join('');
 
     return `
-<details class="subject-group" open>
+<details class="subject-group">
     <summary class="subject-summary">
         <span class="group-summary-inner">
             <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
@@ -563,7 +563,7 @@ function renderSessionGroup(dandisetId, session, runs) {
         .join('');
 
     return `
-<details class="session-group" open>
+<details class="session-group">
     <summary class="session-summary">
         <span class="group-summary-inner">
             ${sessionLinkHtml}
@@ -587,7 +587,7 @@ function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
         .join('');
 
     return `
-<details class="pipeline-version-group" open>
+<details class="pipeline-version-group">
     <summary class="pipeline-version-summary">
         <span class="group-summary-inner">
             <span class="group-pipeline">${renderPipelineInfo(pipelineName, pipelineVersion)}</span>
@@ -610,7 +610,7 @@ function renderParamsGroup(paramsProfile, runs) {
         : `Params: ${e(paramsProfile)}`;
 
     return `
-<details class="params-group" open>
+<details class="params-group">
     <summary class="params-summary">
         <span class="group-summary-inner">
             <span class="group-label">${paramsLabel}</span>
