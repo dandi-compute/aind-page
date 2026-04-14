@@ -15,6 +15,67 @@ function dandiApiBaseUrl(dandisetId) {
     return SANDBOX_DANDISETS.has(dandisetId) ? "https://api-staging.dandiarchive.org" : "https://api.dandiarchive.org";
 }
 
+/* ─── URL-based filtering ───────────────────────────────────── */
+function parseFilter() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        dandisetId: params.get("dandiset") ?? null,
+        subject: params.get("subject") ?? null,
+        session: params.get("session") ?? null,
+    };
+}
+
+function applyFilter(runs, filter) {
+    return runs.filter((r) => {
+        if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
+        if (filter.subject && r.subject !== filter.subject) return false;
+        if (filter.session && r.session !== filter.session) return false;
+        return true;
+    });
+}
+
+/* Build a page URL with the given filter parameters */
+function narrowUrl(params) {
+    const sp = new URLSearchParams();
+    if (params.dandiset) sp.set("dandiset", params.dandiset);
+    if (params.subject) sp.set("subject", params.subject);
+    if (params.session) sp.set("session", params.session);
+    const qs = sp.toString();
+    return qs ? `?${qs}` : "./";
+}
+
+function renderFilterBanner(filter) {
+    const banner = document.getElementById("filter-banner");
+    const isFiltered = !!(filter.dandisetId || filter.subject || filter.session);
+    if (!isFiltered) {
+        banner.style.display = "none";
+        return;
+    }
+
+    const crumbs = [];
+    if (filter.dandisetId) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId })}">Dandiset&nbsp;${e(filter.dandisetId)}</a>`
+        );
+    }
+    if (filter.subject) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject })}">Sub:&nbsp;${e(filter.subject)}</a>`
+        );
+    }
+    if (filter.session) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session })}">Ses:&nbsp;${e(filter.session)}</a>`
+        );
+    }
+
+    banner.innerHTML = `
+<span class="filter-banner-label">Filtered view:</span>
+<span class="filter-crumbs">${crumbs.join('<span class="filter-sep">/</span>')}</span>
+<a class="filter-clear" href="./">× View all runs</a>`;
+    banner.style.display = "";
+}
+
 /* ─── Theme toggle ──────────────────────────────────────────── */
 function initTheme() {
     const btn = document.getElementById("theme_toggle_btn");
@@ -533,16 +594,20 @@ function renderDandisets(runs) {
         const bDate = byDandiset.get(b)[0]?.runDate ?? "";
         return bDate.localeCompare(aDate);
     });
-    return dandisetIds.map((id) => renderDandisetGroup(id, byDandiset.get(id))).join("");
+    const autoExpand = dandisetIds.length === 1;
+    return dandisetIds.map((id) => renderDandisetGroup(id, byDandiset.get(id), autoExpand)).join("");
 }
 
-function renderDandisetGroup(dandisetId, runs) {
+function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
     const bySubject = groupBy(runs, (r) => r.subject);
     const subjects = [...bySubject.keys()].sort();
-    const subjectHtml = subjects.map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s))).join("");
+    const autoExpandSubject = autoExpand && subjects.length === 1;
+    const subjectHtml = subjects
+        .map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s), autoExpandSubject))
+        .join("");
 
     return `
-<details class="dandiset-group">
+<details class="dandiset-group"${autoExpand ? " open" : ""}>
     <summary class="dandiset-summary">
         <span class="dandiset-summary-inner">
             <a class="dandiset-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
@@ -553,6 +618,8 @@ function renderDandisetGroup(dandisetId, runs) {
                 <span class="group-count">${runs.length}&nbsp;run${runs.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId })}"
+               title="Narrow view to Dandiset ${e(dandisetId)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
     <div class="dandiset-body">
@@ -561,7 +628,7 @@ function renderDandisetGroup(dandisetId, runs) {
 </details>`;
 }
 
-function renderSubjectGroup(dandisetId, subject, runs) {
+function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
     // Prefer a run with a known assetId to determine inSourcedata for the DANDI link
     const rep = runs.find((r) => r.assetId) ?? runs[0];
     const location = rep.inSourcedata ? `sourcedata/sub-${subject}` : `sub-${subject}`;
@@ -569,10 +636,13 @@ function renderSubjectGroup(dandisetId, subject, runs) {
 
     const bySession = groupBy(runs, (r) => r.session);
     const sessions = [...bySession.keys()].sort();
-    const sessionHtml = sessions.map((ses) => renderSessionGroup(dandisetId, ses, bySession.get(ses))).join("");
+    const autoExpandSession = autoExpand && sessions.length === 1;
+    const sessionHtml = sessions
+        .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
+        .join("");
 
     return `
-<details class="subject-group">
+<details class="subject-group"${autoExpand ? " open" : ""}>
     <summary class="subject-summary">
         <span class="group-summary-inner">
             <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
@@ -581,6 +651,8 @@ function renderSubjectGroup(dandisetId, subject, runs) {
                 <span class="group-count">${sessions.length}&nbsp;session${sessions.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId, subject })}"
+               title="Narrow view to Sub: ${e(subject)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
     <div class="subject-body">
@@ -589,7 +661,7 @@ function renderSubjectGroup(dandisetId, subject, runs) {
 </details>`;
 }
 
-function renderSessionGroup(dandisetId, session, runs) {
+function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
     const rep = runs.find((r) => r.assetId) ?? runs[0];
     const sessionLinkHtml = rep.assetId
         ? `<a class="group-link" href="${e(neurosiftUrl(dandisetId, rep.assetId))}"
@@ -608,7 +680,7 @@ function renderSessionGroup(dandisetId, session, runs) {
         .join("");
 
     return `
-<details class="session-group">
+<details class="session-group"${autoExpand ? " open" : ""}>
     <summary class="session-summary">
         <span class="group-summary-inner">
             ${sessionLinkHtml}
@@ -616,6 +688,8 @@ function renderSessionGroup(dandisetId, session, runs) {
                 <span class="group-count">${pipelineKeys.length}&nbsp;pipeline${pipelineKeys.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId, subject, session })}"
+               title="Narrow view to Ses: ${e(session)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
     <div class="session-body">
@@ -844,6 +918,7 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
 function showLoading() {
     document.getElementById("loading").style.display = "";
     document.getElementById("error").style.display = "none";
+    document.getElementById("filter-banner").style.display = "none";
     document.getElementById("summary").style.display = "none";
     document.getElementById("runs").style.display = "none";
 }
@@ -905,9 +980,24 @@ async function init() {
         });
 
         const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
-        const runsForSummary = runsWithStatus.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
+        const filter = parseFilter();
+        const isFiltered = !!(filter.dandisetId || filter.subject || filter.session);
+        const filteredRuns = applyFilter(runsWithStatus, filter);
+
+        if (isFiltered && filteredRuns.length === 0) {
+            showError("No pipeline runs match the current filter.");
+            return;
+        }
+
+        // On the global view, exclude sandbox dandisets from the summary.
+        // When a specific dandiset (or subject/session within one) is selected,
+        // show the full summary for the filtered scope.
+        const runsForSummary = isFiltered
+            ? filteredRuns
+            : filteredRuns.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
         renderSummary(runsForSummary);
-        document.getElementById("runs").innerHTML = renderDandisets(runsWithStatus);
+        renderFilterBanner(filter);
+        document.getElementById("runs").innerHTML = renderDandisets(filteredRuns);
         initInlineHtmlFrames();
         showResults();
     } catch (err) {
