@@ -228,6 +228,7 @@ function renderSummary(runs) {
 
 /* Log files rendered as always-open inline iframes (not modal buttons) */
 const INLINE_REPORT_FILES = new Set(["report.html", "timeline.html"]);
+const INLINE_REPORT_ORDER = ["timeline.html", "report.html"];
 
 /* Pretty-print a log file name */
 const LOG_LABELS = {
@@ -312,7 +313,13 @@ function renderRunEntry(run) {
     }
 
     const hasViz = Object.keys(vizByRecording).length > 0;
-    const inlineLogs = logFiles.filter((f) => INLINE_REPORT_FILES.has(f));
+    const inlineLogs = logFiles
+        .filter((f) => INLINE_REPORT_FILES.has(f))
+        .sort((a, b) => {
+            const ai = INLINE_REPORT_ORDER.indexOf(a);
+            const bi = INLINE_REPORT_ORDER.indexOf(b);
+            return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
+        });
     const buttonLogs = logFiles.filter((f) => !INLINE_REPORT_FILES.has(f));
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
