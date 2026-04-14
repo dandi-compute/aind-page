@@ -420,11 +420,9 @@ function renderReportSection(runPath, reportFiles) {
         .map((fname) => {
             const filePath = `${runPath}/logs/${fname}`;
             const label = logLabel(fname);
-            const href = cdnUrl(filePath);
             return `<div class="inline-report-wrap">
             <div class="inline-report-header">
                 <span class="inline-report-label">${e(label)}</span>
-                <a class="log-modal-btn-external" href="${e(href)}" target="_blank" rel="noopener">↗ Open</a>
             </div>
             <iframe class="inline-report-iframe"
                 data-srcdoc-path="${e(filePath)}"
