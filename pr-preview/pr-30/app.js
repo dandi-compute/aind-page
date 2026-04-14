@@ -884,7 +884,10 @@ async function init() {
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
                 const inSourcedata = dandiResult?.inSourcedata ?? false;
-                return { ...run, ...parsed, assetId, inSourcedata };
+                // Any run without an /output folder is considered failed
+                const hasOutput = run.files.some((f) => f.includes("/output/"));
+                const status = hasOutput ? parsed.status : "failed";
+                return { ...run, ...parsed, assetId, inSourcedata, status };
             })
         );
 
