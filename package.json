@@ -1,0 +1,25 @@
+{
+    "name": "aind-page",
+    "version": "1.0.0",
+    "description": "Simple webpage rendering the basic aspects of DANDI Compute - AIND.",
+    "main": "src/app.js",
+    "scripts": {
+        "format": "prettier --write .",
+        "format:check": "prettier --check ."
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/dandi-compute/aind-page.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT",
+    "type": "commonjs",
+    "bugs": {
+        "url": "https://github.com/dandi-compute/aind-page/issues"
+    },
+    "homepage": "https://github.com/dandi-compute/aind-page#readme",
+    "devDependencies": {
+        "prettier": "^3.8.2"
+    }
+}
