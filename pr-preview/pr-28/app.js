@@ -896,7 +896,9 @@ async function init() {
             return d !== 0 ? d : b.attempt - a.attempt;
         });
 
-        renderSummary(runsWithStatus);
+        const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
+        const runsForSummary = runsWithStatus.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
+        renderSummary(runsForSummary);
         document.getElementById("runs").innerHTML = renderDandisets(runsWithStatus);
         initInlineHtmlFrames();
         showResults();
