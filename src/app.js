@@ -184,6 +184,18 @@ async function fetchTraceText(runPath) {
     }
 }
 
+async function fetchDatasetDescription(runPath) {
+    const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
+    const url = `${CDN_BASE}/${pathParts}/dataset_description.json`;
+    try {
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return null;
+        return resp.json();
+    } catch {
+        return null;
+    }
+}
+
 async function fetchDandiAssetId(dandisetId, subject, session) {
     const apiBase = dandiApiBaseUrl(dandisetId);
     async function queryPath(assetPath) {
@@ -434,6 +446,7 @@ function renderRunEntry(run) {
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
+    const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
 
     return `
 <div class="run-entry ${sc}">
@@ -444,6 +457,7 @@ function renderRunEntry(run) {
         <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
 
+    ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasLogs ? renderLogSection(run.path, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run.path, inlineLogs) : ""}
@@ -474,6 +488,27 @@ function renderPipelineInfo(pipelineName, pipelineVersion) {
 
     const displayVer = e(pipelineVersion.replace(/\+/g, "-"));
     return `<span class="pipeline-name">${displayName}</span>` + `<span class="pipeline-version">${displayVer}</span>`;
+}
+
+function renderSourceVersionsSection(generatedBy) {
+    const items = generatedBy
+        .map((entry) => {
+            const name = e(entry.Name ?? "");
+            const version = e(entry.Version ?? "");
+            const codeUrl = entry.CodeURL ? e(entry.CodeURL) : null;
+            const versionHtml = version ? `<span class="src-version">${version}</span>` : "";
+            const nameHtml = codeUrl
+                ? `<a class="src-link" href="${codeUrl}" target="_blank" rel="noopener">${name}</a>`
+                : `<span class="src-name">${name}</span>`;
+            return `<span class="src-entry">${nameHtml}${versionHtml}</span>`;
+        })
+        .join("");
+
+    return `
+<div class="source-versions">
+    <span class="source-versions-label">Source versions:</span>
+    <span class="source-versions-list">${items}</span>
+</div>`;
 }
 
 function renderTraceSection(tasks) {
@@ -1005,20 +1040,22 @@ async function init() {
             return;
         }
 
-        // Fetch trace.txt and DANDI asset IDs for all runs in parallel
+        // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, dandiResult] = await Promise.all([
+                const [text, datasetDesc, dandiResult] = await Promise.all([
                     fetchTraceText(run.path),
+                    fetchDatasetDescription(run.path),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                 ]);
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
                 const inSourcedata = dandiResult?.inSourcedata ?? false;
+                const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
                 // Any run without an /output folder is considered failed
                 const hasOutput = run.files.some((f) => f.includes("/output/"));
                 const status = hasOutput ? parsed.status : "failed";
-                return { ...run, ...parsed, assetId, inSourcedata, status };
+                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, status };
             })
         );
 
