@@ -498,7 +498,7 @@ function resolveCodeUrl(codeUrl, version) {
     const isCommitHash = /^[0-9a-f]{6,40}$/i.test(version);
     const alreadySpecific = /\/(commit|tree|blob|releases\/tag)\//i.test(codeUrl);
     if (isCommitHash && !alreadySpecific) {
-        return codeUrl.replace(/\/+$/, "") + "/commit/" + version;
+        return codeUrl.replace(/\/+$/, "") + "/tree/" + version;
     }
     return codeUrl;
 }
