@@ -490,12 +490,27 @@ function renderPipelineInfo(pipelineName, pipelineVersion) {
     return `<span class="pipeline-name">${displayName}</span>` + `<span class="pipeline-version">${displayVer}</span>`;
 }
 
+function resolveCodeUrl(codeUrl, version) {
+    if (!codeUrl || !version) return codeUrl ?? null;
+    // If the version looks like a bare commit hash and the CodeURL doesn't already
+    // point to a specific commit/tree/tag, append /commit/<hash> so the link goes
+    // directly to the commit rather than the repository root.
+    const isCommitHash = /^[0-9a-f]{6,40}$/i.test(version);
+    const alreadySpecific = /\/(commit|tree|blob|releases\/tag)\//i.test(codeUrl);
+    if (isCommitHash && !alreadySpecific) {
+        return codeUrl.replace(/\/+$/, "") + "/commit/" + version;
+    }
+    return codeUrl;
+}
+
 function renderSourceVersionsSection(generatedBy) {
     const items = generatedBy
         .map((entry) => {
             const name = e(entry.Name ?? "");
             const version = e(entry.Version ?? "");
-            const codeUrl = entry.CodeURL ? e(entry.CodeURL) : null;
+            const rawUrl = entry.CodeURL ?? null;
+            const resolvedUrl = resolveCodeUrl(rawUrl, entry.Version ?? "");
+            const codeUrl = resolvedUrl ? e(resolvedUrl) : null;
             const versionHtml = version ? `<span class="src-version">${version}</span>` : "";
             const nameHtml = codeUrl
                 ? `<a class="src-link" href="${codeUrl}" target="_blank" rel="noopener">${name}</a>`
