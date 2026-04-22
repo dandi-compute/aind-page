@@ -22,6 +22,7 @@ function parseFilter() {
         dandisetId: params.get("dandiset") ?? null,
         subject: params.get("subject") ?? null,
         session: params.get("session") ?? null,
+        pipelineVersion: params.get("version") ?? null,
     };
 }
 
@@ -30,6 +31,7 @@ function applyFilter(runs, filter) {
         if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
         if (filter.subject && r.subject !== filter.subject) return false;
         if (filter.session && r.session !== filter.session) return false;
+        if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
         return true;
     });
 }
@@ -40,13 +42,14 @@ function narrowUrl(params) {
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
+    if (params.version) sp.set("version", params.version);
     const qs = sp.toString();
     return qs ? `?${qs}` : "./";
 }
 
 function renderFilterBanner(filter) {
     const banner = document.getElementById("filter-banner");
-    const isFiltered = !!(filter.dandisetId || filter.subject || filter.session);
+    const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
     if (!isFiltered) {
         banner.style.display = "none";
         return;
@@ -66,6 +69,11 @@ function renderFilterBanner(filter) {
     if (filter.session) {
         crumbs.push(
             `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session })}">Ses:&nbsp;${e(filter.session)}</a>`
+        );
+    }
+    if (filter.pipelineVersion) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, version: filter.pipelineVersion })}">Ver:&nbsp;${e(filter.pipelineVersion)}</a>`
         );
     }
 
@@ -774,7 +782,14 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
             const sep = key.indexOf("\x00");
             const pipelineName = key.slice(0, sep);
             const pipelineVersion = key.slice(sep + 1);
-            return renderPipelineVersionGroup(pipelineName, pipelineVersion, byPipeline.get(key));
+            return renderPipelineVersionGroup(
+                dandisetId,
+                subject,
+                session,
+                pipelineName,
+                pipelineVersion,
+                byPipeline.get(key)
+            );
         })
         .join("");
 
@@ -797,7 +812,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
 </details>`;
 }
 
-function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
+function renderPipelineVersionGroup(dandisetId, subject, session, pipelineName, pipelineVersion, runs) {
     const byParams = groupBy(runs, (r) => `${r.paramsProfile}\x00${r.configHash}`);
     const paramKeys = [...byParams.keys()].sort();
     const paramsHtml = paramKeys
@@ -818,6 +833,8 @@ function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
                 <span class="group-count">${paramKeys.length}&nbsp;configuration${paramKeys.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId, subject, session, version: pipelineVersion })}"
+               title="Narrow view to version: ${e(pipelineVersion)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
     <div class="pipeline-version-body">
@@ -1082,7 +1099,7 @@ async function init() {
 
         const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
         const filter = parseFilter();
-        const isFiltered = !!(filter.dandisetId || filter.subject || filter.session);
+        const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
         const filteredRuns = applyFilter(runsWithStatus, filter);
 
         if (isFiltered && filteredRuns.length === 0) {
