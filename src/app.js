@@ -872,7 +872,14 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
             const sep = key.indexOf("\x00");
             const pipelineName = key.slice(0, sep);
             const pipelineVersion = key.slice(sep + 1);
-            return renderPipelineVersionGroup(pipelineName, pipelineVersion, byPipeline.get(key));
+            return renderPipelineVersionGroup(
+                dandisetId,
+                subject,
+                session,
+                pipelineName,
+                pipelineVersion,
+                byPipeline.get(key)
+            );
         })
         .join("");
 
@@ -895,7 +902,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
 </details>`;
 }
 
-function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
+function renderPipelineVersionGroup(dandisetId, subject, session, pipelineName, pipelineVersion, runs) {
     const byParams = groupBy(runs, (r) => `${r.paramsProfile}\x00${r.configHash}`);
     const paramKeys = [...byParams.keys()].sort();
     const paramsHtml = paramKeys
@@ -916,7 +923,7 @@ function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
                 <span class="group-count">${paramKeys.length}&nbsp;configuration${paramKeys.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
-            <a class="narrow-link" href="${e(narrowUrl({ pipelineVersion }))}"
+            <a class="narrow-link" href="${e(narrowUrl({ dandiset: dandisetId, subject, session, pipelineVersion }))}"
                title="Narrow view to version: ${e(pipelineVersion)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
