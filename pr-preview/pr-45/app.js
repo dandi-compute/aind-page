@@ -35,9 +35,13 @@ function classifyFailedTaskStep(taskName = "") {
     return "other";
 }
 
+function isFailedStatus(status) {
+    return String(status).toLowerCase() === "failed";
+}
+
 function runFailureStep(run) {
-    if (run.status !== "failed") return null;
-    const failedTasks = (run.tasks ?? []).filter((task) => task.status === "FAILED");
+    if (!isFailedStatus(run.status)) return null;
+    const failedTasks = (run.tasks ?? []).filter((task) => isFailedStatus(task.status));
     if (failedTasks.length === 0) return "other";
 
     const failedSteps = failedTasks.map((task) => classifyFailedTaskStep(task.name));
@@ -54,8 +58,8 @@ function applyFilter(runs, filter) {
         if (filter.session && r.session !== filter.session) return false;
         if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
         if (filter.failureStep) {
-            if (r.status !== "failed") return false;
-            const failedStep = runFailureStep(r);
+            if (!isFailedStatus(r.status)) return false;
+            const failedStep = r.failureStep;
             if (filter.failureStep === "exclude-job-dispatch") return failedStep !== "job-dispatch";
             return failedStep === filter.failureStep;
         }
@@ -77,6 +81,7 @@ function narrowUrl(params) {
 
 const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
+const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
 
 function renderFilterInput(name, label, value, suggestions) {
     const listId = `filter-options-${name}`;
@@ -139,12 +144,10 @@ function renderFilterBanner(filter, availableRuns = []) {
     const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
     const failureSteps = uniqueSortedValues([
-        "exclude-job-dispatch",
-        "pre-processing",
-        "post-processing",
+        ...FAILURE_STEP_FILTER_OPTIONS,
         ...availableRuns
-            .filter((run) => run.status === "failed")
-            .map((run) => runFailureStep(run))
+            .filter((run) => isFailedStatus(run.status))
+            .map((run) => run.failureStep)
             .filter((step) => step !== "other"),
     ]);
     const filteredViewHtml = isFiltered
@@ -1169,7 +1172,8 @@ async function init() {
                 // Any run without an /output folder is considered failed
                 const hasOutput = run.files.some((f) => f.includes("/output/"));
                 const status = hasOutput ? parsed.status : "failed";
-                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, status };
+                const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
+                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, status, failureStep };
             })
         );
 
