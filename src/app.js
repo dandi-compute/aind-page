@@ -47,13 +47,20 @@ function narrowUrl(params) {
     return qs ? `?${qs}` : "./";
 }
 
-function renderFilterBanner(filter) {
+function renderFilterInput(name, label, value, suggestions) {
+    const listId = `filter-options-${name}`;
+    const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
+    return `
+<label class="filter-input-wrap">
+    <span class="filter-input-label">${label}</span>
+    <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off">
+    <datalist id="${listId}">${options}</datalist>
+</label>`;
+}
+
+function renderFilterBanner(filter, availableRuns = []) {
     const banner = document.getElementById("filter-banner");
     const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
-    if (!isFiltered) {
-        banner.style.display = "none";
-        return;
-    }
 
     const crumbs = [];
     if (filter.dandisetId) {
@@ -77,10 +84,32 @@ function renderFilterBanner(filter) {
         );
     }
 
+    const collator = new Intl.Collator();
+    const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(collator.compare);
+    const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
+    const subjects = uniqueSortedValues(availableRuns.map((r) => r.subject));
+    const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
+    const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
+    const filteredViewHtml = isFiltered
+        ? `<div class="filter-banner-active">
+    <span class="filter-banner-label">Filtered view:</span>
+    <span class="filter-crumbs">${crumbs.join('<span class="filter-sep">/</span>')}</span>
+</div>`
+        : "";
+
     banner.innerHTML = `
-<span class="filter-banner-label">Filtered view:</span>
-<span class="filter-crumbs">${crumbs.join('<span class="filter-sep">/</span>')}</span>
-<a class="filter-clear" href="./">× View all runs</a>`;
+<div class="filter-banner-main">
+    <span class="filter-banner-label">Filter runs:</span>
+    <form class="filter-form" method="get" action="">
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets)}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects)}
+        ${renderFilterInput("session", "Session", filter.session, sessions)}
+        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions)}
+        <button class="filter-apply" type="submit">Apply</button>
+        <a class="filter-clear" href="./">× View all runs</a>
+    </form>
+</div>
+${filteredViewHtml}`;
     banner.style.display = "";
 }
 
@@ -1055,12 +1084,14 @@ async function init() {
     initTheme();
     initModal();
     showLoading();
+    renderFilterBanner(parseFilter(), []);
 
     try {
         const tree = await fetchRepoTree();
         const runs = parseRuns(tree);
 
         if (runs.length === 0) {
+            renderFilterBanner(parseFilter(), []);
             showError("No pipeline runs found in the repository.");
             return;
         }
@@ -1096,6 +1127,7 @@ async function init() {
         const filteredRuns = applyFilter(runsWithStatus, filter);
 
         if (isFiltered && filteredRuns.length === 0) {
+            renderFilterBanner(filter, runsWithStatus);
             showError("No pipeline runs match the current filter.");
             return;
         }
@@ -1107,11 +1139,12 @@ async function init() {
             ? filteredRuns
             : filteredRuns.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
         renderSummary(runsForSummary);
-        renderFilterBanner(filter);
+        renderFilterBanner(filter, runsWithStatus);
         document.getElementById("runs").innerHTML = renderDandisets(filteredRuns);
         initInlineHtmlFrames();
         showResults();
     } catch (err) {
+        renderFilterBanner(parseFilter(), []);
         showError(err.message || "An unexpected error occurred.");
     }
 }
