@@ -1225,3 +1225,17 @@ async function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        applyFilter,
+        classifyFailedTaskStep,
+        parseRunPath,
+        parseTrace,
+        renderFilterBanner,
+        runFailureStep,
+        showError,
+        showLoading,
+        showResults,
+    };
+}
