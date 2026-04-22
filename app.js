@@ -22,6 +22,7 @@ function parseFilter() {
         dandisetId: params.get("dandiset") ?? null,
         subject: params.get("subject") ?? null,
         session: params.get("session") ?? null,
+        pipelineVersion: params.get("version") ?? null,
     };
 }
 
@@ -30,6 +31,7 @@ function applyFilter(runs, filter) {
         if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
         if (filter.subject && r.subject !== filter.subject) return false;
         if (filter.session && r.session !== filter.session) return false;
+        if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
         return true;
     });
 }
@@ -40,17 +42,28 @@ function narrowUrl(params) {
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
+    if (params.pipelineVersion) sp.set("version", params.pipelineVersion);
     const qs = sp.toString();
     return qs ? `?${qs}` : "./";
 }
 
-function renderFilterBanner(filter) {
+const FILTER_VALUE_COLLATOR = new Intl.Collator();
+const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
+
+function renderFilterInput(name, label, value, suggestions) {
+    const listId = `filter-options-${name}`;
+    const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
+    return `
+<label class="filter-input-wrap">
+    <span class="filter-input-label">${label}</span>
+    <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off">
+    <datalist id="${listId}">${options}</datalist>
+</label>`;
+}
+
+function renderFilterBanner(filter, availableRuns = []) {
     const banner = document.getElementById("filter-banner");
-    const isFiltered = !!(filter.dandisetId || filter.subject || filter.session);
-    if (!isFiltered) {
-        banner.style.display = "none";
-        return;
-    }
+    const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
 
     const crumbs = [];
     if (filter.dandisetId) {
@@ -68,11 +81,36 @@ function renderFilterBanner(filter) {
             `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session })}">Ses:&nbsp;${e(filter.session)}</a>`
         );
     }
+    if (filter.pipelineVersion) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ pipelineVersion: filter.pipelineVersion }))}">Ver:&nbsp;${e(filter.pipelineVersion)}</a>`
+        );
+    }
+
+    const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
+    const subjects = uniqueSortedValues(availableRuns.map((r) => r.subject));
+    const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
+    const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
+    const filteredViewHtml = isFiltered
+        ? `<div class="filter-banner-active">
+    <span class="filter-banner-label">Filtered view:</span>
+    <span class="filter-crumbs">${crumbs.join('<span class="filter-sep">/</span>')}</span>
+</div>`
+        : "";
 
     banner.innerHTML = `
-<span class="filter-banner-label">Filtered view:</span>
-<span class="filter-crumbs">${crumbs.join('<span class="filter-sep">/</span>')}</span>
-<a class="filter-clear" href="./">× View all runs</a>`;
+<div class="filter-banner-main">
+    <span class="filter-banner-label">Filter runs:</span>
+    <form class="filter-form" method="get" action="">
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets)}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects)}
+        ${renderFilterInput("session", "Session", filter.session, sessions)}
+        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions)}
+        <button class="filter-apply" type="submit">Apply</button>
+        <a class="filter-clear" href="./">× View all runs</a>
+    </form>
+</div>
+${filteredViewHtml}`;
     banner.style.display = "";
 }
 
@@ -818,6 +856,8 @@ function renderPipelineVersionGroup(pipelineName, pipelineVersion, runs) {
                 <span class="group-count">${paramKeys.length}&nbsp;configuration${paramKeys.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${e(narrowUrl({ pipelineVersion }))}"
+               title="Narrow view to version: ${e(pipelineVersion)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
     <div class="pipeline-version-body">
@@ -1045,12 +1085,14 @@ async function init() {
     initTheme();
     initModal();
     showLoading();
+    renderFilterBanner(parseFilter(), []);
 
     try {
         const tree = await fetchRepoTree();
         const runs = parseRuns(tree);
 
         if (runs.length === 0) {
+            renderFilterBanner(parseFilter(), []);
             showError("No pipeline runs found in the repository.");
             return;
         }
@@ -1082,10 +1124,11 @@ async function init() {
 
         const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
         const filter = parseFilter();
-        const isFiltered = !!(filter.dandisetId || filter.subject || filter.session);
+        const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
         const filteredRuns = applyFilter(runsWithStatus, filter);
 
         if (isFiltered && filteredRuns.length === 0) {
+            renderFilterBanner(filter, runsWithStatus);
             showError("No pipeline runs match the current filter.");
             return;
         }
@@ -1097,11 +1140,12 @@ async function init() {
             ? filteredRuns
             : filteredRuns.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
         renderSummary(runsForSummary);
-        renderFilterBanner(filter);
+        renderFilterBanner(filter, runsWithStatus);
         document.getElementById("runs").innerHTML = renderDandisets(filteredRuns);
         initInlineHtmlFrames();
         showResults();
     } catch (err) {
+        renderFilterBanner(parseFilter(), []);
         showError(err.message || "An unexpected error occurred.");
     }
 }
