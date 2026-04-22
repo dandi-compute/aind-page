@@ -47,6 +47,9 @@ function narrowUrl(params) {
     return qs ? `?${qs}` : "./";
 }
 
+const FILTER_VALUE_COLLATOR = new Intl.Collator();
+const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
+
 function renderFilterInput(name, label, value, suggestions) {
     const listId = `filter-options-${name}`;
     const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
@@ -84,8 +87,6 @@ function renderFilterBanner(filter, availableRuns = []) {
         );
     }
 
-    const collator = new Intl.Collator();
-    const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(collator.compare);
     const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
     const subjects = uniqueSortedValues(availableRuns.map((r) => r.subject));
     const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
