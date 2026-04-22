@@ -23,7 +23,28 @@ function parseFilter() {
         subject: params.get("subject") ?? null,
         session: params.get("session") ?? null,
         pipelineVersion: params.get("version") ?? null,
+        failureStep: params.get("failureStep") ?? null,
     };
+}
+
+function classifyFailedTaskStep(taskName = "") {
+    const normalized = String(taskName).toLowerCase();
+    if (/dispatch/.test(normalized)) return "job-dispatch";
+    if (/pre[\s_-]*process/.test(normalized)) return "pre-processing";
+    if (/post[\s_-]*process/.test(normalized)) return "post-processing";
+    return "other";
+}
+
+function runFailureStep(run) {
+    if (run.status !== "failed") return null;
+    const failedTasks = (run.tasks ?? []).filter((task) => task.status === "FAILED");
+    if (failedTasks.length === 0) return "other";
+
+    const failedSteps = failedTasks.map((task) => classifyFailedTaskStep(task.name));
+    if (failedSteps.includes("pre-processing")) return "pre-processing";
+    if (failedSteps.includes("post-processing")) return "post-processing";
+    if (failedSteps.includes("job-dispatch")) return "job-dispatch";
+    return "other";
 }
 
 function applyFilter(runs, filter) {
@@ -32,6 +53,12 @@ function applyFilter(runs, filter) {
         if (filter.subject && r.subject !== filter.subject) return false;
         if (filter.session && r.session !== filter.session) return false;
         if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
+        if (filter.failureStep) {
+            if (r.status !== "failed") return false;
+            const failedStep = runFailureStep(r);
+            if (filter.failureStep === "exclude-job-dispatch") return failedStep !== "job-dispatch";
+            return failedStep === filter.failureStep;
+        }
         return true;
     });
 }
@@ -43,6 +70,7 @@ function narrowUrl(params) {
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
     if (params.pipelineVersion) sp.set("version", params.pipelineVersion);
+    if (params.failureStep) sp.set("failureStep", params.failureStep);
     const qs = sp.toString();
     return qs ? `?${qs}` : "./";
 }
@@ -63,7 +91,13 @@ function renderFilterInput(name, label, value, suggestions) {
 
 function renderFilterBanner(filter, availableRuns = []) {
     const banner = document.getElementById("filter-banner");
-    const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
+    const isFiltered = !!(
+        filter.dandisetId ||
+        filter.subject ||
+        filter.session ||
+        filter.pipelineVersion ||
+        filter.failureStep
+    );
 
     const crumbs = [];
     if (filter.dandisetId) {
@@ -86,11 +120,33 @@ function renderFilterBanner(filter, availableRuns = []) {
             `<a class="filter-crumb" href="${e(narrowUrl({ pipelineVersion: filter.pipelineVersion }))}">Ver:&nbsp;${e(filter.pipelineVersion)}</a>`
         );
     }
+    if (filter.failureStep) {
+        const failureStepLabel =
+            filter.failureStep === "exclude-job-dispatch"
+                ? "Failed (except dispatch)"
+                : filter.failureStep === "pre-processing"
+                  ? "Failed in pre-processing"
+                  : filter.failureStep === "post-processing"
+                    ? "Failed in post-processing"
+                    : `Failed in ${filter.failureStep}`;
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ failureStep: filter.failureStep }))}">${e(failureStepLabel)}</a>`
+        );
+    }
 
     const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
     const subjects = uniqueSortedValues(availableRuns.map((r) => r.subject));
     const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
+    const failureSteps = uniqueSortedValues([
+        "exclude-job-dispatch",
+        "pre-processing",
+        "post-processing",
+        ...availableRuns
+            .filter((run) => run.status === "failed")
+            .map((run) => runFailureStep(run))
+            .filter((step) => step !== "other"),
+    ]);
     const filteredViewHtml = isFiltered
         ? `<div class="filter-banner-active">
     <span class="filter-banner-label">Filtered view:</span>
@@ -106,6 +162,7 @@ function renderFilterBanner(filter, availableRuns = []) {
         ${renderFilterInput("subject", "Subject", filter.subject, subjects)}
         ${renderFilterInput("session", "Session", filter.session, sessions)}
         ${renderFilterInput("version", "Version", filter.pipelineVersion, versions)}
+        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps)}
         <button class="filter-apply" type="submit">Apply</button>
         <a class="filter-clear" href="./">× View all runs</a>
     </form>
@@ -1124,7 +1181,13 @@ async function init() {
 
         const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
         const filter = parseFilter();
-        const isFiltered = !!(filter.dandisetId || filter.subject || filter.session || filter.pipelineVersion);
+        const isFiltered = !!(
+            filter.dandisetId ||
+            filter.subject ||
+            filter.session ||
+            filter.pipelineVersion ||
+            filter.failureStep
+        );
         const filteredRuns = applyFilter(runsWithStatus, filter);
 
         if (isFiltered && filteredRuns.length === 0) {
