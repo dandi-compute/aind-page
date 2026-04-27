@@ -9,6 +9,19 @@ const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/ma
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(["214527"]);
+/* Dandisets used for internal testing – hidden from the main view and moved to
+   the dedicated Tests page (?view=tests).  Currently all sandbox dandisets are
+   also test dandisets, but the two concepts are kept separate so they can
+   diverge independently in the future. */
+const TEST_DANDISETS = new Set(["214527"]);
+
+/* Module-level view mode ("tests" | null), set during init */
+let _viewMode = null;
+
+function parseViewMode() {
+    return new URLSearchParams(window.location.search).get("view") ?? null;
+}
+
 function dandiBaseUrl(dandisetId) {
     return SANDBOX_DANDISETS.has(dandisetId) ? "https://sandbox.dandiarchive.org" : "https://dandiarchive.org";
 }
@@ -68,9 +81,13 @@ function applyFilter(runs, filter) {
     });
 }
 
-/* Build a page URL with the given filter parameters */
+/* Build a page URL with the given filter parameters.
+   When on the tests page (_viewMode === "tests"), the view=tests param is
+   automatically preserved so navigation stays within the tests scope.
+   When on the main page (_viewMode === null), no view param is emitted. */
 function narrowUrl(params) {
     const sp = new URLSearchParams();
+    if (_viewMode === "tests") sp.set("view", "tests");
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
@@ -158,17 +175,30 @@ function renderFilterBanner(filter, availableRuns = []) {
 </div>`
         : "";
 
+    const testsPageHtml =
+        _viewMode === "tests"
+            ? `<div class="tests-page-banner">
+    <span class="tests-page-label">🧪 Tests</span>
+    <span class="tests-page-desc">Showing internal test runs only (Dandiset 214527)</span>
+    <a class="tests-back-link" href="./">← Back to main</a>
+</div>`
+            : "";
+
+    const viewHiddenInput = _viewMode === "tests" ? `<input type="hidden" name="view" value="tests">` : "";
+    const clearAllHref = _viewMode === "tests" ? "?view=tests" : "./";
+
     banner.innerHTML = `
-<div class="filter-banner-main">
+${testsPageHtml}<div class="filter-banner-main">
     <span class="filter-banner-label">Filter runs:</span>
     <form class="filter-form" method="get" action="">
+        ${viewHiddenInput}
         ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets)}
         ${renderFilterInput("subject", "Subject", filter.subject, subjects)}
         ${renderFilterInput("session", "Session", filter.session, sessions)}
         ${renderFilterInput("version", "Version", filter.pipelineVersion, versions)}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps)}
         <button class="filter-apply" type="submit">Apply</button>
-        <a class="filter-clear" href="./">× View all runs</a>
+        <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
     </form>
 </div>
 ${filteredViewHtml}`;
@@ -1121,8 +1151,15 @@ function e(str) {
 
 /* ─── Main ──────────────────────────────────────────────────── */
 async function init() {
+    _viewMode = parseViewMode();
     initTheme();
     initModal();
+
+    // Mark the "Tests" nav link as active when on the tests page
+    if (_viewMode === "tests") {
+        document.querySelector(".site-tests-link")?.classList.add("active");
+    }
+
     showLoading();
     renderFilterBanner(parseFilter(), []);
 
@@ -1169,7 +1206,14 @@ async function init() {
         // Sort by attempt (descending); no run date available from JSONL
         runsWithStatus.sort((a, b) => b.attempt - a.attempt);
 
-        const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
+        // Scope runs by view mode:
+        //   tests page  → show only TEST_DANDISETS entries
+        //   main page   → hide TEST_DANDISETS entries
+        const runsInScope =
+            _viewMode === "tests"
+                ? runsWithStatus.filter((r) => TEST_DANDISETS.has(r.dandisetId))
+                : runsWithStatus.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
+
         const filter = parseFilter();
         const isFiltered = !!(
             filter.dandisetId ||
@@ -1178,22 +1222,19 @@ async function init() {
             filter.pipelineVersion ||
             filter.failureStep
         );
-        const filteredRuns = applyFilter(runsWithStatus, filter);
+        const filteredRuns = applyFilter(runsInScope, filter);
 
         if (isFiltered && filteredRuns.length === 0) {
-            renderFilterBanner(filter, runsWithStatus);
+            renderFilterBanner(filter, runsInScope);
             showError("No pipeline runs match the current filter.");
             return;
         }
 
-        // On the global view, exclude sandbox dandisets from the summary.
-        // When a specific dandiset (or subject/session within one) is selected,
-        // show the full summary for the filtered scope.
-        const runsForSummary = isFiltered
-            ? filteredRuns
-            : filteredRuns.filter((r) => !EXCLUDED_FROM_SUMMARY.has(r.dandisetId));
+        // Show the full summary for the in-scope runs; when a specific filter is
+        // active show only the matching subset.
+        const runsForSummary = isFiltered ? filteredRuns : runsInScope;
         renderSummary(runsForSummary);
-        renderFilterBanner(filter, runsWithStatus);
+        renderFilterBanner(filter, runsInScope);
         document.getElementById("runs").innerHTML = renderDandisets(filteredRuns);
         initInlineHtmlFrames();
         showResults();
@@ -1213,10 +1254,12 @@ if (typeof module !== "undefined" && module.exports) {
         parseQueueEntries,
         parseRunPath,
         parseTrace,
+        parseViewMode,
         renderFilterBanner,
         runFailureStep,
         showError,
         showLoading,
         showResults,
+        TEST_DANDISETS,
     };
 }
