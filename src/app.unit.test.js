@@ -1,4 +1,4 @@
-const { applyFilter, classifyFailedTaskStep, parseRunPath, parseTrace, runFailureStep } = require("./app");
+const { applyFilter, buildRunPath, classifyFailedTaskStep, parseQueueEntries, parseRunPath, parseTrace, runFailureStep } = require("./app");
 
 beforeEach(() => {
     document.body.innerHTML = "";
@@ -62,5 +62,87 @@ describe("app unit behavior", () => {
             configHash: "abcdef",
             attempt: 3,
         });
+    });
+
+    it("builds run path with session from JSONL entry", () => {
+        const path = buildRunPath({
+            dandiset_id: "000233",
+            subject: "CGM3",
+            session: "CGM3",
+            pipeline: "aind+ephys",
+            version: "v1.0.0+fixes+20abeb6",
+            params: "98fd947",
+            config: "6568dda",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-000233/sub-CGM3/ses-CGM3/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6/params-98fd947_config-6568dda_attempt-1"
+        );
+    });
+
+    it("builds run path without session when session is null", () => {
+        const path = buildRunPath({
+            dandiset_id: "001469",
+            subject: "Chronic-Implant-2",
+            session: null,
+            pipeline: "aind+ephys",
+            version: "v1.0.0+fixes+20abeb6",
+            params: "98fd947",
+            config: "6568dda",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6/params-98fd947_config-6568dda_attempt-1"
+        );
+    });
+
+    it("parses JSONL queue entries into run objects", () => {
+        const entries = [
+            {
+                dandiset_id: "000233",
+                subject: "CGM3",
+                session: "CGM3",
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: true,
+            },
+            {
+                dandiset_id: "001469",
+                subject: "Chronic-Implant-2",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "aa073df",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: false,
+            },
+        ];
+        const runs = parseQueueEntries(entries);
+        expect(runs).toHaveLength(2);
+        expect(runs[0]).toMatchObject({
+            dandisetId: "000233",
+            subject: "CGM3",
+            session: "CGM3",
+            pipelineName: "aind+ephys",
+            pipelineVersion: "v1.0.0+fixes+20abeb6",
+            paramsProfile: "98fd947",
+            configHash: "6568dda",
+            attempt: 1,
+            hasCode: true,
+            hasOutput: false,
+            hasLogs: true,
+        });
+        expect(runs[1].session).toBeNull();
+        expect(runs[1].hasLogs).toBe(false);
+        // null session should not appear in path
+        expect(runs[1].path).not.toContain("ses-");
     });
 });
