@@ -4,8 +4,6 @@
     "description": "Simple webpage rendering the basic aspects of DANDI Compute - AIND.",
     "main": "src/app.js",
     "scripts": {
-        "format": "prettier --write .",
-        "format:check": "prettier --check .",
         "test": "vitest",
         "test:run": "vitest run",
         "test:coverage": "vitest run --coverage"
