@@ -85,6 +85,11 @@ body {
     color: var(--color-accent-hover);
 }
 
+.site-logo {
+    height: 30px;
+    width: auto;
+}
+
 .site-title {
     color: var(--color-text-secondary);
     font-size: 0.9em;
