@@ -1,9 +1,10 @@
 /* ─── Configuration ─────────────────────────────────────────── */
 const OWNER = "dandi-compute";
-const REPO = "001697";
+const REPO = "001697-temp";
 const BRANCH = "main";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
-const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
+
+const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/main`;
 
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
 /* Dandisets hosted on the sandbox archive instead of the production archive */
@@ -255,19 +256,20 @@ async function cachedFetch(url, init = {}) {
 }
 
 /* ─── Data fetching ─────────────────────────────────────────── */
-async function fetchRepoTree() {
-    const resp = await cachedFetch(`${API_BASE}/git/trees/HEAD?recursive=1`);
+async function fetchQueueState() {
+    const resp = await cachedFetch(`${QUEUE_CDN_BASE}/state.jsonl`);
     if (!resp.ok) {
         if (resp.status === 403 || resp.status === 429) {
-            throw new Error("GitHub API rate limit exceeded. Please try again in a few minutes.");
+            throw new Error("GitHub CDN rate limit exceeded. Please try again in a few minutes.");
         }
-        throw new Error(`Failed to load repository data (HTTP ${resp.status}).`);
+        throw new Error(`Failed to load queue state (HTTP ${resp.status}).`);
     }
-    const data = await resp.json();
-    if (data.truncated) {
-        console.warn("Repository tree is truncated; some runs may not appear.");
-    }
-    return data.tree;
+    const text = await resp.text();
+    return text
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
 }
 
 async function fetchTraceText(runPath) {
@@ -295,6 +297,8 @@ async function fetchDatasetDescription(runPath) {
 }
 
 async function fetchDandiAssetId(dandisetId, subject, session) {
+    // Asset lookup requires a session path; return null when session is absent
+    if (!session) return null;
     const apiBase = dandiApiBaseUrl(dandisetId);
     async function queryPath(assetPath) {
         const url = `${apiBase}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
@@ -315,31 +319,43 @@ async function fetchDandiAssetId(dandisetId, subject, session) {
     }
 }
 
-/* ─── Path parsing ──────────────────────────────────────────── */
-// Run paths are: derivatives/{dandiset}/{subject}/{session}/{pipeline}/{version}/{runId}
-function parseRuns(tree) {
-    const runItems = tree.filter((item) => {
-        if (item.type !== "tree") return false;
-        const parts = item.path.split("/");
-        return parts[0] === "derivatives" && parts.length === 7;
-    });
-
-    const blobsByRun = {};
-    for (const item of tree) {
-        if (item.type !== "blob") continue;
-        const parts = item.path.split("/");
-        if (parts.length < 8 || parts[0] !== "derivatives") continue;
-        const runPath = parts.slice(0, 7).join("/");
-        if (!blobsByRun[runPath]) blobsByRun[runPath] = [];
-        blobsByRun[runPath].push(item.path);
+/* ─── Path helpers ──────────────────────────────────────────── */
+// Build a run directory path from a JSONL queue entry.
+// With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}/params-{params}_config-{config}_attempt-{attempt}
+// Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}/params-{params}_config-{config}_attempt-{attempt}
+function buildRunPath(entry) {
+    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${entry.subject}`];
+    if (entry.session !== null && entry.session !== undefined) {
+        parts.push(`ses-${entry.session}`);
     }
+    parts.push(`pipeline-${entry.pipeline}`);
+    parts.push(`version-${entry.version}`);
+    parts.push(`params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`);
+    return parts.join("/");
+}
 
-    return runItems.map((item) => ({
-        ...parseRunPath(item.path),
-        files: blobsByRun[item.path] || [],
+/* ─── Queue entry parsing ───────────────────────────────────── */
+// Convert raw JSONL entries from the queue state file into run objects.
+function parseQueueEntries(entries) {
+    return entries.map((entry) => ({
+        path: buildRunPath(entry),
+        dandisetId: entry.dandiset_id,
+        subject: entry.subject,
+        session: entry.session ?? null,
+        pipelineName: entry.pipeline,
+        pipelineVersion: entry.version,
+        paramsProfile: entry.params,
+        configHash: entry.config,
+        attempt: entry.attempt,
+        hasCode: entry.has_code,
+        hasOutput: entry.has_output,
+        hasLogs: entry.has_logs,
+        runDate: null,
     }));
 }
 
+/* ─── Path parsing ──────────────────────────────────────────── */
+// Run paths are: derivatives/{dandiset}/{subject}/{session}/{pipeline}/{version}/{runId}
 function parseRunPath(runPath) {
     const parts = runPath.split("/");
     //  parts[0] = 'derivatives'
@@ -410,8 +426,9 @@ function renderSummary(runs) {
     const total = runs.length;
     const success = runs.filter((r) => r.status === "success").length;
     const failed = runs.filter((r) => r.status === "failed").length;
+    const queued = runs.filter((r) => r.status === "queued").length;
     const partial = runs.filter((r) => r.status === "partial").length;
-    const unknown = total - success - failed - partial;
+    const unknown = total - success - failed - queued - partial;
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -427,6 +444,14 @@ function renderSummary(runs) {
                 <span class="stat-value">${failed}</span>
                 <span class="stat-label">Failed</span>
             </div>
+            ${
+                queued
+                    ? `<div class="stat-item stat-queued">
+                <span class="stat-value">${queued}</span>
+                <span class="stat-label">Queued</span>
+            </div>`
+                    : ""
+            }
             ${
                 partial
                     ? `<div class="stat-item stat-partial">
@@ -464,23 +489,6 @@ function logLabel(fileName) {
     return fileName;
 }
 
-/* Pretty-print a visualization image name */
-function vizLabel(fileName) {
-    return (
-        fileName
-            .replace(/\.png$/i, "")
-            .replace(/_/g, " ")
-            .replace(/\bseg(\d+)\b/g, "Seg $1")
-            .replace(/\bfull\b/i, "Full")
-            .replace(/\bproc\b/i, "Processed")
-            .replace(/\btraces\b/i, "Traces")
-            .replace(/\bdrift map\b/i, "Drift Map")
-            .replace(/\bmotion\b/i, "Motion")
-            // title-case first letter
-            .replace(/^\w/, (c) => c.toUpperCase())
-    );
-}
-
 /* Build a raw CDN URL for a repo file path */
 function cdnUrl(filePath) {
     return `${CDN_BASE}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
@@ -505,34 +513,27 @@ function renderRunEntry(run) {
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "partial"
-                ? "status-partial"
-                : "status-unknown";
+              : run.status === "queued"
+                ? "status-queued"
+                : run.status === "partial"
+                  ? "status-partial"
+                  : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "partial"
-                ? "⚠ Partial"
-                : "? Unknown";
+              : run.status === "queued"
+                ? "⧗ Queued"
+                : run.status === "partial"
+                  ? "⚠ Partial"
+                  : "? Unknown";
 
-    const logFiles = run.files.filter((f) => f.includes("/logs/")).map((f) => f.split("/").pop());
+    // Log files known to be present when has_logs is true (standard Nextflow output).
+    // Visualization images are only available for successful runs and are not enumerated here.
+    const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
+    const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
 
-    const vizByRecording = {};
-    for (const f of run.files) {
-        if (!f.includes("/visualization/") || !f.endsWith(".png")) continue;
-        const parts = f.split("/");
-        // …/visualization/{recording}/{file.png}
-        const recIdx = parts.indexOf("visualization");
-        if (recIdx < 0 || recIdx + 1 >= parts.length - 1) continue;
-        const rec = parts[recIdx + 1];
-        const fname = parts[parts.length - 1];
-        if (!vizByRecording[rec]) vizByRecording[rec] = [];
-        vizByRecording[rec].push({ path: f, name: fname });
-    }
-
-    const hasViz = Object.keys(vizByRecording).length > 0;
     const inlineLogs = logFiles
         .filter((f) => INLINE_REPORT_FILES.has(f))
         .sort((a, b) => {
@@ -559,7 +560,6 @@ function renderRunEntry(run) {
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasLogs ? renderLogSection(run.path, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run.path, inlineLogs) : ""}
-    ${hasViz ? renderVizSection(vizByRecording) : ""}
 </div>`;
 }
 
@@ -707,45 +707,6 @@ function renderReportSection(runPath, reportFiles) {
 </details>`;
 }
 
-function renderVizSection(vizByRecording) {
-    const recordings = Object.keys(vizByRecording).sort();
-    const sections = recordings
-        .map((rec) => {
-            const images = vizByRecording[rec]
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((img) => {
-                    const src = cdnUrl(img.path);
-                    const lbl = vizLabel(img.name);
-                    return `<figure class="viz-figure">
-                    <a href="${e(src)}" target="_blank" rel="noopener">
-                        <img src="${e(src)}" alt="${e(lbl)}" loading="lazy" class="viz-img">
-                    </a>
-                    <figcaption>${e(lbl)}</figcaption>
-                </figure>`;
-                })
-                .join("");
-
-            const recLabel = rec
-                .replace(/block(\d+)_acquisition-(\w+)_recording(\d+)/, "Block $1 · $2 · Recording $3")
-                .replace(/ElectricalSeriesRaw/g, "Electrical Series (Raw)");
-
-            return `<div class="viz-recording">
-            <div class="viz-recording-label">${e(recLabel)}</div>
-            <div class="viz-grid">${images}</div>
-        </div>`;
-        })
-        .join("");
-
-    return `
-<details class="run-section" open>
-    <summary class="run-section-title">
-        Visualizations
-        <span class="count-badge">${Object.values(vizByRecording).reduce((s, a) => s + a.length, 0)}</span>
-    </summary>
-    ${sections}
-</details>`;
-}
-
 /* ─── Grouping helpers ──────────────────────────────────────── */
 function groupBy(arr, keyFn) {
     const map = new Map();
@@ -760,8 +721,9 @@ function groupBy(arr, keyFn) {
 function renderGroupBadges(runs) {
     const s = runs.filter((r) => r.status === "success").length;
     const f = runs.filter((r) => r.status === "failed").length;
+    const q = runs.filter((r) => r.status === "queued").length;
     const p = runs.filter((r) => r.status === "partial").length;
-    const u = runs.length - s - f - p;
+    const u = runs.length - s - f - q - p;
     const parts = [];
     if (s)
         parts.push(
@@ -770,6 +732,10 @@ function renderGroupBadges(runs) {
     if (f)
         parts.push(
             `<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
+        );
+    if (q)
+        parts.push(
+            `<span class="gbadge gbadge-queued" title="${q} queued run${q !== 1 ? "s" : ""}">${q}&thinsp;⧗</span>`
         );
     if (p)
         parts.push(
@@ -832,7 +798,12 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
     const subjectUrl = `${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}/draft/files?location=${e(location)}`;
 
     const bySession = groupBy(runs, (r) => r.session);
-    const sessions = [...bySession.keys()].sort();
+    // Sort sessions; null (no session) sorts last
+    const sessions = [...bySession.keys()].sort((a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return String(a).localeCompare(String(b));
+    });
     const autoExpandSession = autoExpand && sessions.length === 1;
     const sessionHtml = sessions
         .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
@@ -860,10 +831,11 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
 
 function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
     const rep = runs.find((r) => r.assetId) ?? runs[0];
+    const sessionLabel = session !== null ? session : "—";
     const sessionLinkHtml = rep.assetId
         ? `<a class="group-link" href="${e(neurosiftUrl(dandisetId, rep.assetId))}"
-              target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(session)}</strong></a>`
-        : `<span class="group-label">Ses:&nbsp;<strong>${e(session)}</strong></span>`;
+              target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
+        : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
     const byPipeline = groupBy(runs, (r) => `${r.pipelineName}\x00${r.pipelineVersion}`);
     const pipelineKeys = [...byPipeline.keys()].sort();
@@ -1155,40 +1127,47 @@ async function init() {
     renderFilterBanner(parseFilter(), []);
 
     try {
-        const tree = await fetchRepoTree();
-        const runs = parseRuns(tree);
+        const entries = await fetchQueueState();
+        const runs = parseQueueEntries(entries);
 
         if (runs.length === 0) {
             renderFilterBanner(parseFilter(), []);
-            showError("No pipeline runs found in the repository.");
+            showError("No pipeline runs found in the queue.");
             return;
         }
 
-        // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel
+        // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel.
+        // Skip trace/dataset fetching for queued runs (no logs yet).
+        const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
                 const [text, datasetDesc, dandiResult] = await Promise.all([
-                    fetchTraceText(run.path),
-                    fetchDatasetDescription(run.path),
+                    fetchIfLogs(run.hasLogs, () => fetchTraceText(run.path)),
+                    fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                 ]);
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
                 const inSourcedata = dandiResult?.inSourcedata ?? false;
                 const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
-                // Any run without an /output folder is considered failed
-                const hasOutput = run.files.some((f) => f.includes("/output/"));
-                const status = hasOutput ? parsed.status : "failed";
+                // Determine status from JSONL flags:
+                //   has_output=true  → success (use trace status for task detail)
+                //   has_logs=false && has_code=true → queued (not yet started)
+                //   otherwise        → failed
+                const status = run.hasOutput
+                    ? parsed.status !== "unknown"
+                        ? parsed.status
+                        : "success"
+                    : !run.hasLogs && run.hasCode
+                      ? "queued"
+                      : "failed";
                 const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
                 return { ...run, ...parsed, assetId, inSourcedata, generatedBy, status, failureStep };
             })
         );
 
-        // Newest first by date, then attempt
-        runsWithStatus.sort((a, b) => {
-            const d = (b.runDate ?? "").localeCompare(a.runDate ?? "");
-            return d !== 0 ? d : b.attempt - a.attempt;
-        });
+        // Sort by attempt (descending); no run date available from JSONL
+        runsWithStatus.sort((a, b) => b.attempt - a.attempt);
 
         const EXCLUDED_FROM_SUMMARY = new Set(["214527"]);
         const filter = parseFilter();
@@ -1229,7 +1208,9 @@ document.addEventListener("DOMContentLoaded", init);
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         applyFilter,
+        buildRunPath,
         classifyFailedTaskStep,
+        parseQueueEntries,
         parseRunPath,
         parseTrace,
         renderFilterBanner,
