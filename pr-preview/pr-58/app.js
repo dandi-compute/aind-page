@@ -6,6 +6,8 @@ const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
 const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
 
+const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
+
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(["214527"]);
@@ -310,7 +312,9 @@ async function fetchQueueState() {
         text = cached.body;
     } else if (resp.ok) {
         if (typeof DecompressionStream === "undefined") {
-            throw new Error("Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+).");
+            throw new Error(
+                "Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+)."
+            );
         }
         const ds = new DecompressionStream("gzip");
         const decompressed = resp.body.pipeThrough(ds);
@@ -380,6 +384,40 @@ async function fetchDandiAssetId(dandisetId, subject, session) {
         const sourcedataAssetId = await queryPath(`sourcedata/sub-${subject}/${nwbName}`);
         if (sourcedataAssetId) return { assetId: sourcedataAssetId, inSourcedata: true };
         return null;
+    } catch {
+        return null;
+    }
+}
+
+async function fetchVisualizationData(runPath) {
+    try {
+        const encodedPath = runPath.split("/").map(encodeURIComponent).join("/");
+        const vizDirUrl = `${GITHUB_API_BASE}/contents/${encodedPath}/visualization?ref=${BRANCH}`;
+        const vizDirResp = await cachedFetch(vizDirUrl);
+        if (!vizDirResp.ok) return null;
+        const vizDirItems = await vizDirResp.json();
+        const recordingDirs = vizDirItems.filter((item) => item.type === "dir");
+        if (recordingDirs.length === 0) return null;
+
+        const recordings = await Promise.all(
+            recordingDirs.map(async (dir) => {
+                const treeUrl = `${GITHUB_API_BASE}/git/trees/${dir.sha}`;
+                const treeResp = await cachedFetch(treeUrl);
+                if (!treeResp.ok) return null;
+                const treeData = await treeResp.json();
+                const images = (treeData.tree ?? [])
+                    .filter((f) => f.type === "blob" && /\.png$/i.test(f.path))
+                    .sort((a, b) => a.path.localeCompare(b.path))
+                    .map((f) => ({
+                        name: f.path,
+                        url: cdnUrl(`${runPath}/visualization/${dir.name}/${f.path}`),
+                    }));
+                return { name: dir.name, images };
+            })
+        );
+
+        const validRecordings = recordings.filter(Boolean).filter((r) => r.images.length > 0);
+        return validRecordings.length > 0 ? validRecordings : null;
     } catch {
         return null;
     }
@@ -596,7 +634,6 @@ function renderRunEntry(run) {
                   : "? Unknown";
 
     // Log files known to be present when has_logs is true (standard Nextflow output).
-    // Visualization images are only available for successful runs and are not enumerated here.
     const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
     const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
 
@@ -612,6 +649,7 @@ function renderRunEntry(run) {
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
     const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
+    const hasViz = run.vizData && run.vizData.length > 0;
 
     return `
 <div class="run-entry ${sc}">
@@ -624,6 +662,7 @@ function renderRunEntry(run) {
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
+    ${hasViz ? renderVisualizationSection(run.vizData) : ""}
     ${hasLogs ? renderLogSection(run.path, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run.path, inlineLogs) : ""}
 </div>`;
@@ -770,6 +809,39 @@ function renderReportSection(runPath, reportFiles) {
         <span class="count-badge">${reportFiles.length}</span>
     </summary>
     <div class="inline-reports">${frames}</div>
+</details>`;
+}
+
+function renderVisualizationSection(recordings) {
+    const totalImages = recordings.reduce((sum, r) => sum + r.images.length, 0);
+    const recordingHtml = recordings
+        .map((rec) => {
+            const imgHtml = rec.images
+                .map((img) => {
+                    const href = e(img.url);
+                    const caption = e(img.name.replace(/\.png$/i, "").replace(/_/g, " "));
+                    return `<figure class="viz-figure">
+                <a href="${href}" target="_blank" rel="noopener">
+                    <img class="viz-img" src="${href}" loading="lazy" alt="${e(img.name)}">
+                </a>
+                <figcaption>${caption}</figcaption>
+            </figure>`;
+                })
+                .join("");
+            return `<div class="viz-recording">
+        <div class="viz-recording-label">${e(rec.name)}</div>
+        <div class="viz-grid">${imgHtml}</div>
+    </div>`;
+        })
+        .join("");
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Visualizations
+        <span class="count-badge">${totalImages}</span>
+    </summary>
+    ${recordingHtml}
 </details>`;
 }
 
@@ -1214,10 +1286,11 @@ async function init() {
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, dandiResult] = await Promise.all([
+                const [text, datasetDesc, dandiResult, vizData] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run.path)),
                     fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
+                    run.hasOutput ? fetchVisualizationData(run.path) : Promise.resolve(null),
                 ]);
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
@@ -1235,7 +1308,7 @@ async function init() {
                       ? "queued"
                       : "failed";
                 const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
-                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, status, failureStep };
+                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, vizData, status, failureStep };
             })
         );
 
@@ -1288,11 +1361,13 @@ if (typeof module !== "undefined" && module.exports) {
         buildRunPath,
         classifyFailedTaskStep,
         fetchQueueState,
+        fetchVisualizationData,
         parseQueueEntries,
         parseRunPath,
         parseTrace,
         parseViewMode,
         renderFilterBanner,
+        renderVisualizationSection,
         runFailureStep,
         showError,
         showLoading,
