@@ -821,7 +821,7 @@ function renderVisualizationSection(recordings) {
                     const href = e(img.url);
                     const caption = e(img.name.replace(/\.png$/i, "").replace(/_/g, " "));
                     return `<figure class="viz-figure">
-                <a href="${href}" target="_blank" rel="noopener">
+                <a class="viz-link" data-viz-url="${href}" data-viz-label="${caption}" href="${href}" rel="noopener" aria-haspopup="dialog">
                     <img class="viz-img" src="${href}" loading="lazy" alt="${e(img.name)}">
                 </a>
                 <figcaption>${caption}</figcaption>
@@ -1087,6 +1087,16 @@ function initModal() {
             btn.dataset.logExternal
         );
     });
+
+    const runsEl = document.getElementById("runs");
+    if (runsEl) {
+        runsEl.addEventListener("click", (evt) => {
+            const link = evt.target.closest(".viz-link");
+            if (!link) return;
+            evt.preventDefault();
+            openVizModal(link.dataset.vizUrl, link.dataset.vizLabel);
+        });
+    }
 }
 
 function openLogModal(filePath, label, isHtml, externalHref) {
@@ -1133,6 +1143,27 @@ function closeLogModal() {
     overlay.hidden = true;
     document.body.style.overflow = "";
     document.getElementById("log-modal-body").innerHTML = "";
+}
+
+function openVizModal(url, label) {
+    const overlay = document.getElementById("log-modal");
+    const titleEl = document.getElementById("log-modal-title");
+    const bodyEl = document.getElementById("log-modal-body");
+    const extLink = document.getElementById("log-modal-external");
+
+    _modalGeneration++;
+
+    titleEl.textContent = label;
+    extLink.href = url;
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+
+    bodyEl.innerHTML = "";
+    const img = document.createElement("img");
+    img.className = "viz-modal-img";
+    img.src = url;
+    img.alt = label;
+    bodyEl.appendChild(img);
 }
 
 async function fetchLogText(filePath) {

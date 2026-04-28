@@ -797,6 +797,15 @@ details[open] > .run-section-title::before {
     text-overflow: ellipsis;
 }
 
+.viz-modal-img {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100vh - 140px);
+    margin: auto;
+    padding: 16px;
+    object-fit: contain;
+}
+
 /* ─── Dandiset group (outer) ────────────────────────────────── */
 .dandiset-group {
     background: var(--color-surface);

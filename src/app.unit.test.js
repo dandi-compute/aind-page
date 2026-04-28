@@ -305,6 +305,11 @@ describe("renderVisualizationSection", () => {
         expect(html).toContain("viz-img");
         expect(html).toContain("drift_map.png");
         expect(html).toContain("motion.png");
+        // images open in a modal, not a new tab
+        expect(html).toContain("viz-link");
+        expect(html).toContain("data-viz-url=");
+        expect(html).toContain("data-viz-label=");
+        expect(html).not.toContain('target="_blank"');
     });
 
     it("renders captions with underscores replaced by spaces", () => {
