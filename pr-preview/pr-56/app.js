@@ -1287,6 +1287,7 @@ if (typeof module !== "undefined" && module.exports) {
         applyFilter,
         buildRunPath,
         classifyFailedTaskStep,
+        fetchQueueState,
         parseQueueEntries,
         parseRunPath,
         parseTrace,
