@@ -377,14 +377,12 @@ describe("fetchVisualizationData", () => {
 
     it("returns null when the visualization directory has no subdirectories", async () => {
         const vizDirItems = [{ type: "file", name: "visualization_output.json", sha: "abc123" }];
-        global.fetch = vi
-            .fn()
-            .mockResolvedValue(
-                new Response(JSON.stringify(vizDirItems), {
-                    status: 200,
-                    headers: { "Content-Type": "application/json" },
-                })
-            );
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(vizDirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
         const result = await fetchVisualizationData(
             "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
         );
