@@ -1,4 +1,26 @@
-const { applyFilter, buildRunPath, classifyFailedTaskStep, parseQueueEntries, parseRunPath, parseTrace, runFailureStep } = require("./app");
+const { applyFilter, buildRunPath, classifyFailedTaskStep, fetchQueueState, parseQueueEntries, parseRunPath, parseTrace, runFailureStep } = require("./app");
+
+const QUEUE_STATE_CACHE_KEY =
+    "aind_etag:https://raw.githubusercontent.com/dandi-compute/queue/compressed/state.jsonl.gz";
+
+/** A passthrough TransformStream that stands in for DecompressionStream in tests. */
+class MockDecompressionStream {
+    constructor() {
+        const ts = new TransformStream();
+        this.readable = ts.readable;
+        this.writable = ts.writable;
+    }
+}
+
+/** Wrap plain text in a ReadableStream so it can be used as a Response body. */
+function makeReadableStream(text) {
+    return new ReadableStream({
+        start(controller) {
+            controller.enqueue(new TextEncoder().encode(text));
+            controller.close();
+        },
+    });
+}
 
 beforeEach(() => {
     document.body.innerHTML = "";
@@ -144,5 +166,109 @@ describe("app unit behavior", () => {
         expect(runs[1].hasLogs).toBe(false);
         // null session should not appear in path
         expect(runs[1].path).not.toContain("ses-");
+    });
+});
+
+describe("fetchQueueState ETag caching", () => {
+    const SAMPLE_ENTRY = {
+        dandiset_id: "001697",
+        subject: "sub1",
+        session: "ses1",
+        pipeline: "ephys",
+        version: "v1",
+        params: "abc",
+        config: "def",
+        attempt: 1,
+        has_code: true,
+        has_output: false,
+        has_logs: false,
+    };
+    const JSONL_TEXT = JSON.stringify(SAMPLE_ENTRY);
+
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+        global.DecompressionStream = MockDecompressionStream;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        delete global.DecompressionStream;
+        sessionStorage.clear();
+    });
+
+    it("fetches, decompresses, parses, and caches ETag on first load", async () => {
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(makeReadableStream(JSONL_TEXT), {
+                status: 200,
+                headers: { ETag: '"etag-v1"' },
+            })
+        );
+
+        const result = await fetchQueueState();
+
+        expect(result).toHaveLength(1);
+        expect(result[0].dandiset_id).toBe("001697");
+
+        // ETag and decompressed body must be stored in sessionStorage
+        const stored = JSON.parse(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY));
+        expect(stored.etag).toBe('"etag-v1"');
+        expect(stored.body).toBe(JSONL_TEXT);
+
+        // First request must not include If-None-Match
+        const [, init] = global.fetch.mock.calls[0];
+        expect(init.headers.get("If-None-Match")).toBeNull();
+    });
+
+    it("sends If-None-Match and returns cached body on 304", async () => {
+        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: JSONL_TEXT }));
+
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
+
+        const result = await fetchQueueState();
+
+        expect(result).toHaveLength(1);
+        expect(result[0].dandiset_id).toBe("001697");
+
+        // Must send the cached ETag
+        const [, init] = global.fetch.mock.calls[0];
+        expect(init.headers.get("If-None-Match")).toBe('"etag-v1"');
+    });
+
+    it("skips DecompressionStream entirely on 304 cache hit", async () => {
+        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: JSONL_TEXT }));
+
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
+        const decompressionSpy = vi.fn();
+        global.DecompressionStream = decompressionSpy;
+
+        await fetchQueueState();
+
+        expect(decompressionSpy).not.toHaveBeenCalled();
+    });
+
+    it("throws rate-limit error on HTTP 403", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 403 }));
+        await expect(fetchQueueState()).rejects.toThrow("rate limit");
+    });
+
+    it("throws rate-limit error on HTTP 429", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 429 }));
+        await expect(fetchQueueState()).rejects.toThrow("rate limit");
+    });
+
+    it("throws generic error on other HTTP failures", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
+        await expect(fetchQueueState()).rejects.toThrow("HTTP 500");
+    });
+
+    it("throws when DecompressionStream is unavailable", async () => {
+        delete global.DecompressionStream;
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(makeReadableStream(JSONL_TEXT), { status: 200 })
+        );
+        await expect(fetchQueueState()).rejects.toThrow("DecompressionStream");
     });
 });
