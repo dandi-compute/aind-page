@@ -4,7 +4,7 @@ const REPO = "001697-temp";
 const BRANCH = "main";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
-const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/main`;
+const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
 
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
 /* Dandisets hosted on the sandbox archive instead of the production archive */
@@ -287,14 +287,50 @@ async function cachedFetch(url, init = {}) {
 
 /* ─── Data fetching ─────────────────────────────────────────── */
 async function fetchQueueState() {
-    const resp = await cachedFetch(`${QUEUE_CDN_BASE}/state.jsonl`);
-    if (!resp.ok) {
+    const url = `${QUEUE_CDN_BASE}/state.jsonl.gz`;
+    const cacheKey = ETAG_CACHE_PREFIX + url;
+
+    let cached = null;
+    try {
+        const raw = sessionStorage.getItem(cacheKey);
+        if (raw) cached = JSON.parse(raw);
+    } catch {
+        /* sessionStorage unavailable or parse error; proceed without cache */
+    }
+
+    const headers = new Headers();
+    if (cached?.etag) {
+        headers.set("If-None-Match", cached.etag);
+    }
+
+    const resp = await fetch(url, { headers });
+
+    let text;
+    if (resp.status === 304 && cached) {
+        text = cached.body;
+    } else if (resp.ok) {
+        if (typeof DecompressionStream === "undefined") {
+            throw new Error("Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+).");
+        }
+        const ds = new DecompressionStream("gzip");
+        const decompressed = resp.body.pipeThrough(ds);
+        text = await new Response(decompressed).text();
+
+        const etag = resp.headers.get("ETag");
+        if (etag) {
+            try {
+                sessionStorage.setItem(cacheKey, JSON.stringify({ etag, body: text }));
+            } catch {
+                /* Ignore storage errors (e.g., quota exceeded) */
+            }
+        }
+    } else {
         if (resp.status === 403 || resp.status === 429) {
             throw new Error("GitHub CDN rate limit exceeded. Please try again in a few minutes.");
         }
         throw new Error(`Failed to load queue state (HTTP ${resp.status}).`);
     }
-    const text = await resp.text();
+
     return text
         .trim()
         .split("\n")
