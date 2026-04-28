@@ -1,6 +1,6 @@
 /* ─── Configuration ─────────────────────────────────────────── */
 const OWNER = "dandi-compute";
-const REPO = "001697-temp";
+const REPO = "001697";
 const BRANCH = "main";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
