@@ -1294,9 +1294,10 @@ async function init() {
     initTheme();
     initModal();
 
-    // Mark the "Tests" nav link as active when on the tests page
+    // Hide the "Tests" nav link when already on the tests page
     if (_viewMode === "tests") {
-        document.querySelector(".site-tests-link")?.classList.add("active");
+        const testsLink = document.querySelector(".site-tests-link");
+        if (testsLink) testsLink.hidden = true;
     }
 
     showLoading();
