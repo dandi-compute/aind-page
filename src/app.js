@@ -1,7 +1,7 @@
 /* ─── Configuration ─────────────────────────────────────────── */
 const OWNER = "dandi-compute";
 const REPO = "001697";
-const BRANCH = "main";
+const BRANCH = "draft";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
 const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
