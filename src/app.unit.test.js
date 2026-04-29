@@ -1,4 +1,15 @@
-const { applyFilter, buildRunPath, classifyFailedTaskStep, fetchQueueState, parseQueueEntries, parseRunPath, parseTrace, runFailureStep } = require("./app");
+const {
+    applyFilter,
+    buildRunPath,
+    classifyFailedTaskStep,
+    fetchQueueState,
+    fetchVisualizationData,
+    parseQueueEntries,
+    parseRunPath,
+    parseTrace,
+    renderVisualizationSection,
+    runFailureStep,
+} = require("./app");
 
 const QUEUE_STATE_CACHE_KEY =
     "aind_etag:https://raw.githubusercontent.com/dandi-compute/queue/compressed/state.jsonl.gz";
@@ -266,9 +277,185 @@ describe("fetchQueueState ETag caching", () => {
 
     it("throws when DecompressionStream is unavailable", async () => {
         delete global.DecompressionStream;
-        global.fetch = vi.fn().mockResolvedValue(
-            new Response(makeReadableStream(JSONL_TEXT), { status: 200 })
-        );
+        global.fetch = vi.fn().mockResolvedValue(new Response(makeReadableStream(JSONL_TEXT), { status: 200 }));
         await expect(fetchQueueState()).rejects.toThrow("DecompressionStream");
+    });
+});
+
+describe("renderVisualizationSection", () => {
+    it("renders a gallery section with recording and image data", () => {
+        const recordings = [
+            {
+                name: "block0_acquisition-ElectricalSeriesRaw_recording1",
+                images: [
+                    { name: "drift_map.png", url: "https://cdn.example.com/drift_map.png" },
+                    { name: "motion.png", url: "https://cdn.example.com/motion.png" },
+                ],
+            },
+        ];
+
+        const html = renderVisualizationSection(recordings);
+
+        expect(html).toContain("Visualizations");
+        expect(html).toContain("2"); // count badge
+        expect(html).toContain("block0_acquisition-ElectricalSeriesRaw_recording1");
+        expect(html).toContain("viz-recording");
+        expect(html).toContain("viz-grid");
+        expect(html).toContain("viz-figure");
+        expect(html).toContain("viz-img");
+        expect(html).toContain("drift_map.png");
+        expect(html).toContain("motion.png");
+        // images open in a modal, not a new tab
+        expect(html).toContain("viz-link");
+        expect(html).toContain("data-viz-url=");
+        expect(html).toContain("data-viz-label=");
+        expect(html).not.toContain('target="_blank"');
+    });
+
+    it("renders captions with underscores replaced by spaces", () => {
+        const recordings = [
+            {
+                name: "recording1",
+                images: [{ name: "traces_full_seg0.png", url: "https://cdn.example.com/traces_full_seg0.png" }],
+            },
+        ];
+
+        const html = renderVisualizationSection(recordings);
+        expect(html).toContain("traces full seg0");
+    });
+
+    it("escapes HTML in recording names and image names", () => {
+        const recordings = [
+            {
+                name: '<script>alert("xss")</script>',
+                images: [{ name: "evil<img>.png", url: "https://cdn.example.com/evil.png" }],
+            },
+        ];
+
+        const html = renderVisualizationSection(recordings);
+        expect(html).not.toContain("<script>");
+        expect(html).toContain("&lt;script&gt;");
+    });
+
+    it("sums image counts across multiple recordings", () => {
+        const recordings = [
+            {
+                name: "rec1",
+                images: [
+                    { name: "a.png", url: "url1" },
+                    { name: "b.png", url: "url2" },
+                ],
+            },
+            { name: "rec2", images: [{ name: "c.png", url: "url3" }] },
+        ];
+
+        const html = renderVisualizationSection(recordings);
+        expect(html).toContain(">3<"); // total image count badge
+    });
+});
+
+describe("fetchVisualizationData", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("returns null when the visualization directory fetch fails", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+        const result = await fetchVisualizationData(
+            "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
+        );
+        expect(result).toBeNull();
+    });
+
+    it("returns null when the visualization directory has no subdirectories", async () => {
+        const vizDirItems = [{ type: "file", name: "visualization_output.json", sha: "abc123" }];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(vizDirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchVisualizationData(
+            "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
+        );
+        expect(result).toBeNull();
+    });
+
+    it("returns recordings with image data from the GitHub API", async () => {
+        const vizDirItems = [
+            { type: "dir", name: "recording1", sha: "dir-sha-1" },
+            { type: "file", name: "visualization_output.json", sha: "file-sha" },
+        ];
+        const treeData = {
+            tree: [
+                { type: "blob", path: "drift_map.png" },
+                { type: "blob", path: "motion.png" },
+                { type: "tree", path: "subdir" },
+            ],
+        };
+
+        global.fetch = vi
+            .fn()
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(vizDirItems), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
+            )
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(treeData), { status: 200, headers: { "Content-Type": "application/json" } })
+            );
+
+        const result = await fetchVisualizationData(
+            "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
+        );
+
+        expect(result).not.toBeNull();
+        expect(result).toHaveLength(1);
+        expect(result[0].name).toBe("recording1");
+        expect(result[0].images).toHaveLength(2);
+        expect(result[0].images[0].name).toBe("drift_map.png");
+        expect(result[0].images[1].name).toBe("motion.png");
+        // Images should be CDN URLs
+        expect(result[0].images[0].url).toContain("raw.githubusercontent.com");
+        expect(result[0].images[0].url).toContain("drift_map.png");
+    });
+
+    it("returns null when all recordings have no PNG images", async () => {
+        const vizDirItems = [{ type: "dir", name: "recording1", sha: "dir-sha-1" }];
+        const treeData = { tree: [{ type: "blob", path: "readme.txt" }] };
+
+        global.fetch = vi
+            .fn()
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(vizDirItems), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
+            )
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(treeData), { status: 200, headers: { "Content-Type": "application/json" } })
+            );
+
+        const result = await fetchVisualizationData(
+            "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
+        );
+        expect(result).toBeNull();
+    });
+
+    it("returns null on network error", async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+        const result = await fetchVisualizationData(
+            "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
+        );
+        expect(result).toBeNull();
     });
 });
