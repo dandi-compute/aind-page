@@ -588,6 +588,9 @@ function renderSummary(runs) {
 const INLINE_REPORT_FILES = new Set(["report.html", "timeline.html"]);
 const INLINE_REPORT_ORDER = ["timeline.html", "report.html"];
 
+/* Standard log files present whenever has_logs is true (Nextflow output) */
+const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
+
 /* Pretty-print a log file name */
 const LOG_LABELS = {
     "dag.html": "Pipeline DAG",
@@ -643,7 +646,6 @@ function renderRunEntry(run) {
                   : "? Unknown";
 
     // Log files known to be present when has_logs is true (standard Nextflow output).
-    const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
     const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
 
     const inlineLogs = logFiles
@@ -1097,7 +1099,6 @@ function renderFlatRunEntry(run) {
                   ? "⚠ Partial"
                   : "? Unknown";
 
-    const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
     const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
 
     const inlineLogs = logFiles
