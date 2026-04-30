@@ -7,6 +7,7 @@ const {
     parseQueueEntries,
     parseRunPath,
     parseTrace,
+    renderFlatList,
     renderVisualizationSection,
     runFailureStep,
 } = require("./app");
@@ -457,5 +458,94 @@ describe("fetchVisualizationData", () => {
             "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
         );
         expect(result).toBeNull();
+    });
+});
+
+describe("renderFlatList", () => {
+    const baseRun = {
+        status: "success",
+        attempt: 1,
+        runDate: null,
+        tasks: [],
+        generatedBy: [],
+        vizData: null,
+        hasLogs: false,
+        hasOutput: true,
+        hasCode: true,
+        path: "derivatives/dandiset-001697/sub-A/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+        dandisetId: "001697",
+        subject: "A",
+        session: "S1",
+        pipelineName: "ephys",
+        pipelineVersion: "v1",
+        paramsProfile: "fast",
+        configHash: "abc",
+        assetId: null,
+        inSourcedata: false,
+        failureStep: null,
+    };
+
+    it("wraps runs in a flat-list container", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain('class="flat-list"');
+    });
+
+    it("includes dandiset ID in each flat run entry", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("001697");
+    });
+
+    it("includes subject in each flat run entry", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("Sub:");
+        expect(html).toContain(">A<");
+    });
+
+    it("includes session in each flat run entry when session is not null", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("Ses:");
+        expect(html).toContain(">S1<");
+    });
+
+    it("omits session context when session is null", () => {
+        const run = { ...baseRun, session: null };
+        const html = renderFlatList([run]);
+        expect(html).not.toContain("Ses:");
+    });
+
+    it("includes pipeline info in each flat run entry", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("ephys");
+        expect(html).toContain("v1");
+    });
+
+    it("includes params profile in each flat run entry", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("Params:");
+        expect(html).toContain("fast");
+    });
+
+    it("shows attempt number", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("Attempt");
+        expect(html).toContain("1");
+    });
+
+    it("renders multiple runs", () => {
+        const run2 = { ...baseRun, dandisetId: "000233", subject: "B", attempt: 2 };
+        const html = renderFlatList([baseRun, run2]);
+        expect(html).toContain("001697");
+        expect(html).toContain("000233");
+    });
+
+    it("applies correct status class for success", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("status-success");
+    });
+
+    it("applies correct status class for failed", () => {
+        const run = { ...baseRun, status: "failed" };
+        const html = renderFlatList([run]);
+        expect(html).toContain("status-failed");
     });
 });
