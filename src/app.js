@@ -20,8 +20,17 @@ const TEST_DANDISETS = new Set(["214527"]);
 /* Module-level view mode ("tests" | null), set during init */
 let _viewMode = null;
 
+/* Module-level layout mode ("tree" | "flat"), toggled by the layout bar */
+let _layoutMode = "tree";
+/* Cached filtered runs for re-rendering on layout toggle */
+let _filteredRuns = [];
+
 function parseViewMode() {
     return new URLSearchParams(window.location.search).get("view") ?? null;
+}
+
+function parseLayoutMode() {
+    return localStorage.getItem("layoutMode") === "flat" ? "flat" : "tree";
 }
 
 function dandiBaseUrl(dandisetId) {
@@ -579,6 +588,9 @@ function renderSummary(runs) {
 const INLINE_REPORT_FILES = new Set(["report.html", "timeline.html"]);
 const INLINE_REPORT_ORDER = ["timeline.html", "report.html"];
 
+/* Standard log files present whenever has_logs is true (Nextflow output) */
+const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
+
 /* Pretty-print a log file name */
 const LOG_LABELS = {
     "dag.html": "Pipeline DAG",
@@ -634,7 +646,6 @@ function renderRunEntry(run) {
                   : "? Unknown";
 
     // Log files known to be present when has_logs is true (standard Nextflow output).
-    const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
     const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
 
     const inlineLogs = logFiles
@@ -1065,6 +1076,116 @@ function renderParamsGroup(paramsProfile, configHash, runs) {
 </details>`;
 }
 
+/* ─── Flat view rendering ───────────────────────────────────── */
+function renderFlatRunEntry(run) {
+    const sc =
+        run.status === "success"
+            ? "status-success"
+            : run.status === "failed"
+              ? "status-failed"
+              : run.status === "queued"
+                ? "status-queued"
+                : run.status === "partial"
+                  ? "status-partial"
+                  : "status-unknown";
+    const slbl =
+        run.status === "success"
+            ? "✓ Success"
+            : run.status === "failed"
+              ? "✗ Failed"
+              : run.status === "queued"
+                ? "⧗ Queued"
+                : run.status === "partial"
+                  ? "⚠ Partial"
+                  : "? Unknown";
+
+    const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
+
+    const inlineLogs = logFiles
+        .filter((f) => INLINE_REPORT_FILES.has(f))
+        .sort((a, b) => {
+            const ai = INLINE_REPORT_ORDER.indexOf(a);
+            const bi = INLINE_REPORT_ORDER.indexOf(b);
+            return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
+        });
+    const buttonLogs = logFiles.filter((f) => !INLINE_REPORT_FILES.has(f));
+    const hasLogs = buttonLogs.length > 0;
+    const hasInline = inlineLogs.length > 0;
+    const hasTasks = run.tasks && run.tasks.length > 0;
+    const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
+    const hasViz = run.vizData && run.vizData.length > 0;
+
+    const location = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
+    const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
+    const sessionContextHtml =
+        run.session !== null
+            ? run.assetId
+                ? `<span class="run-sep">·</span><a class="flat-ctx-link" href="${e(neurosiftUrl(run.dandisetId, run.assetId))}" target="_blank" rel="noopener">Ses:&nbsp;<strong>${e(run.session)}</strong></a>`
+                : `<span class="run-sep">·</span><span class="flat-ctx-text">Ses:&nbsp;<strong>${e(run.session)}</strong></span>`
+            : "";
+
+    return `
+<div class="run-entry flat-run-entry ${sc}">
+    <div class="run-entry-header flat-run-header">
+        <span class="status-badge ${sc}">${slbl}</span>
+        <span class="flat-run-context">
+            <a class="flat-ctx-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
+            <span class="run-sep">·</span>
+            <a class="flat-ctx-link" href="${e(subjectUrl)}" target="_blank" rel="noopener">Sub:&nbsp;<strong>${e(run.subject)}</strong></a>
+            ${sessionContextHtml}
+            <span class="run-sep">·</span>
+            <span class="flat-ctx-pipeline">${renderPipelineInfo(run.pipelineName, run.pipelineVersion)}</span>
+            <span class="run-sep">·</span>
+            <span class="flat-ctx-text">Params:&nbsp;${e(run.paramsProfile)}</span>
+        </span>
+        ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
+        <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
+        <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+    </div>
+
+    ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${hasTasks ? renderTraceSection(run.tasks) : ""}
+    ${hasViz ? renderVisualizationSection(run.vizData) : ""}
+    ${hasLogs ? renderLogSection(run.path, buttonLogs) : ""}
+    ${hasInline ? renderReportSection(run.path, inlineLogs) : ""}
+</div>`;
+}
+
+function renderFlatList(runs) {
+    return `<div class="flat-list">${runs.map(renderFlatRunEntry).join("")}</div>`;
+}
+
+/* ─── Layout toggle ─────────────────────────────────────────── */
+function renderLayoutBar() {
+    const isFlat = _layoutMode === "flat";
+    return `<div class="layout-bar">
+    <span class="layout-bar-label">View:</span>
+    <button class="layout-btn${!isFlat ? " layout-btn-active" : ""}" data-layout="tree" aria-pressed="${!isFlat}">Tree</button>
+    <button class="layout-btn${isFlat ? " layout-btn-active" : ""}" data-layout="flat" aria-pressed="${isFlat}">Flat</button>
+</div>`;
+}
+
+function rerenderRuns() {
+    document.getElementById("runs").innerHTML =
+        _layoutMode === "flat" ? renderFlatList(_filteredRuns) : renderDandisets(_filteredRuns);
+    initInlineHtmlFrames();
+}
+
+function initLayoutToggle() {
+    const bar = document.getElementById("layout-bar");
+    if (!bar) return;
+    bar.innerHTML = renderLayoutBar();
+    bar.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-layout]");
+        if (!btn) return;
+        const mode = btn.dataset.layout;
+        if (mode === _layoutMode) return;
+        _layoutMode = mode;
+        localStorage.setItem("layoutMode", mode);
+        bar.innerHTML = renderLayoutBar();
+        rerenderRuns();
+    });
+}
 /* ─── Log modal ─────────────────────────────────────────────── */
 let _modalGeneration = 0;
 
@@ -1280,6 +1401,7 @@ function showError(msg) {
 function showResults() {
     document.getElementById("loading").style.display = "none";
     document.getElementById("summary").style.display = "";
+    document.getElementById("layout-bar").style.display = "";
     document.getElementById("runs").style.display = "";
 }
 
@@ -1376,8 +1498,12 @@ async function init() {
         const runsForSummary = isFiltered ? filteredRuns : runsInScope;
         renderSummary(runsForSummary);
         renderFilterBanner(filter, runsInScope);
-        document.getElementById("runs").innerHTML = renderDandisets(filteredRuns);
+        _filteredRuns = filteredRuns;
+        _layoutMode = parseLayoutMode();
+        document.getElementById("runs").innerHTML =
+            _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(filteredRuns);
         initInlineHtmlFrames();
+        initLayoutToggle();
         showResults();
     } catch (err) {
         renderFilterBanner(parseFilter(), []);
@@ -1399,6 +1525,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseTrace,
         parseViewMode,
         renderFilterBanner,
+        renderFlatList,
         renderVisualizationSection,
         runFailureStep,
         showError,
