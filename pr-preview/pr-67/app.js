@@ -479,18 +479,41 @@ function parseRunPath(runPath) {
     const versionPart = pipelineIndex >= 0 ? (parts[pipelineIndex + 1] ?? "") : "";
     const runPart = pipelineIndex >= 0 ? (parts[pipelineIndex + 2] ?? "") : "";
 
-    const flattenedMatch = versionPart.match(/^version-(.+?)_(params-.+)$/);
-    const pipelineVersion = flattenedMatch
-        ? flattenedMatch[1]
-        : versionPart.startsWith("version-")
-          ? versionPart.replace(/^version-/, "")
-          : versionPart;
-    const capsulePart = flattenedMatch ? flattenedMatch[2] : runPart;
+    let pipelineVersion = versionPart.startsWith("version-") ? versionPart.slice("version-".length) : versionPart;
+    let capsulePart = runPart;
+    if (versionPart.startsWith("version-")) {
+        const versionBody = versionPart.slice("version-".length);
+        const flattenedMarker = "_params-";
+        const flattenedIndex = versionBody.indexOf(flattenedMarker);
+        if (flattenedIndex !== -1) {
+            pipelineVersion = versionBody.slice(0, flattenedIndex);
+            capsulePart = `params-${versionBody.slice(flattenedIndex + flattenedMarker.length)}`;
+        }
+    }
 
-    const runMatch = capsulePart.match(/^params-(.+?)(?:_config-(.+?))?_attempt-(\d+)$/);
-    const paramsProfile = runMatch ? runMatch[1] : capsulePart;
-    const configHash = runMatch ? runMatch[2] : "";
-    const attempt = runMatch ? parseInt(runMatch[3], 10) : 1;
+    let paramsProfile = capsulePart;
+    let configHash = "";
+    let attempt = 1;
+    if (capsulePart.startsWith("params-")) {
+        const capsuleBody = capsulePart.slice("params-".length);
+        const attemptMarker = "_attempt-";
+        const attemptIndex = capsuleBody.lastIndexOf(attemptMarker);
+        if (attemptIndex !== -1) {
+            const attemptText = capsuleBody.slice(attemptIndex + attemptMarker.length);
+            if (/^\d+$/.test(attemptText)) {
+                attempt = parseInt(attemptText, 10);
+                const beforeAttempt = capsuleBody.slice(0, attemptIndex);
+                const configMarker = "_config-";
+                const configIndex = beforeAttempt.indexOf(configMarker);
+                if (configIndex !== -1) {
+                    paramsProfile = beforeAttempt.slice(0, configIndex);
+                    configHash = beforeAttempt.slice(configIndex + configMarker.length);
+                } else {
+                    paramsProfile = beforeAttempt;
+                }
+            }
+        }
+    }
 
     return {
         path: runPath,
