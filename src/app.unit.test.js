@@ -97,6 +97,22 @@ describe("app unit behavior", () => {
         });
     });
 
+    it("parses flattened version+capsule run path segments", () => {
+        const parsed = parseRunPath(
+            "derivatives/dandiset-214527/sub-test/ses-aind+sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+5d20fd2_params-4af6a25_config-0d4bf36_date-2026+05+14_attempt-2"
+        );
+        expect(parsed).toMatchObject({
+            dandisetId: "214527",
+            subject: "test",
+            session: "aind+sample",
+            pipelineName: "aind+ephys",
+            pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
+            paramsProfile: "4af6a25",
+            configHash: "0d4bf36_date-2026+05+14",
+            attempt: 2,
+        });
+    });
+
     it("builds run path with session from JSONL entry", () => {
         const path = buildRunPath({
             dandiset_id: "000233",
@@ -109,7 +125,7 @@ describe("app unit behavior", () => {
             attempt: 1,
         });
         expect(path).toBe(
-            "derivatives/dandiset-000233/sub-CGM3/ses-CGM3/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6/params-98fd947_config-6568dda_attempt-1"
+            "derivatives/dandiset-000233/sub-CGM3/ses-CGM3/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6_params-98fd947_config-6568dda_attempt-1"
         );
     });
 
@@ -125,7 +141,7 @@ describe("app unit behavior", () => {
             attempt: 1,
         });
         expect(path).toBe(
-            "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6/params-98fd947_config-6568dda_attempt-1"
+            "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6_params-98fd947_config-6568dda_attempt-1"
         );
     });
 
