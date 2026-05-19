@@ -1214,25 +1214,29 @@ async function fetchPipelineCompareSummary(baseRef, headRef) {
     }
 }
 
-function renderNamedPairTable(rowLabel, leftLabel, rightLabel, leftHtml, rightHtml) {
+function renderNamedPairTable(rowLabel, leftColumnLabel, rightColumnLabel, leftCellHtml, rightCellHtml) {
     return `<div class="diff-detail-table-wrap">
         <table class="diff-detail-table diff-detail-table-pair">
             <thead>
                 <tr>
                     <th class="diff-detail-corner" aria-hidden="true"></th>
-                    <th scope="col">${e(leftLabel)}</th>
-                    <th scope="col">${e(rightLabel)}</th>
+                    <th scope="col">${e(leftColumnLabel)}</th>
+                    <th scope="col">${e(rightColumnLabel)}</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
                     <th scope="row" class="diff-detail-key">${e(rowLabel)}</th>
-                    <td>${leftHtml}</td>
-                    <td>${rightHtml}</td>
+                    <td>${leftCellHtml}</td>
+                    <td>${rightCellHtml}</td>
                 </tr>
             </tbody>
         </table>
     </div>`;
+}
+
+function renderTextPairTable(rowLabel, leftLabel, rightLabel) {
+    return renderNamedPairTable(rowLabel, leftLabel, rightLabel, e(leftLabel), e(rightLabel));
 }
 
 function renderKeyValueTable(rows) {
@@ -1359,7 +1363,7 @@ function renderPipelineCompareBody(baseVersion, headVersion, summary) {
     const baseLabel = baseVersion.replace(/\+/g, "-");
     const headLabel = headVersion.replace(/\+/g, "-");
     return `<div class="diff-pair-card">
-        ${renderNamedPairTable("Pipeline version", baseLabel, headLabel, e(baseLabel), e(headLabel))}
+        ${renderTextPairTable("Pipeline version", baseLabel, headLabel)}
         ${summaryTable}
         ${commitItems}
         ${fileItems}
