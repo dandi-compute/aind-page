@@ -725,8 +725,8 @@ describe("diff page helpers", () => {
                 },
             ]);
             expect(pairs[0].modalHtml).toContain("Minor 1.1.1 release (#102)");
-            expect(pairs[0].modalHtml).toContain('<th scope="col">Source</th>');
-            expect(pairs[0].modalHtml).toContain('<th scope="col">Target</th>');
+            expect(pairs[0].modalHtml).toContain('<th scope="col">v1.0.1-20abeb6</th>');
+            expect(pairs[0].modalHtml).toContain('<th scope="col">v1.1.1-b268fd2-5d20fd2</th>');
 
             expect(global.fetch).toHaveBeenCalledTimes(3);
         } finally {
@@ -891,10 +891,12 @@ describe("diff page helpers", () => {
 
         document.body.innerHTML = html;
         const pipelineRows = document.querySelector(".diff-matrix").querySelectorAll("tbody tr");
-        expect(pipelineRows[0].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(2);
+        expect(pipelineRows[0].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(2);
+        expect(pipelineRows[0].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(0);
         expect(pipelineRows[1].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(1);
         expect(pipelineRows[1].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(1);
-        expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(2);
+        expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(0);
+        expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(2);
     });
 });
 
@@ -984,11 +986,11 @@ describe("diff modal interactions", () => {
         document.querySelectorAll(".diff-cell-trigger")[1].click();
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
-        expect(document.getElementById("log-modal-title").hidden).toBe(false);
-        expect(document.getElementById("log-modal-title").textContent).toContain("deterministic → original");
+        expect(document.getElementById("log-modal-title").hidden).toBe(true);
         expect(document.getElementById("log-modal-body").innerHTML).toContain("Registered params");
-        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Source</th>');
-        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Target</th>');
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">deterministic</th>');
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">original</th>');
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Parameter</th>');
         expect(document.getElementById("log-modal-body").textContent).toContain("sorter.detect_sign");
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
@@ -1014,7 +1016,7 @@ describe("diff modal interactions", () => {
                     {
                         compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
                         modalHtml:
-                            '<div class="diff-pair-card"><table class="diff-detail-table"><thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead><tbody><tr><th scope="row" class="diff-detail-key">Commits</th><td>1 commit</td></tr></tbody></table></div>',
+                            '<div class="diff-pair-card"><table class="diff-detail-table diff-detail-table-pair"><thead><tr><th class="diff-detail-corner" aria-hidden="true"></th><th scope="col">v1.0.0-abc1234</th><th scope="col">v1.1.0-def5678</th></tr></thead><tbody><tr><th scope="row" class="diff-detail-key">Pipeline version</th><td>v1.0.0-abc1234</td><td>v1.1.0-def5678</td></tr></tbody></table><table class="diff-detail-table"><thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead><tbody><tr><th scope="row" class="diff-detail-key">Commits</th><td>1 commit</td></tr></tbody></table></div>',
                     },
                 ],
             ]),
@@ -1027,7 +1029,10 @@ describe("diff modal interactions", () => {
         document.querySelector(".diff-cell-trigger").click();
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-title").hidden).toBe(true);
         expect(document.getElementById("log-modal-body").innerHTML).toContain("diff-detail-table");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("v1.0.0-abc1234");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("v1.1.0-def5678");
         expect(document.getElementById("log-modal-body").textContent).toContain("Commits");
     });
 
