@@ -4,7 +4,9 @@ const {
     classifyFailedTaskStep,
     fetchQueueState,
     fetchVisualizationData,
+    initLayoutToggle,
     parseQueueEntries,
+    parseLayoutMode,
     parseRunPath,
     parseTrace,
     renderDandisets,
@@ -41,7 +43,25 @@ beforeEach(() => {
     document.body.innerHTML = "";
 });
 
+afterEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+    window.history.replaceState(null, "", "/");
+});
+
 describe("app unit behavior", () => {
+    it("parses layout mode from URL query when present", () => {
+        localStorage.setItem("layoutMode", "tree");
+        window.history.replaceState(null, "", "/?layout=flat");
+        expect(parseLayoutMode()).toBe("flat");
+    });
+
+    it("falls back to localStorage layout mode when URL query is absent", () => {
+        localStorage.setItem("layoutMode", "flat");
+        window.history.replaceState(null, "", "/");
+        expect(parseLayoutMode()).toBe("flat");
+    });
+
     it("classifies failure steps from task names", () => {
         expect(classifyFailedTaskStep("dispatch workflow")).toBe("job-dispatch");
         expect(classifyFailedTaskStep("pre_process data")).toBe("pre-processing");
@@ -640,5 +660,24 @@ describe("renderRegistryLink", () => {
         expect(renderRegistryLink("Params", '<script>alert("xss")</script>', [], "params")).toBe(
             "Params:&nbsp;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"
         );
+    });
+});
+
+describe("initLayoutToggle", () => {
+    beforeEach(() => {
+        document.body.innerHTML = '<div id="layout-bar"></div><div id="runs"></div>';
+        window.history.replaceState(null, "", "/?view=tests&dandiset=001697");
+    });
+
+    it("updates URL layout query param while preserving other URL state", () => {
+        initLayoutToggle();
+        document.querySelector('[data-layout="tree"]').click();
+        document.querySelector('[data-layout="flat"]').click();
+
+        const params = new URLSearchParams(window.location.search);
+        expect(params.get("layout")).toBe("flat");
+        expect(params.get("view")).toBe("tests");
+        expect(params.get("dandiset")).toBe("001697");
+        expect(localStorage.getItem("layoutMode")).toBe("flat");
     });
 });

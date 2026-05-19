@@ -61,4 +61,22 @@ describe("app integration behavior", () => {
         expect(document.getElementById("summary").style.display).toBe("");
         expect(document.getElementById("runs").style.display).toBe("");
     });
+
+    it("includes layout mode in filter form and clear links for shareable URLs", () => {
+        window.history.replaceState(null, "", "/?layout=flat");
+        renderFilterBanner(
+            {
+                dandisetId: null,
+                subject: null,
+                session: null,
+                pipelineVersion: null,
+                failureStep: null,
+            },
+            []
+        );
+
+        const banner = document.getElementById("filter-banner");
+        expect(banner.innerHTML).toContain('name="layout" value="flat"');
+        expect(banner.innerHTML).toContain('href="?layout=flat"');
+    });
 });
