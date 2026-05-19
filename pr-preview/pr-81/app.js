@@ -9,6 +9,7 @@ const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/co
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
+const PIPELINE_API_BASE = "https://api.github.com/repos/CodyCBakerPhD/aind-ephys-pipeline";
 const CODE_REPO_URL = "https://github.com/dandi-compute/code";
 const AIND_EPHYS_PIPELINE_CODE_URL =
     "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
@@ -830,17 +831,13 @@ function renderRunEntry(run) {
 }
 
 function renderPipelineInfo(pipelineName, pipelineVersion) {
-    const MIN_COMMIT_HASH_LENGTH = 6;
-    const vParts = pipelineVersion.split("+");
-    const lastPart = vParts[vParts.length - 1];
-    const hasCommit = vParts.length > 1 && lastPart.length >= MIN_COMMIT_HASH_LENGTH && /^[0-9a-f]+$/i.test(lastPart);
+    const commitHash = pipelineCompareRef(pipelineVersion);
+    const hasCommit = commitHash !== pipelineVersion;
 
     const displayName = e(pipelineName.replace(/\+/g, "-"));
 
     if (hasCommit) {
-        const commitHash = lastPart;
-        // Version parts use '-' as separator; the final '+' preserves the commit hash as a distinct suffix.
-        const displayVer = e(vParts.slice(0, -1).join("-") + "+" + commitHash);
+        const displayVer = e(pipelineVersion.replace(/\+/g, "-"));
         const url = e(`${PIPELINE_REPO_URL}/commit/${commitHash}`);
         return (
             `<a class="pipeline-link" href="${url}" target="_blank" rel="noopener">` +
@@ -1115,21 +1112,68 @@ function uniquePipelineEntries(runs) {
 
 function pipelineCompareRef(version) {
     const versionText = String(version ?? "");
-    const parts = versionText.split("+");
-    const suffix = parts[parts.length - 1] ?? "";
-    if (parts.length > 1 && COMMIT_HASH_PATTERN.test(suffix)) {
-        return suffix;
+    const hashPart = pipelineCompareRefCandidates(versionText)[0];
+    if (hashPart) {
+        return hashPart;
     }
     return versionText;
 }
 
-function buildPipelineDiffPairs(runs) {
+function pipelineCompareRefCandidates(version) {
+    return String(version ?? "")
+        .split("+")
+        .slice(1)
+        .filter((part) => COMMIT_HASH_PATTERN.test(part));
+}
+
+const _pipelineCompareRefCache = new Map();
+
+async function resolvePipelineCompareRef(version) {
+    const versionText = String(version ?? "");
+    const refs = pipelineCompareRefCandidates(versionText);
+    if (refs.length === 0) {
+        return versionText;
+    }
+    for (const ref of refs) {
+        if (ref.length === FULL_COMMIT_HASH_LENGTH) {
+            return ref;
+        }
+        if (_pipelineCompareRefCache.has(ref)) {
+            return _pipelineCompareRefCache.get(ref);
+        }
+        const request = (async () => {
+            try {
+                const resp = await cachedFetch(`${PIPELINE_API_BASE}/commits/${encodeURIComponent(ref)}`, {
+                    headers: { Accept: "application/vnd.github+json" },
+                });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                return typeof data?.sha === "string" && data.sha ? data.sha : null;
+            } catch {
+                return null;
+            }
+        })();
+        _pipelineCompareRefCache.set(ref, request);
+        const resolved = await request;
+        if (resolved) {
+            return resolved;
+        }
+    }
+    return refs[0] ?? versionText;
+}
+
+async function buildPipelineDiffPairs(runs) {
     const uniqueVersions = uniquePipelineEntries(runs);
+    const compareRefs = new Map(
+        await Promise.all(
+            uniqueVersions.map(async (entry) => [entry.key, await resolvePipelineCompareRef(entry.pipelineVersion)])
+        )
+    );
     return buildPairwiseComparisons(uniqueVersions).map(([base, head]) => ({
         pipelineName: base.pipelineName,
         baseVersion: base.pipelineVersion,
         headVersion: head.pipelineVersion,
-        compareUrl: `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(pipelineCompareRef(base.pipelineVersion))}...${encodeURIComponent(pipelineCompareRef(head.pipelineVersion))}`,
+        compareUrl: `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(compareRefs.get(base.key))}...${encodeURIComponent(compareRefs.get(head.key))}`,
     }));
 }
 
@@ -1222,11 +1266,8 @@ function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     </div>`;
 }
 
-function renderDiffModalTrigger(label, title, bodyHtml, externalHref = null, externalLabel = "↗ Open") {
-    const externalAttrs = externalHref
-        ? ` data-modal-external="${e(externalHref)}" data-modal-external-label="${e(externalLabel)}"`
-        : "";
-    return `<button type="button" class="diff-cell-trigger" aria-haspopup="dialog" data-modal-title="${e(title)}" data-modal-html="${e(bodyHtml)}"${externalAttrs}>
+function renderDiffModalTrigger(label, bodyHtml) {
+    return `<button type="button" class="diff-cell-trigger" aria-haspopup="dialog" data-modal-html="${e(bodyHtml)}">
         <span class="diff-cell-trigger-label">${e(label)}</span>
     </button>`;
 }
@@ -1241,16 +1282,10 @@ function renderDiffPage(data) {
                       const compareUrl =
                           data.pipelinePairMap.get(`${baseEntry.key}\x00${headEntry.key}`) ??
                           `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(pipelineCompareRef(baseEntry.pipelineVersion))}...${encodeURIComponent(pipelineCompareRef(headEntry.pipelineVersion))}`;
-                      const pairTitle = `${baseEntry.pipelineVersion} → ${headEntry.pipelineVersion}`;
-                      const bodyHtml = `<div class="diff-pair-card">
-                     <div class="diff-pair-header">
-                         <span class="diff-pair-title">${e(baseEntry.pipelineVersion)} → ${e(headEntry.pipelineVersion)}</span>
-                     </div>
-                     <div class="diff-link-row">
-                         <a class="run-entry-github-link" href="${e(compareUrl)}" target="_blank" rel="noopener">Open compare</a>
-                     </div>
-                 </div>`;
-                      return renderDiffModalTrigger("View compare", pairTitle, bodyHtml, compareUrl, "↗ Open compare");
+                      return renderDiffModalTrigger(
+                          "View compare",
+                          `<pre class="log-modal-text">${e(compareUrl)}</pre>`
+                      );
                   }
               )
             : '<p class="diff-empty-state">Only one pipeline version is currently present, so there are no pipeline comparisons to show.</p>';
@@ -1277,23 +1312,12 @@ function renderDiffPage(data) {
                                     )
                                     .join("")}</ol>`
                               : '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
-                      const pairTitle = `${baseEntry.alias} → ${headEntry.alias}`;
-                      const bodyHtml = `<div class="diff-pair-card">
-                     <div class="diff-pair-header">
-                         <span class="diff-pair-title">${e(baseEntry.alias)} → ${e(headEntry.alias)}</span>
-                         <span class="count-badge">${pairChanges.length}</span>
-                     </div>
-                     <div class="diff-link-row">
-                        <a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(baseEntry.alias)} source</a>
-                         <a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(headEntry.alias)} source</a>
-                     </div>
-                     ${changeItems}
-                 </div>`;
+                      const bodyHtml = `<div class="diff-pair-card">${changeItems}</div>`;
                       const buttonLabel =
                           pairChanges.length > 0
                               ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
                               : "View diff";
-                      return renderDiffModalTrigger(buttonLabel, pairTitle, bodyHtml);
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
                   }
               )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
@@ -1302,14 +1326,12 @@ function renderDiffPage(data) {
     <section class="diff-section">
         <div class="diff-section-banner">
             Pipeline GitHub compares
-            <span class="count-badge">${data.pipelinePairs.length}</span>
         </div>
         ${pipelineHtml}
     </section>
     <section class="diff-section">
         <div class="diff-section-banner">
             Registered params JSON diffs
-            <span class="count-badge">${data.paramsPairs.length}</span>
         </div>
         ${paramsHtml}
     </section>
@@ -1647,14 +1669,27 @@ function setModalExternalLink(externalHref, externalLabel = "↗ Open") {
     }
 }
 
+function setModalTitle(title) {
+    const modalBox = document.querySelector("#log-modal .log-modal-box");
+    const titleEl = document.getElementById("log-modal-title");
+    titleEl.textContent = title ?? "";
+    titleEl.hidden = !title;
+    if (title) {
+        modalBox?.setAttribute("aria-labelledby", "log-modal-title");
+        modalBox?.removeAttribute("aria-label");
+    } else {
+        modalBox?.removeAttribute("aria-labelledby");
+        modalBox?.setAttribute("aria-label", "Details");
+    }
+}
+
 function openLogModal(filePath, label, isHtml, externalHref) {
     const overlay = document.getElementById("log-modal");
-    const titleEl = document.getElementById("log-modal-title");
     const bodyEl = document.getElementById("log-modal-body");
 
     const generation = ++_modalGeneration;
 
-    titleEl.textContent = label;
+    setModalTitle(label);
     setModalExternalLink(externalHref);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
@@ -1694,12 +1729,11 @@ function closeLogModal() {
 
 function openHtmlModal(title, html, externalHref = null, externalLabel = "↗ Open") {
     const overlay = document.getElementById("log-modal");
-    const titleEl = document.getElementById("log-modal-title");
     const bodyEl = document.getElementById("log-modal-body");
 
     _modalGeneration++;
 
-    titleEl.textContent = title;
+    setModalTitle(title);
     setModalExternalLink(externalHref, externalLabel);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
@@ -1708,12 +1742,11 @@ function openHtmlModal(title, html, externalHref = null, externalLabel = "↗ Op
 
 function openVizModal(url, label) {
     const overlay = document.getElementById("log-modal");
-    const titleEl = document.getElementById("log-modal-title");
     const bodyEl = document.getElementById("log-modal-body");
 
     _modalGeneration++;
 
-    titleEl.textContent = label;
+    setModalTitle(label);
     setModalExternalLink(url);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
@@ -1884,7 +1917,7 @@ async function init() {
             const entries = await fetchQueueState();
             const runs = parseQueueEntries(entries);
             const pipelineEntries = uniquePipelineEntries(runs);
-            const pipelinePairs = buildPipelineDiffPairs(runs);
+            const pipelinePairs = await buildPipelineDiffPairs(runs);
             const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY).map((entry) => ({
                 key: entry.alias,
                 alias: entry.alias,
