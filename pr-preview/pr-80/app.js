@@ -163,7 +163,7 @@ function renderFilterInput(name, label, value, suggestions, clearHref = null) {
     return `
 <label class="filter-input-wrap">
     <span class="filter-input-label">${label}</span>
-    <span class="filter-input-field">
+    <span class="filter-input-row">
         <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off">
         ${clearBtn}
     </span>
