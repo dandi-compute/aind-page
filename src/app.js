@@ -1214,47 +1214,155 @@ async function fetchPipelineCompareSummary(baseRef, headRef) {
     }
 }
 
-function renderPipelineCompareBody(summary) {
+function renderSourceTargetTable(rowLabel, sourceHtml, targetHtml) {
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table diff-detail-table-pair">
+            <thead>
+                <tr>
+                    <th class="diff-detail-corner" aria-hidden="true"></th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Target</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th scope="row" class="diff-detail-key">${e(rowLabel)}</th>
+                    <td>${sourceHtml}</td>
+                    <td>${targetHtml}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>`;
+}
+
+function renderKeyValueTable(rows) {
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">Metric</th>
+                    <th scope="col">Value</th>
+                </tr>
+            </thead>
+            <tbody>${rows
+                .map(
+                    (row) => `<tr>
+                    <th scope="row" class="diff-detail-key">${e(row.label)}</th>
+                    <td>${row.valueHtml}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderTwoColumnTable(headers, rows) {
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">${e(headers[0])}</th>
+                    <th scope="col">${e(headers[1])}</th>
+                </tr>
+            </thead>
+            <tbody>${rows
+                .map(
+                    (row) => `<tr>
+                    <td>${row[0]}</td>
+                    <td>${row[1]}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderSourceTargetDiffTable(changes) {
+    if (changes.length === 0) {
+        return '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
+    }
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">Path</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Target</th>
+                </tr>
+            </thead>
+            <tbody>${changes
+                .map(
+                    (change) => `<tr>
+                    <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
+                    <td><span class="diff-detail-chip diff-change-before">− ${e(renderDiffValue(change.left))}</span></td>
+                    <td><span class="diff-detail-chip diff-change-after">+ ${e(renderDiffValue(change.right))}</span></td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderPipelineCompareBody(baseVersion, headVersion, summary) {
     if (summary?.kind === "same-ref") {
         return '<p class="diff-empty-state diff-empty-state-inline">No distinct pipeline repository commit comparison is available for this version pair.</p>';
     }
     if (summary?.kind === "error") {
         return `<p class="diff-empty-state diff-empty-state-inline">${e(summary.message)}</p>`;
     }
-    const summaryBits = [
-        `${summary.totalCommits} commit${summary.totalCommits !== 1 ? "s" : ""}`,
-        `${summary.files.length} file${summary.files.length !== 1 ? "s" : ""}`,
+    const summaryRows = [
+        {
+            label: "Commits",
+            valueHtml: e(`${summary.totalCommits} commit${summary.totalCommits !== 1 ? "s" : ""}`),
+        },
+        {
+            label: "Files",
+            valueHtml: e(`${summary.files.length} file${summary.files.length !== 1 ? "s" : ""}`),
+        },
     ];
-    if (summary.aheadBy)
-        summaryBits.push(`${summary.aheadBy} commit${summary.aheadBy !== 1 ? "s" : ""} ahead in comparison`);
-    if (summary.behindBy) {
-        summaryBits.push(`${summary.behindBy} commit${summary.behindBy !== 1 ? "s" : ""} behind in comparison`);
+    if (summary.aheadBy) {
+        summaryRows.push({
+            label: "Ahead",
+            valueHtml: e(`${summary.aheadBy} commit${summary.aheadBy !== 1 ? "s" : ""} ahead in comparison`),
+        });
     }
+    if (summary.behindBy) {
+        summaryRows.push({
+            label: "Behind",
+            valueHtml: e(`${summary.behindBy} commit${summary.behindBy !== 1 ? "s" : ""} behind in comparison`),
+        });
+    }
+    const summaryTable = renderKeyValueTable(summaryRows);
     const commitItems =
         summary.commits.length > 0
-            ? `<ol class="diff-change-list">${summary.commits
-                  .map((commit) => {
+            ? renderTwoColumnTable(
+                  ["Commit", "Message"],
+                  summary.commits.map((commit) => {
                       const message = String(commit?.commit?.message ?? "").split("\n")[0] || "(no commit message)";
-                      return `<li>
-                    <span class="diff-change-path">${e(String(commit?.sha ?? "").slice(0, 7) || "commit")}</span>
-                    <span class="diff-change-values">${e(message)}</span>
-                </li>`;
+                      return [
+                          `<span class="diff-change-path">${e(String(commit?.sha ?? "").slice(0, 7) || "commit")}</span>`,
+                          e(message),
+                      ];
                   })
-                  .join("")}</ol>`
+              )
             : '<p class="diff-empty-state diff-empty-state-inline">No commit metadata returned.</p>';
     const fileItems =
         summary.files.length > 0
-            ? `<ol class="diff-change-list">${summary.files
-                  .map(
-                      (file) => `<li>
-                <span class="diff-change-path">${e(file.filename ?? "(unknown file)")}</span>
-                <span class="diff-change-values">${e(file.status ?? "changed")}</span>
-            </li>`
-                  )
-                  .join("")}</ol>`
+            ? renderTwoColumnTable(
+                  ["File", "Status"],
+                  summary.files.map((file) => [
+                      `<span class="diff-change-path">${e(file.filename ?? "(unknown file)")}</span>`,
+                      e(file.status ?? "changed"),
+                  ])
+              )
             : '<p class="diff-empty-state diff-empty-state-inline">No changed files were returned.</p>';
     return `<div class="diff-pair-card">
-        <p class="diff-empty-state diff-empty-state-inline">${e(summaryBits.join(" · "))}</p>
+        ${renderSourceTargetTable(
+            "Pipeline version",
+            e(baseVersion.replace(/\+/g, "-")),
+            e(headVersion.replace(/\+/g, "-"))
+        )}
+        ${summaryTable}
         ${commitItems}
         ${fileItems}
     </div>`;
@@ -1271,6 +1379,8 @@ async function buildPipelineDiffPairs(runs) {
                 headVersion: head.pipelineVersion,
                 compareUrl,
                 modalHtml: renderPipelineCompareBody(
+                    base.pipelineVersion,
+                    head.pipelineVersion,
                     await fetchPipelineCompareSummary(base.compareRef, head.compareRef)
                 ),
             };
@@ -1398,22 +1508,15 @@ function renderDiffPage(data) {
                   (baseEntry, headEntry) => {
                       const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
                       const pairChanges = pair?.changes ?? [];
-                      const changeItems =
-                          pairChanges.length > 0
-                              ? `<ol class="diff-change-list">${pairChanges
-                                    .map(
-                                        (change) => `<li>
-                                <span class="diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</span>
-                                <span class="diff-change-values">
-                                    <span class="diff-change-before">− ${e(renderDiffValue(change.left))}</span>
-                                    <span class="diff-change-after">+ ${e(renderDiffValue(change.right))}</span>
-                                </span>
-                            </li>`
-                                    )
-                                    .join("")}</ol>`
-                              : '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
                       const pairTitle = `${baseEntry.alias} → ${headEntry.alias}`;
-                      const bodyHtml = `<div class="diff-pair-card">${changeItems}</div>`;
+                      const bodyHtml = `<div class="diff-pair-card">
+                           ${renderSourceTargetTable(
+                               "Registered params",
+                               `<a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">${e(baseEntry.alias)}</a>`,
+                               `<a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">${e(headEntry.alias)}</a>`
+                           )}
+                           ${renderSourceTargetDiffTable(pairChanges)}
+                       </div>`;
                       const buttonLabel =
                           pairChanges.length > 0
                               ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`

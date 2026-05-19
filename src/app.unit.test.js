@@ -721,9 +721,12 @@ describe("diff page helpers", () => {
                     headVersion: "v1.1.1+b268fd2+5d20fd2",
                     compareUrl:
                         "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/20abeb66850ec6ce0127c1489c22bd949d9bb642...b268fd207886905b40a956e7f6a839884ce9835f",
-                    modalHtml: expect.stringContaining("Minor 1.1.1 release (#102)"),
+                    modalHtml: expect.stringContaining("Pipeline version"),
                 },
             ]);
+            expect(pairs[0].modalHtml).toContain("Minor 1.1.1 release (#102)");
+            expect(pairs[0].modalHtml).toContain('<th scope="col">Source</th>');
+            expect(pairs[0].modalHtml).toContain('<th scope="col">Target</th>');
 
             expect(global.fetch).toHaveBeenCalledTimes(3);
         } finally {
@@ -983,8 +986,49 @@ describe("diff modal interactions", () => {
         expect(document.getElementById("log-modal").hidden).toBe(false);
         expect(document.getElementById("log-modal-title").hidden).toBe(false);
         expect(document.getElementById("log-modal-title").textContent).toContain("deterministic → original");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("Registered params");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Source</th>');
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Target</th>');
         expect(document.getElementById("log-modal-body").textContent).toContain("sorter.detect_sign");
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
+    });
+
+    it("shows pipeline compare modal details in tables", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [
+                { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+            ],
+            pipelinePairs: [
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.0+def5678",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    modalHtml: "",
+                },
+            ],
+            pipelinePairMap: new Map([
+                [
+                    "v1.0.0+abc1234\x00v1.1.0+def5678",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                        modalHtml:
+                            '<div class="diff-pair-card"><table class="diff-detail-table"><thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead><tbody><tr><th scope="row" class="diff-detail-key">Commits</th><td>1 commit</td></tr></tbody></table></div>',
+                    },
+                ],
+            ]),
+            paramsEntries: [],
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+        });
+
+        initModal();
+        document.querySelector(".diff-cell-trigger").click();
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("diff-detail-table");
+        expect(document.getElementById("log-modal-body").textContent).toContain("Commits");
     });
 
     it("hides the external action when opening inline-only modal content", () => {
