@@ -670,13 +670,13 @@ describe("renderRegistryLink", () => {
 });
 
 describe("diff page helpers", () => {
-    it("builds GitHub compare URLs from expanded pipeline commit refs", async () => {
+    it("builds GitHub compare URLs and summaries from expanded pipeline commit refs", async () => {
         const originalFetch = global.fetch;
         try {
             global.fetch = vi
                 .fn()
                 .mockResolvedValueOnce(
-                    new Response(JSON.stringify({ sha: "abc1234567890abc1234567890abc1234567890a" }), {
+                    new Response(JSON.stringify({ sha: "20abeb66850ec6ce0127c1489c22bd949d9bb642" }), {
                         status: 200,
                         headers: { "Content-Type": "application/json" },
                     })
@@ -686,25 +686,67 @@ describe("diff page helpers", () => {
                         status: 200,
                         headers: { "Content-Type": "application/json" },
                     })
+                )
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            ahead_by: 1,
+                            behind_by: 0,
+                            total_commits: 1,
+                            commits: [
+                                {
+                                    sha: "b268fd207886905b40a956e7f6a839884ce9835f",
+                                    commit: { message: "Minor 1.1.1 release (#102)" },
+                                },
+                            ],
+                            files: [{ filename: "pyproject.toml", status: "modified" }],
+                        }),
+                        {
+                            status: 200,
+                            headers: { "Content-Type": "application/json" },
+                        }
+                    )
                 );
 
             const pairs = await buildPipelineDiffPairs([
-                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
-                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.1+20abeb6" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.1+20abeb6" },
                 { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2+5d20fd2" },
             ]);
 
             expect(pairs).toEqual([
                 {
                     pipelineName: "aind+ephys",
-                    baseVersion: "v1.0.0+abc1234",
+                    baseVersion: "v1.0.1+20abeb6",
                     headVersion: "v1.1.1+b268fd2+5d20fd2",
                     compareUrl:
-                        "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234567890abc1234567890abc1234567890a...b268fd207886905b40a956e7f6a839884ce9835f",
+                        "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/20abeb66850ec6ce0127c1489c22bd949d9bb642...b268fd207886905b40a956e7f6a839884ce9835f",
+                    modalHtml: expect.stringContaining("Minor 1.1.1 release (#102)"),
                 },
             ]);
 
-            expect(global.fetch).toHaveBeenCalledTimes(2);
+            expect(global.fetch).toHaveBeenCalledTimes(3);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it("omits pipeline compares when version suffixes resolve to the same pipeline commit", async () => {
+        const originalFetch = global.fetch;
+        try {
+            global.fetch = vi.fn().mockResolvedValue(
+                new Response(JSON.stringify({ sha: "b268fd207886905b40a956e7f6a839884ce9835f" }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
+            );
+
+            const pairs = await buildPipelineDiffPairs([
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2+3fac55c" },
+            ]);
+
+            expect(pairs).toEqual([]);
         } finally {
             global.fetch = originalFetch;
         }
@@ -747,6 +789,7 @@ describe("diff page helpers", () => {
             pipelineEntries: [
                 { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
                 { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+                { key: "v1.2.0+fedcba9", pipelineName: "aind+ephys", pipelineVersion: "v1.2.0+fedcba9" },
             ],
             pipelinePairs: [
                 {
@@ -754,12 +797,44 @@ describe("diff page helpers", () => {
                     baseVersion: "v1.0.0+abc1234",
                     headVersion: "v1.1.0+def5678",
                     compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    modalHtml: "<p>1 commit · 1 file</p>",
+                },
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.2.0+fedcba9",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...fedcba9",
+                    modalHtml: "<p>2 commits · 2 files</p>",
+                },
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.1.0+def5678",
+                    headVersion: "v1.2.0+fedcba9",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/def5678...fedcba9",
+                    modalHtml: "<p>1 commit · 1 file</p>",
                 },
             ],
             pipelinePairMap: new Map([
                 [
                     "v1.0.0+abc1234\x00v1.1.0+def5678",
-                    "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                        modalHtml: "<p>1 commit · 1 file</p>",
+                    },
+                ],
+                [
+                    "v1.0.0+abc1234\x00v1.2.0+fedcba9",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...fedcba9",
+                        modalHtml: "<p>2 commits · 2 files</p>",
+                    },
+                ],
+                [
+                    "v1.1.0+def5678\x00v1.2.0+fedcba9",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/def5678...fedcba9",
+                        modalHtml: "<p>1 commit · 1 file</p>",
+                    },
                 ],
             ]),
             paramsEntries: [
@@ -809,6 +884,7 @@ describe("diff page helpers", () => {
         expect(html).not.toContain('<details class="run-section" open>');
         expect(html).toContain('class="diff-matrix-cell diff-matrix-cell-empty"');
         expect(html).not.toContain('class="count-badge"');
+        expect((html.match(/class="diff-matrix-col-header"/g) ?? []).length).toBe(3);
     });
 });
 
@@ -845,12 +921,16 @@ describe("diff modal interactions", () => {
                     baseVersion: "v1.0.0+abc1234",
                     headVersion: "v1.1.0+def5678",
                     compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    modalHtml: "<p>1 commit · 1 file</p>",
                 },
             ],
             pipelinePairMap: new Map([
                 [
                     "v1.0.0+abc1234\x00v1.1.0+def5678",
-                    "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                        modalHtml: "<p>1 commit · 1 file</p>",
+                    },
                 ],
             ]),
             paramsEntries: [
@@ -891,13 +971,12 @@ describe("diff modal interactions", () => {
         });
 
         initModal();
-        document.querySelector(".diff-cell-trigger").click();
+        document.querySelectorAll(".diff-cell-trigger")[1].click();
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
-        expect(document.getElementById("log-modal-title").hidden).toBe(true);
-        expect(document.getElementById("log-modal-body").textContent).toContain(
-            "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"
-        );
+        expect(document.getElementById("log-modal-title").hidden).toBe(false);
+        expect(document.getElementById("log-modal-title").textContent).toContain("deterministic → original");
+        expect(document.getElementById("log-modal-body").textContent).toContain("sorter.detect_sign");
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
 
