@@ -778,6 +778,7 @@ describe("diff page helpers", () => {
         expect(html).toContain('class="diff-matrix"');
         expect(html).toContain('href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"');
         expect(html).toContain("Registered params JSON diffs");
+        expect(html).not.toContain("Quick links for pipeline GitHub comparisons");
         expect(html).toContain("sorter.detect_sign");
         expect(html).toContain("deterministic source");
         expect(html).toContain("original source");

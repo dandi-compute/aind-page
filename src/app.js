@@ -1282,13 +1282,6 @@ function renderDiffPage(data) {
             : '<p class="diff-empty-state">No registered params files were found.</p>';
 
     return `<div class="diff-page">
-    <div class="diff-page-header">
-        <p>Quick links for pipeline GitHub comparisons, plus assembled JSON diffs for the registered params files.</p>
-        <div class="diff-page-summary">
-            <span class="diff-summary-chip">${data.pipelinePairs.length}&nbsp;pipeline compare${data.pipelinePairs.length !== 1 ? "s" : ""}</span>
-            <span class="diff-summary-chip">${data.paramsPairs.length}&nbsp;params diff${data.paramsPairs.length !== 1 ? "s" : ""}</span>
-        </div>
-    </div>
     <details class="run-section" open>
         <summary class="run-section-title">
             Pipeline GitHub compares

@@ -1422,38 +1422,6 @@ details[open] > .params-summary::before {
     gap: 14px;
 }
 
-.diff-page-header {
-    background: var(--color-accent-subtle);
-    border: 1px solid rgba(var(--color-accent-rgb), 0.3);
-    border-radius: var(--radius);
-    padding: 14px 16px;
-}
-
-.diff-page-header p {
-    margin: 0;
-    color: var(--color-text-secondary);
-}
-
-.diff-page-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.diff-summary-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    background: var(--color-surface);
-    color: var(--color-text-secondary);
-    font-size: 0.82em;
-    font-weight: 600;
-}
-
 .diff-pair-list {
     display: flex;
     flex-direction: column;
