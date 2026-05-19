@@ -947,8 +947,8 @@ function resolveRegistryAlias(hash, registry) {
     if (!hash) return null;
     const normalizedHash = String(hash).toLowerCase();
     const exactMatches = registry.filter((entry) => entry.md5 === normalizedHash);
-    const prefixMatches = registry.filter((entry) => entry.md5.startsWith(normalizedHash));
-    const candidates = exactMatches.length > 0 ? exactMatches : prefixMatches;
+    const candidates =
+        exactMatches.length > 0 ? exactMatches : registry.filter((entry) => entry.md5.startsWith(normalizedHash));
     return candidates.find((entry) => entry.alias !== "default") ?? candidates[0] ?? null;
 }
 
