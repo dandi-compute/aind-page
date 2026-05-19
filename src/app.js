@@ -15,6 +15,7 @@ const AIND_EPHYS_PIPELINE_CODE_URL =
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
 const FULL_COMMIT_HASH_LENGTH = 40;
+const ROOT_DIFF_PATH_LABEL = "(root)";
 const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
 const PARAMS_REGISTRY = [
     { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 2 },
@@ -1083,7 +1084,7 @@ function uniqueRegistryEntries(registry) {
         if (
             !existing ||
             candidatePriority > storedPriority ||
-            (candidatePriority === storedPriority && entry.alias < existing.alias)
+            (candidatePriority === storedPriority && entry.alias.localeCompare(existing.alias) < 0)
         ) {
             entriesByHash.set(key, entry);
         }
@@ -1149,7 +1150,7 @@ function collectJsonDiffs(left, right, path = []) {
 }
 
 function renderDiffValue(value) {
-    return value === undefined ? "∅" : JSON.stringify(value);
+    return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
 async function fetchRegistryJson(path) {
@@ -1201,7 +1202,7 @@ function renderDiffPage(data) {
                               ? `<ol class="diff-change-list">${pair.changes
                                     .map(
                                         (change) => `<li>
-                                <span class="diff-change-path">${e(change.path || "(root)")}</span>
+                                <span class="diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</span>
                                 <span class="diff-change-values">
                                     <span class="diff-change-before">− ${e(renderDiffValue(change.left))}</span>
                                     <span class="diff-change-after">+ ${e(renderDiffValue(change.right))}</span>
