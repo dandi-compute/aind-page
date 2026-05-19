@@ -887,7 +887,7 @@ describe("diff page helpers", () => {
         expect((html.match(/class="diff-matrix-col-header"/g) ?? []).length).toBe(3);
 
         document.body.innerHTML = html;
-        const pipelineRows = document.querySelectorAll(".diff-matrix")[0].querySelectorAll("tbody tr");
+        const pipelineRows = document.querySelector(".diff-matrix").querySelectorAll("tbody tr");
         expect(pipelineRows[0].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(2);
         expect(pipelineRows[1].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(1);
         expect(pipelineRows[1].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(1);
