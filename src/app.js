@@ -1077,7 +1077,11 @@ function uniqueRegistryEntries(registry) {
         const existing = entriesByHash.get(key);
         const existingPriority = existing?.priority ?? FALLBACK_ALIAS_PRIORITY;
         const nextPriority = entry.priority ?? FALLBACK_ALIAS_PRIORITY;
-        if (!existing || nextPriority > existingPriority || (nextPriority === existingPriority && entry.alias < existing.alias)) {
+        if (
+            !existing ||
+            nextPriority > existingPriority ||
+            (nextPriority === existingPriority && entry.alias < existing.alias)
+        ) {
             entriesByHash.set(key, entry);
         }
     }
@@ -1120,7 +1124,9 @@ function isPlainObject(value) {
 function collectJsonDiffs(left, right, path = []) {
     if (Array.isArray(left) && Array.isArray(right)) {
         const maxLength = Math.max(left.length, right.length);
-        return Array.from({ length: maxLength }, (_, index) => collectJsonDiffs(left[index], right[index], [...path, index]))
+        return Array.from({ length: maxLength }, (_, index) =>
+            collectJsonDiffs(left[index], right[index], [...path, index])
+        )
             .flat()
             .filter(Boolean);
     }

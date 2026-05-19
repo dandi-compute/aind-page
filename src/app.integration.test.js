@@ -1,4 +1,4 @@
-const { renderFilterBanner, showError, showLoading, showResults } = require("./app");
+const { renderFilterBanner, showDiffResults, showError, showLoading, showResults } = require("./app");
 
 beforeEach(() => {
     document.body.innerHTML = `
@@ -59,6 +59,15 @@ describe("app integration behavior", () => {
 
         showResults();
         expect(document.getElementById("summary").style.display).toBe("");
+        expect(document.getElementById("runs").style.display).toBe("");
+    });
+
+    it("shows only the diff content region on the diff page", () => {
+        showDiffResults();
+        expect(document.getElementById("loading").style.display).toBe("none");
+        expect(document.getElementById("filter-banner").style.display).toBe("none");
+        expect(document.getElementById("summary").style.display).toBe("none");
+        expect(document.getElementById("layout-bar").style.display).toBe("none");
         expect(document.getElementById("runs").style.display).toBe("");
     });
 
