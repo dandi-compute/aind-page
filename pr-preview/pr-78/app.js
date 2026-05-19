@@ -210,9 +210,15 @@ function renderFilterBanner(filter, availableRuns = []) {
         );
     }
 
+    const runsMatchingDandiset = filter.dandisetId
+        ? availableRuns.filter((run) => run.dandisetId === filter.dandisetId)
+        : availableRuns;
+    const runsMatchingSubject = filter.subject
+        ? runsMatchingDandiset.filter((run) => run.subject === filter.subject)
+        : runsMatchingDandiset;
     const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
-    const subjects = uniqueSortedValues(availableRuns.map((r) => r.subject));
-    const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
+    const subjects = uniqueSortedValues(runsMatchingDandiset.map((r) => r.subject));
+    const sessions = uniqueSortedValues(runsMatchingSubject.map((r) => r.session));
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
