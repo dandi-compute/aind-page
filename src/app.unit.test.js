@@ -43,6 +43,11 @@ beforeEach(() => {
     document.body.innerHTML = "";
 });
 
+afterEach(() => {
+    localStorage.clear();
+    window.history.replaceState(null, "", "/");
+});
+
 describe("app unit behavior", () => {
     it("parses layout mode from URL query when present", () => {
         localStorage.setItem("layoutMode", "tree");
