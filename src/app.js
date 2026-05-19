@@ -1222,6 +1222,15 @@ function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     </div>`;
 }
 
+function renderDiffModalTrigger(label, title, bodyHtml, externalHref = null, externalLabel = "↗ Open") {
+    const externalAttrs = externalHref
+        ? ` data-modal-external="${e(externalHref)}" data-modal-external-label="${e(externalLabel)}"`
+        : "";
+    return `<button type="button" class="diff-cell-trigger" aria-haspopup="dialog" data-modal-title="${e(title)}" data-modal-html="${e(bodyHtml)}"${externalAttrs}>
+        <span class="diff-cell-trigger-label">${e(label)}</span>
+    </button>`;
+}
+
 function renderDiffPage(data) {
     const pipelineHtml =
         data.pipelineEntries.length > 1
@@ -1232,14 +1241,16 @@ function renderDiffPage(data) {
                       const compareUrl =
                           data.pipelinePairMap.get(`${baseEntry.key}\x00${headEntry.key}`) ??
                           `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(pipelineCompareRef(baseEntry.pipelineVersion))}...${encodeURIComponent(pipelineCompareRef(headEntry.pipelineVersion))}`;
-                      return `<div class="diff-pair-card">
-                    <div class="diff-pair-header">
-                        <span class="diff-pair-title">${e(baseEntry.pipelineVersion)} → ${e(headEntry.pipelineVersion)}</span>
-                    </div>
-                    <div class="diff-link-row">
-                        <a class="run-entry-github-link" href="${e(compareUrl)}" target="_blank" rel="noopener">Open compare</a>
-                    </div>
-                </div>`;
+                      const pairTitle = `${baseEntry.pipelineVersion} → ${headEntry.pipelineVersion}`;
+                      const bodyHtml = `<div class="diff-pair-card">
+                     <div class="diff-pair-header">
+                         <span class="diff-pair-title">${e(baseEntry.pipelineVersion)} → ${e(headEntry.pipelineVersion)}</span>
+                     </div>
+                     <div class="diff-link-row">
+                         <a class="run-entry-github-link" href="${e(compareUrl)}" target="_blank" rel="noopener">Open compare</a>
+                     </div>
+                 </div>`;
+                      return renderDiffModalTrigger("View compare", pairTitle, bodyHtml, compareUrl, "↗ Open compare");
                   }
               )
             : '<p class="diff-empty-state">Only one pipeline version is currently present, so there are no pipeline comparisons to show.</p>';
@@ -1266,36 +1277,42 @@ function renderDiffPage(data) {
                                     )
                                     .join("")}</ol>`
                               : '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
-                      return `<div class="diff-pair-card">
-                    <div class="diff-pair-header">
-                        <span class="diff-pair-title">${e(baseEntry.alias)} → ${e(headEntry.alias)}</span>
-                        <span class="count-badge">${pairChanges.length}</span>
-                    </div>
-                    <div class="diff-link-row">
+                      const pairTitle = `${baseEntry.alias} → ${headEntry.alias}`;
+                      const bodyHtml = `<div class="diff-pair-card">
+                     <div class="diff-pair-header">
+                         <span class="diff-pair-title">${e(baseEntry.alias)} → ${e(headEntry.alias)}</span>
+                         <span class="count-badge">${pairChanges.length}</span>
+                     </div>
+                     <div class="diff-link-row">
                         <a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(baseEntry.alias)} source</a>
-                        <a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(headEntry.alias)} source</a>
-                    </div>
-                    ${changeItems}
-                </div>`;
+                         <a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(headEntry.alias)} source</a>
+                     </div>
+                     ${changeItems}
+                 </div>`;
+                      const buttonLabel =
+                          pairChanges.length > 0
+                              ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
+                              : "View diff";
+                      return renderDiffModalTrigger(buttonLabel, pairTitle, bodyHtml);
                   }
               )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
 
     return `<div class="diff-page">
-    <details class="run-section" open>
-        <summary class="run-section-title">
+    <section class="diff-section">
+        <div class="diff-section-banner">
             Pipeline GitHub compares
             <span class="count-badge">${data.pipelinePairs.length}</span>
-        </summary>
+        </div>
         ${pipelineHtml}
-    </details>
-    <details class="run-section" open>
-        <summary class="run-section-title">
+    </section>
+    <section class="diff-section">
+        <div class="diff-section-banner">
             Registered params JSON diffs
             <span class="count-badge">${data.paramsPairs.length}</span>
-        </summary>
+        </div>
         ${paramsHtml}
-    </details>
+    </section>
 </div>`;
 }
 
@@ -1599,6 +1616,17 @@ function initModal() {
     const runsEl = document.getElementById("runs");
     if (runsEl) {
         runsEl.addEventListener("click", (evt) => {
+            const diffTrigger = evt.target.closest(".diff-cell-trigger");
+            if (diffTrigger) {
+                evt.preventDefault();
+                openHtmlModal(
+                    diffTrigger.dataset.modalTitle,
+                    diffTrigger.dataset.modalHtml,
+                    diffTrigger.dataset.modalExternal || null,
+                    diffTrigger.dataset.modalExternalLabel || "↗ Open"
+                );
+                return;
+            }
             const link = evt.target.closest(".viz-link");
             if (!link) return;
             evt.preventDefault();
@@ -1607,16 +1635,27 @@ function initModal() {
     }
 }
 
+function setModalExternalLink(externalHref, externalLabel = "↗ Open") {
+    const extLink = document.getElementById("log-modal-external");
+    extLink.textContent = externalLabel;
+    if (externalHref) {
+        extLink.href = externalHref;
+        extLink.hidden = false;
+    } else {
+        extLink.hidden = true;
+        extLink.removeAttribute("href");
+    }
+}
+
 function openLogModal(filePath, label, isHtml, externalHref) {
     const overlay = document.getElementById("log-modal");
     const titleEl = document.getElementById("log-modal-title");
     const bodyEl = document.getElementById("log-modal-body");
-    const extLink = document.getElementById("log-modal-external");
 
     const generation = ++_modalGeneration;
 
     titleEl.textContent = label;
-    extLink.href = externalHref;
+    setModalExternalLink(externalHref);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
@@ -1653,16 +1692,29 @@ function closeLogModal() {
     document.getElementById("log-modal-body").innerHTML = "";
 }
 
+function openHtmlModal(title, html, externalHref = null, externalLabel = "↗ Open") {
+    const overlay = document.getElementById("log-modal");
+    const titleEl = document.getElementById("log-modal-title");
+    const bodyEl = document.getElementById("log-modal-body");
+
+    _modalGeneration++;
+
+    titleEl.textContent = title;
+    setModalExternalLink(externalHref, externalLabel);
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+    bodyEl.innerHTML = html;
+}
+
 function openVizModal(url, label) {
     const overlay = document.getElementById("log-modal");
     const titleEl = document.getElementById("log-modal-title");
     const bodyEl = document.getElementById("log-modal-body");
-    const extLink = document.getElementById("log-modal-external");
 
     _modalGeneration++;
 
     titleEl.textContent = label;
-    extLink.href = url;
+    setModalExternalLink(url);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
@@ -1954,7 +2006,9 @@ if (typeof module !== "undefined" && module.exports) {
         classifyFailedTaskStep,
         fetchQueueState,
         fetchVisualizationData,
+        initModal,
         initLayoutToggle,
+        openHtmlModal,
         parseQueueEntries,
         parseLayoutMode,
         parseRunPath,

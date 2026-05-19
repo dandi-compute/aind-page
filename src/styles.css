@@ -1422,6 +1422,22 @@ details[open] > .params-summary::before {
     gap: 14px;
 }
 
+.diff-section {
+    border-top: 1px solid var(--color-border);
+}
+
+.diff-section-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-size: 0.85em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--color-text);
+    background: var(--color-accent-subtle);
+}
+
 .diff-pair-list {
     display: flex;
     flex-direction: column;
@@ -1474,6 +1490,41 @@ details[open] > .params-summary::before {
 .diff-matrix-cell {
     min-width: 220px;
     padding: 0;
+}
+
+.diff-cell-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 100%;
+    padding: 18px 12px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.diff-cell-trigger:hover {
+    background: var(--color-accent-subtle);
+}
+
+.diff-cell-trigger:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+.diff-cell-trigger-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 0.9em;
+    font-weight: 600;
+    text-align: center;
 }
 
 .diff-matrix-cell-empty {
