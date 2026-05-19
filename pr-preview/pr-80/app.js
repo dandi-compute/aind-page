@@ -156,10 +156,9 @@ const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "
 function renderFilterInput(name, label, value, suggestions, clearHref = null) {
     const listId = `filter-options-${name}`;
     const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
-    const clearBtn =
-        value && clearHref
-            ? `<a class="filter-input-clear" href="${e(clearHref)}" title="Clear ${label} filter" aria-label="Clear ${label} filter">×</a>`
-            : "";
+    const clearBtn = clearHref
+        ? `<a class="filter-input-clear${value ? " filter-input-clear-active" : ""}" href="${e(clearHref)}" title="Clear ${label} filter" aria-label="Clear ${label} filter">×</a>`
+        : "";
     return `
 <label class="filter-input-wrap">
     <span class="filter-input-label">${label}</span>

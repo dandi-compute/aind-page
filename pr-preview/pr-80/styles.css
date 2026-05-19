@@ -1203,7 +1203,7 @@ details[open] > .params-summary::before {
 }
 
 .filter-input-clear {
-    color: var(--color-failed);
+    color: var(--color-text-secondary);
     font-size: 1em;
     line-height: 1;
     text-decoration: none;
@@ -1218,6 +1218,14 @@ details[open] > .params-summary::before {
 }
 
 .filter-input-clear:hover {
+    border-color: var(--color-border);
+}
+
+.filter-input-clear-active {
+    color: var(--color-failed);
+}
+
+.filter-input-clear-active:hover {
     border-color: var(--color-failed);
 }
 
