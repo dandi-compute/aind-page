@@ -60,7 +60,16 @@ function parseViewMode() {
 }
 
 function parseLayoutMode() {
+    const layout = new URLSearchParams(window.location.search).get("layout");
+    if (layout === "flat" || layout === "tree") return layout;
     return localStorage.getItem("layoutMode") === "flat" ? "flat" : "tree";
+}
+
+function updateLayoutModeUrl(mode) {
+    const params = new URLSearchParams(window.location.search);
+    params.set("layout", mode);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
 }
 
 function dandiBaseUrl(dandisetId) {
@@ -128,6 +137,7 @@ function applyFilter(runs, filter) {
    When on the main page (_viewMode === null), no view param is emitted. */
 function narrowUrl(params) {
     const sp = new URLSearchParams();
+    sp.set("layout", _layoutMode);
     if (_viewMode === "tests") sp.set("view", "tests");
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
@@ -226,13 +236,18 @@ function renderFilterBanner(filter, availableRuns = []) {
             : "";
 
     const viewHiddenInput = _viewMode === "tests" ? `<input type="hidden" name="view" value="tests">` : "";
-    const clearAllHref = _viewMode === "tests" ? "?view=tests" : "./";
+    const layoutHiddenInput = `<input type="hidden" name="layout" value="${_layoutMode}">`;
+    const clearAllParams = new URLSearchParams();
+    clearAllParams.set("layout", _layoutMode);
+    if (_viewMode === "tests") clearAllParams.set("view", "tests");
+    const clearAllHref = `?${clearAllParams.toString()}`;
 
     banner.innerHTML = `
 ${testsPageHtml}<div class="filter-banner-main">
     <span class="filter-banner-label">Filter runs:</span>
     <form class="filter-form" method="get" action="">
         ${viewHiddenInput}
+        ${layoutHiddenInput}
         ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets)}
         ${renderFilterInput("subject", "Subject", filter.subject, subjects)}
         ${renderFilterInput("session", "Session", filter.session, sessions)}
@@ -1254,6 +1269,7 @@ function initLayoutToggle() {
         if (mode === _layoutMode) return;
         _layoutMode = mode;
         localStorage.setItem("layoutMode", mode);
+        updateLayoutModeUrl(mode);
         bar.innerHTML = renderLayoutBar();
         rerenderRuns();
     });
@@ -1572,6 +1588,7 @@ async function init() {
         renderFilterBanner(filter, runsInScope);
         _filteredRuns = filteredRuns;
         _layoutMode = parseLayoutMode();
+        updateLayoutModeUrl(_layoutMode);
         document.getElementById("runs").innerHTML =
             _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(filteredRuns);
         initInlineHtmlFrames();
@@ -1592,7 +1609,9 @@ if (typeof module !== "undefined" && module.exports) {
         classifyFailedTaskStep,
         fetchQueueState,
         fetchVisualizationData,
+        initLayoutToggle,
         parseQueueEntries,
+        parseLayoutMode,
         parseRunPath,
         parseTrace,
         parseViewMode,
