@@ -1251,9 +1251,10 @@ function renderDiffPage(data) {
                       `<a class="diff-inline-link" href="${e(entry.sourceUrl)}" target="_blank" rel="noopener">${e(entry.alias)}</a>`,
                   (baseEntry, headEntry) => {
                       const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      const pairChanges = pair?.changes ?? [];
                       const changeItems =
-                          pair && pair.changes.length > 0
-                              ? `<ol class="diff-change-list">${pair.changes
+                          pairChanges.length > 0
+                              ? `<ol class="diff-change-list">${pairChanges
                                     .map(
                                         (change) => `<li>
                                 <span class="diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</span>
@@ -1268,7 +1269,7 @@ function renderDiffPage(data) {
                       return `<div class="diff-pair-card">
                     <div class="diff-pair-header">
                         <span class="diff-pair-title">${e(baseEntry.alias)} → ${e(headEntry.alias)}</span>
-                        <span class="count-badge">${pair?.changes.length ?? 0}</span>
+                        <span class="count-badge">${pairChanges.length}</span>
                     </div>
                     <div class="diff-link-row">
                         <a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(baseEntry.alias)} source</a>
