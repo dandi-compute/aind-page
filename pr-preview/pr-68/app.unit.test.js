@@ -592,7 +592,9 @@ describe("renderParamsGroup", () => {
 });
 
 describe("renderRegistryLink", () => {
-    it("falls back to hash display for unknown entries", () => {
-        expect(renderRegistryLink("Params", "unknown-hash", [], "params")).toBe("Params:&nbsp;unknown-hash");
+    it("falls back to escaped hash display for unknown entries", () => {
+        expect(renderRegistryLink("Params", '<script>alert("xss")</script>', [], "params")).toBe(
+            "Params:&nbsp;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"
+        );
     });
 });
