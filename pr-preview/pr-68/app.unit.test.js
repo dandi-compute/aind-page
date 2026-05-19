@@ -7,6 +7,8 @@ const {
     parseQueueEntries,
     parseRunPath,
     parseTrace,
+    renderParamsGroup,
+    renderRegistryLink,
     renderFlatList,
     renderVisualizationSection,
     runFailureStep,
@@ -541,6 +543,16 @@ describe("renderFlatList", () => {
         expect(html).toContain("fast");
     });
 
+    it("aliases known params hash to registry name with source link", () => {
+        const run = { ...baseRun, paramsProfile: "4af6a25" };
+        const html = renderFlatList([run]);
+        expect(html).toContain("Params:");
+        expect(html).toContain(">default<");
+        expect(html).toContain(
+            'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json"'
+        );
+    });
+
     it("shows attempt number", () => {
         const html = renderFlatList([baseRun]);
         expect(html).toContain("Attempt");
@@ -563,5 +575,24 @@ describe("renderFlatList", () => {
         const run = { ...baseRun, status: "failed" };
         const html = renderFlatList([run]);
         expect(html).toContain("status-failed");
+    });
+});
+
+describe("renderParamsGroup", () => {
+    it("aliases params and config hashes to registry names with source links", () => {
+        const html = renderParamsGroup("4af6a25", "0d4bf36", []);
+        expect(html).toContain(">default<");
+        expect(html).toContain(
+            'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json"'
+        );
+        expect(html).toContain(
+            'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config"'
+        );
+    });
+});
+
+describe("renderRegistryLink", () => {
+    it("falls back to hash display for unknown entries", () => {
+        expect(renderRegistryLink("Params", "unknown-hash", [], "params")).toBe("Params:&nbsp;unknown-hash");
     });
 });
