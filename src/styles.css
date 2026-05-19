@@ -1461,6 +1461,58 @@ details[open] > .params-summary::before {
     padding: 0 0 8px;
 }
 
+.diff-matrix-wrap {
+    overflow-x: auto;
+    padding: 0 0 8px;
+}
+
+.diff-matrix {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 8px;
+    table-layout: fixed;
+}
+
+.diff-matrix-corner,
+.diff-matrix-col-header,
+.diff-matrix-row-header,
+.diff-matrix-cell {
+    vertical-align: top;
+}
+
+.diff-matrix-corner,
+.diff-matrix-col-header,
+.diff-matrix-row-header {
+    min-width: 180px;
+}
+
+.diff-matrix-col-header,
+.diff-matrix-row-header {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    text-align: left;
+}
+
+.diff-matrix-col-header .pipeline-link,
+.diff-matrix-row-header .pipeline-link {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.diff-matrix-cell {
+    min-width: 220px;
+    padding: 0;
+}
+
+.diff-matrix-cell-empty {
+    background: transparent;
+    border: none;
+}
+
 .diff-pair-card {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -1543,6 +1595,10 @@ details[open] > .params-summary::before {
 .diff-empty-state {
     padding: 0 14px 14px;
     color: var(--color-text-secondary);
+}
+
+.diff-empty-state-inline {
+    padding: 8px 0 0;
 }
 
 /* ─── Flat list view ────────────────────────────────────────── */

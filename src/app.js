@@ -1102,6 +1102,17 @@ function buildPairwiseComparisons(items) {
     return pairs;
 }
 
+function uniquePipelineEntries(runs) {
+    return [...groupBy(runs, (run) => run.pipelineVersion).values()]
+        .map((versions) => versions[0])
+        .sort((a, b) => FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion))
+        .map((run) => ({
+            key: run.pipelineVersion,
+            pipelineName: run.pipelineName,
+            pipelineVersion: run.pipelineVersion,
+        }));
+}
+
 function pipelineCompareRef(version) {
     const versionText = String(version ?? "");
     const parts = versionText.split("+");
@@ -1113,9 +1124,7 @@ function pipelineCompareRef(version) {
 }
 
 function buildPipelineDiffPairs(runs) {
-    const uniqueVersions = [...groupBy(runs, (run) => run.pipelineVersion).values()]
-        .map((versions) => versions[0])
-        .sort((a, b) => FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion));
+    const uniqueVersions = uniquePipelineEntries(runs);
     return buildPairwiseComparisons(uniqueVersions).map(([base, head]) => ({
         pipelineName: base.pipelineName,
         baseVersion: base.pipelineVersion,
@@ -1179,26 +1188,71 @@ async function buildParamsDiffPairs() {
     }));
 }
 
+function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
+    if (entries.length < 2) return "";
+    const columnHeaders = entries
+        .map((entry) => `<th scope="col" class="diff-matrix-col-header">${renderHeaderCell(entry)}</th>`)
+        .join("");
+    const bodyRows = entries
+        .map((rowEntry, rowIndex) => {
+            const cells = entries
+                .map((columnEntry, columnIndex) => {
+                    if (rowIndex <= columnIndex) {
+                        return '<td class="diff-matrix-cell diff-matrix-cell-empty" aria-hidden="true"></td>';
+                    }
+                    return `<td class="diff-matrix-cell">${renderBodyCell(columnEntry, rowEntry)}</td>`;
+                })
+                .join("");
+            return `<tr>
+                <th scope="row" class="diff-matrix-row-header">${renderHeaderCell(rowEntry)}</th>
+                ${cells}
+            </tr>`;
+        })
+        .join("");
+    return `<div class="diff-matrix-wrap">
+        <table class="diff-matrix">
+            <thead>
+                <tr>
+                    <th class="diff-matrix-corner" aria-hidden="true"></th>
+                    ${columnHeaders}
+                </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+        </table>
+    </div>`;
+}
+
 function renderDiffPage(data) {
     const pipelineHtml =
-        data.pipelinePairs.length > 0
-            ? `<div class="diff-pair-list">${data.pipelinePairs
-                  .map(
-                      (pair) => `<div class="diff-pair-card">
-                <div class="diff-pair-header">
-                    <span class="diff-pair-title">${renderPipelineInfo(pair.pipelineName, pair.baseVersion)}&nbsp;→&nbsp;${e(pair.headVersion)}</span>
-                    <a class="run-entry-github-link" href="${e(pair.compareUrl)}" target="_blank" rel="noopener">Open compare</a>
-                </div>
-            </div>`
-                  )
-                  .join("")}</div>`
+        data.pipelineEntries.length > 1
+            ? renderDiffMatrix(
+                  data.pipelineEntries,
+                  (entry) => renderPipelineInfo(entry.pipelineName, entry.pipelineVersion),
+                  (baseEntry, headEntry) => {
+                      const compareUrl =
+                          data.pipelinePairMap.get(`${baseEntry.key}\x00${headEntry.key}`) ??
+                          `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(pipelineCompareRef(baseEntry.pipelineVersion))}...${encodeURIComponent(pipelineCompareRef(headEntry.pipelineVersion))}`;
+                      return `<div class="diff-pair-card">
+                    <div class="diff-pair-header">
+                        <span class="diff-pair-title">${e(baseEntry.pipelineVersion)} → ${e(headEntry.pipelineVersion)}</span>
+                    </div>
+                    <div class="diff-link-row">
+                        <a class="run-entry-github-link" href="${e(compareUrl)}" target="_blank" rel="noopener">Open compare</a>
+                    </div>
+                </div>`;
+                  }
+              )
             : '<p class="diff-empty-state">Only one pipeline version is currently present, so there are no pipeline comparisons to show.</p>';
     const paramsHtml =
-        data.paramsPairs.length > 0
-            ? data.paramsPairs
-                  .map((pair) => {
+        data.paramsEntries.length > 1
+            ? renderDiffMatrix(
+                  data.paramsEntries,
+                  (entry) =>
+                      `<a class="diff-inline-link" href="${e(entry.sourceUrl)}" target="_blank" rel="noopener">${e(entry.alias)}</a>`,
+                  (baseEntry, headEntry) => {
+                      const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
                       const changeItems =
-                          pair.changes.length > 0
+                          pair && pair.changes.length > 0
                               ? `<ol class="diff-change-list">${pair.changes
                                     .map(
                                         (change) => `<li>
@@ -1210,22 +1264,20 @@ function renderDiffPage(data) {
                             </li>`
                                     )
                                     .join("")}</ol>`
-                              : '<p class="diff-empty-state">No JSON differences detected.</p>';
-                      return `<details class="run-section">
-                <summary class="run-section-title">
-                    Registered params: ${e(pair.baseAlias)} → ${e(pair.headAlias)}
-                    <span class="count-badge">${pair.changes.length}</span>
-                </summary>
-                <div class="diff-pair-card">
+                              : '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
+                      return `<div class="diff-pair-card">
+                    <div class="diff-pair-header">
+                        <span class="diff-pair-title">${e(baseEntry.alias)} → ${e(headEntry.alias)}</span>
+                        <span class="count-badge">${pair?.changes.length ?? 0}</span>
+                    </div>
                     <div class="diff-link-row">
-                        <a class="diff-inline-link" href="${e(pair.baseSourceUrl)}" target="_blank" rel="noopener">↗ ${e(pair.baseAlias)} source</a>
-                        <a class="diff-inline-link" href="${e(pair.headSourceUrl)}" target="_blank" rel="noopener">↗ ${e(pair.headAlias)} source</a>
+                        <a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(baseEntry.alias)} source</a>
+                        <a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">↗ ${e(headEntry.alias)} source</a>
                     </div>
                     ${changeItems}
-                </div>
-            </details>`;
-                  })
-                  .join("")
+                </div>`;
+                  }
+              )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
 
     return `<div class="diff-page">
@@ -1785,9 +1837,23 @@ async function init() {
         try {
             const entries = await fetchQueueState();
             const runs = parseQueueEntries(entries);
+            const pipelineEntries = uniquePipelineEntries(runs);
+            const pipelinePairs = buildPipelineDiffPairs(runs);
+            const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY).map((entry) => ({
+                key: entry.alias,
+                alias: entry.alias,
+                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
+            }));
+            const paramsPairs = await buildParamsDiffPairs();
             const diffData = {
-                pipelinePairs: buildPipelineDiffPairs(runs),
-                paramsPairs: await buildParamsDiffPairs(),
+                pipelineEntries,
+                pipelinePairs,
+                pipelinePairMap: new Map(
+                    pipelinePairs.map((pair) => [`${pair.baseVersion}\x00${pair.headVersion}`, pair.compareUrl])
+                ),
+                paramsEntries,
+                paramsPairs,
+                paramsPairMap: new Map(paramsPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
             };
             document.getElementById("runs").innerHTML = renderDiffPage(diffData);
             showDiffResults();
@@ -1910,6 +1976,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderRegistryLink,
         renderVisualizationSection,
         runFailureStep,
+        uniquePipelineEntries,
         uniqueRegistryEntries,
         showError,
         showDiffResults,

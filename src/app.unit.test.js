@@ -18,6 +18,7 @@ const {
     renderFlatList,
     renderVisualizationSection,
     runFailureStep,
+    uniquePipelineEntries,
 } = require("./app");
 
 const QUEUE_STATE_CACHE_KEY =
@@ -684,6 +685,19 @@ describe("diff page helpers", () => {
         ]);
     });
 
+    it("lists unique pipeline entries in sorted order", () => {
+        expect(
+            uniquePipelineEntries([
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+            ])
+        ).toEqual([
+            { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+            { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+        ]);
+    });
+
     it("collects nested JSON differences with stable paths", () => {
         expect(
             collectJsonDiffs(
@@ -698,12 +712,36 @@ describe("diff page helpers", () => {
 
     it("renders pipeline compare links and params diff summaries", () => {
         const html = renderDiffPage({
+            pipelineEntries: [
+                { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+            ],
             pipelinePairs: [
                 {
                     pipelineName: "aind+ephys",
                     baseVersion: "v1.0.0+abc1234",
                     headVersion: "v1.1.0+def5678",
                     compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                },
+            ],
+            pipelinePairMap: new Map([
+                [
+                    "v1.0.0+abc1234\x00v1.1.0+def5678",
+                    "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                ],
+            ]),
+            paramsEntries: [
+                {
+                    key: "deterministic",
+                    alias: "deterministic",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                },
+                {
+                    key: "original",
+                    alias: "original",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
                 },
             ],
             paramsPairs: [
@@ -717,14 +755,26 @@ describe("diff page helpers", () => {
                     changes: [{ path: "sorter.detect_sign", left: false, right: true }],
                 },
             ],
+            paramsPairMap: new Map([
+                [
+                    "deterministic\x00original",
+                    {
+                        baseAlias: "deterministic",
+                        headAlias: "original",
+                        changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                    },
+                ],
+            ]),
         });
 
         expect(html).toContain("Pipeline GitHub compares");
+        expect(html).toContain('class="diff-matrix"');
         expect(html).toContain('href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"');
         expect(html).toContain("Registered params JSON diffs");
         expect(html).toContain("sorter.detect_sign");
         expect(html).toContain("deterministic source");
         expect(html).toContain("original source");
+        expect(html).toContain('class="diff-matrix-cell diff-matrix-cell-empty"');
     });
 });
 
