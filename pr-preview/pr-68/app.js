@@ -971,11 +971,9 @@ function resolveRegistryAlias(hash, registry) {
         }
     }
     const candidates = exactHashMatches.length > 0 ? exactHashMatches : prefixHashMatches;
-    const aliasPriority = (entry) => entry.priority ?? (entry.alias === "default" ? 0 : 1);
-    const sortedCandidates = candidates
-        .slice()
-        .sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias));
-    return sortedCandidates[0] ?? null;
+    const aliasPriority = (entry) => entry.priority ?? 1;
+    candidates.sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias));
+    return candidates[0] ?? null;
 }
 
 function renderRegistryLink(prefix, hash, registry, subdir) {
