@@ -15,6 +15,7 @@ const AIND_EPHYS_PIPELINE_CODE_URL =
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
 const FULL_COMMIT_HASH_LENGTH = 40;
+const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
 const PARAMS_REGISTRY = [
     { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 2 },
     { alias: "default", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 0 },
@@ -1077,12 +1078,12 @@ function uniqueRegistryEntries(registry) {
     for (const entry of registry) {
         const key = `${entry.md5}\x00${entry.path}`;
         const existing = entriesByHash.get(key);
-        const existingPriority = existing?.priority ?? REGISTRY_FALLBACK_ALIAS_PRIORITY;
-        const nextPriority = entry.priority ?? REGISTRY_FALLBACK_ALIAS_PRIORITY;
+        const storedPriority = existing?.priority ?? REGISTRY_FALLBACK_ALIAS_PRIORITY;
+        const candidatePriority = entry.priority ?? REGISTRY_FALLBACK_ALIAS_PRIORITY;
         if (
             !existing ||
-            nextPriority > existingPriority ||
-            (nextPriority === existingPriority && entry.alias < existing.alias)
+            candidatePriority > storedPriority ||
+            (candidatePriority === storedPriority && entry.alias < existing.alias)
         ) {
             entriesByHash.set(key, entry);
         }
@@ -1103,10 +1104,7 @@ function buildPairwiseComparisons(items) {
 function pipelineCompareRef(version) {
     const parts = String(version ?? "").split("+");
     const suffix = parts[parts.length - 1] ?? "";
-    if (
-        parts.length > 1 &&
-        new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i").test(suffix)
-    ) {
+    if (parts.length > 1 && COMMIT_HASH_PATTERN.test(suffix)) {
         return suffix;
     }
     return String(version ?? "");
