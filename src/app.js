@@ -1166,19 +1166,113 @@ async function resolvePipelineCompareRef(version) {
     return refs[0] ?? versionText;
 }
 
-async function buildPipelineDiffPairs(runs) {
+async function buildPipelineCompareEntries(runs) {
     const uniqueVersions = uniquePipelineEntries(runs);
-    const compareRefs = new Map(
-        await Promise.all(
-            uniqueVersions.map(async (entry) => [entry.key, await resolvePipelineCompareRef(entry.pipelineVersion)])
-        )
+    const resolvedEntries = await Promise.all(
+        uniqueVersions.map(async (entry) => ({
+            ...entry,
+            compareRef: await resolvePipelineCompareRef(entry.pipelineVersion),
+        }))
     );
-    return buildPairwiseComparisons(uniqueVersions).map(([base, head]) => ({
-        pipelineName: base.pipelineName,
-        baseVersion: base.pipelineVersion,
-        headVersion: head.pipelineVersion,
-        compareUrl: `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(compareRefs.get(base.key))}...${encodeURIComponent(compareRefs.get(head.key))}`,
-    }));
+    return [...groupBy(resolvedEntries, (entry) => entry.compareRef).values()]
+        .map(
+            (entriesForRef) =>
+                [...entriesForRef].sort(
+                    (a, b) =>
+                        a.pipelineVersion.split("+").length - b.pipelineVersion.split("+").length ||
+                        FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion)
+                )[0]
+        )
+        .sort((a, b) => FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion));
+}
+
+async function fetchPipelineCompareSummary(baseRef, headRef) {
+    if (!baseRef || !headRef || baseRef === headRef) {
+        return { kind: "same-ref" };
+    }
+    try {
+        const resp = await cachedFetch(
+            `${PIPELINE_API_BASE}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headRef)}`,
+            {
+                headers: { Accept: "application/vnd.github+json" },
+            }
+        );
+        if (!resp.ok) {
+            return { kind: "error", message: `Unable to load pipeline compare details (HTTP ${resp.status}).` };
+        }
+        const data = await resp.json();
+        return {
+            kind: "compare",
+            aheadBy: Number(data?.ahead_by ?? 0),
+            behindBy: Number(data?.behind_by ?? 0),
+            totalCommits: Number(data?.total_commits ?? 0),
+            files: Array.isArray(data?.files) ? data.files : [],
+            commits: Array.isArray(data?.commits) ? data.commits : [],
+        };
+    } catch {
+        return { kind: "error", message: "Unable to load pipeline compare details." };
+    }
+}
+
+function renderPipelineCompareBody(summary) {
+    if (summary?.kind === "same-ref") {
+        return '<p class="diff-empty-state diff-empty-state-inline">No distinct pipeline repository commit comparison is available for this version pair.</p>';
+    }
+    if (summary?.kind === "error") {
+        return `<p class="diff-empty-state diff-empty-state-inline">${e(summary.message)}</p>`;
+    }
+    const summaryBits = [
+        `${summary.totalCommits} commit${summary.totalCommits !== 1 ? "s" : ""}`,
+        `${summary.files.length} file${summary.files.length !== 1 ? "s" : ""}`,
+    ];
+    if (summary.aheadBy) summaryBits.push(`${summary.aheadBy} ahead`);
+    if (summary.behindBy) summaryBits.push(`${summary.behindBy} behind`);
+    const commitItems =
+        summary.commits.length > 0
+            ? `<ol class="diff-change-list">${summary.commits
+                  .map((commit) => {
+                      const message = String(commit?.commit?.message ?? "").split("\n")[0] || "(no commit message)";
+                      return `<li>
+                    <span class="diff-change-path">${e(String(commit?.sha ?? "").slice(0, 7) || "commit")}</span>
+                    <span class="diff-change-values">${e(message)}</span>
+                </li>`;
+                  })
+                  .join("")}</ol>`
+            : '<p class="diff-empty-state diff-empty-state-inline">No commit metadata returned.</p>';
+    const fileItems =
+        summary.files.length > 0
+            ? `<ol class="diff-change-list">${summary.files
+                  .map(
+                      (file) => `<li>
+                <span class="diff-change-path">${e(file.filename ?? "(unknown file)")}</span>
+                <span class="diff-change-values">${e(file.status ?? "changed")}</span>
+            </li>`
+                  )
+                  .join("")}</ol>`
+            : '<p class="diff-empty-state diff-empty-state-inline">No changed files were returned.</p>';
+    return `<div class="diff-pair-card">
+        <p class="diff-empty-state diff-empty-state-inline">${e(summaryBits.join(" · "))}</p>
+        ${commitItems}
+        ${fileItems}
+    </div>`;
+}
+
+async function buildPipelineDiffPairs(runs) {
+    const compareEntries = await buildPipelineCompareEntries(runs);
+    return Promise.all(
+        buildPairwiseComparisons(compareEntries).map(async ([base, head]) => {
+            const compareUrl = `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(base.compareRef)}...${encodeURIComponent(head.compareRef)}`;
+            return {
+                pipelineName: base.pipelineName,
+                baseVersion: base.pipelineVersion,
+                headVersion: head.pipelineVersion,
+                compareUrl,
+                modalHtml: renderPipelineCompareBody(
+                    await fetchPipelineCompareSummary(base.compareRef, head.compareRef)
+                ),
+            };
+        })
+    );
 }
 
 function isPlainObject(value) {
@@ -1238,12 +1332,13 @@ async function buildParamsDiffPairs() {
 
 function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     if (entries.length < 2) return "";
-    const columnHeaders = entries
+    const columnEntries = entries.slice(0, -1);
+    const columnHeaders = columnEntries
         .map((entry) => `<th scope="col" class="diff-matrix-col-header">${renderHeaderCell(entry)}</th>`)
         .join("");
     const bodyRows = entries
         .map((rowEntry, rowIndex) => {
-            const cells = entries
+            const cells = columnEntries
                 .map((columnEntry, columnIndex) => {
                     if (rowIndex <= columnIndex) {
                         return '<td class="diff-matrix-cell diff-matrix-cell-empty" aria-hidden="true"></td>';
@@ -1270,8 +1365,9 @@ function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     </div>`;
 }
 
-function renderDiffModalTrigger(label, bodyHtml) {
-    return `<button type="button" class="diff-cell-trigger" aria-haspopup="dialog" data-modal-html="${e(bodyHtml)}">
+function renderDiffModalTrigger(label, bodyHtml, title = null) {
+    const titleAttr = title ? ` data-modal-title="${e(title)}"` : "";
+    return `<button type="button" class="diff-cell-trigger" aria-haspopup="dialog" data-modal-html="${e(bodyHtml)}"${titleAttr}>
         <span class="diff-cell-trigger-label">${e(label)}</span>
     </button>`;
 }
@@ -1283,16 +1379,12 @@ function renderDiffPage(data) {
                   data.pipelineEntries,
                   (entry) => renderPipelineInfo(entry.pipelineName, entry.pipelineVersion),
                   (baseEntry, headEntry) => {
-                      const compareUrl =
-                          data.pipelinePairMap.get(`${baseEntry.key}\x00${headEntry.key}`) ??
-                          `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(pipelineCompareRef(baseEntry.pipelineVersion))}...${encodeURIComponent(pipelineCompareRef(headEntry.pipelineVersion))}`;
-                      return renderDiffModalTrigger(
-                          "View compare",
-                          `<pre class="log-modal-text">${e(compareUrl)}</pre>`
-                      );
+                      const pair = data.pipelinePairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      if (!pair) return "";
+                      return renderDiffModalTrigger("View compare", pair.modalHtml);
                   }
               )
-            : '<p class="diff-empty-state">Only one pipeline version is currently present, so there are no pipeline comparisons to show.</p>';
+            : '<p class="diff-empty-state">Only one distinct pipeline repository revision is currently present, so there are no pipeline comparisons to show.</p>';
     const paramsHtml =
         data.paramsEntries.length > 1
             ? renderDiffMatrix(
@@ -1316,12 +1408,13 @@ function renderDiffPage(data) {
                                     )
                                     .join("")}</ol>`
                               : '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
+                      const pairTitle = `${baseEntry.alias} → ${headEntry.alias}`;
                       const bodyHtml = `<div class="diff-pair-card">${changeItems}</div>`;
                       const buttonLabel =
                           pairChanges.length > 0
                               ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
                               : "View diff";
-                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml, pairTitle);
                   }
               )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
@@ -1920,7 +2013,7 @@ async function init() {
         try {
             const entries = await fetchQueueState();
             const runs = parseQueueEntries(entries);
-            const pipelineEntries = uniquePipelineEntries(runs);
+            const pipelineEntries = await buildPipelineCompareEntries(runs);
             const pipelinePairs = await buildPipelineDiffPairs(runs);
             const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY).map((entry) => ({
                 key: entry.alias,
