@@ -1196,34 +1196,29 @@ details[open] > .params-summary::before {
     outline-offset: 1px;
 }
 
-.filter-input-field {
-    position: relative;
+.filter-input-row {
     display: inline-flex;
     align-items: center;
-}
-
-.filter-input-field:has(.filter-input-clear) .filter-input {
-    padding-right: 22px;
+    gap: 4px;
 }
 
 .filter-input-clear {
-    position: absolute;
-    right: 5px;
-    top: 50%;
-    transform: translateY(-50%);
     color: var(--color-failed);
     font-size: 1em;
     line-height: 1;
     text-decoration: none;
-    padding: 1px 2px;
-    border-radius: 2px;
+    padding: 2px 5px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
     cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.15s;
+    white-space: nowrap;
+    transition:
+        color 0.15s,
+        border-color 0.15s;
 }
 
 .filter-input-clear:hover {
-    opacity: 1;
+    border-color: var(--color-failed);
 }
 
 .filter-apply {
