@@ -1236,7 +1236,9 @@ function renderNamedPairTable(rowLabel, leftColumnLabel, rightColumnLabel, leftC
 }
 
 function renderTextPairTable(rowLabel, leftLabel, rightLabel) {
-    return renderNamedPairTable(rowLabel, leftLabel, rightLabel, e(leftLabel), e(rightLabel));
+    const leftCellText = e(leftLabel);
+    const rightCellText = e(rightLabel);
+    return renderNamedPairTable(rowLabel, leftLabel, rightLabel, leftCellText, rightCellText);
 }
 
 function renderKeyValueTable(rows) {
@@ -1454,8 +1456,8 @@ function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     const bodyRows = entries
         .map((rowEntry, rowIndex) => {
             const cells = columnEntries
-                .map((columnEntry, columnOffset) => {
-                    if (rowIndex <= columnOffset) {
+                .map((columnEntry, columnIndex) => {
+                    if (rowIndex <= columnIndex) {
                         return '<td class="diff-matrix-cell diff-matrix-cell-empty" aria-hidden="true"></td>';
                     }
                     return `<td class="diff-matrix-cell">${renderBodyCell(columnEntry, rowEntry)}</td>`;
