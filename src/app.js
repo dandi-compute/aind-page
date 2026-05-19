@@ -1174,7 +1174,7 @@ async function buildPipelineCompareEntries(runs) {
             compareRef: await resolvePipelineCompareRef(entry.pipelineVersion),
         }))
     );
-    return [...groupBy(resolvedEntries, (entry) => entry.compareRef).values()]
+    return Array.from(groupBy(resolvedEntries, (entry) => entry.compareRef).values())
         .map(
             (entriesForRef) =>
                 [...entriesForRef].sort(
@@ -1225,8 +1225,11 @@ function renderPipelineCompareBody(summary) {
         `${summary.totalCommits} commit${summary.totalCommits !== 1 ? "s" : ""}`,
         `${summary.files.length} file${summary.files.length !== 1 ? "s" : ""}`,
     ];
-    if (summary.aheadBy) summaryBits.push(`${summary.aheadBy} ahead`);
-    if (summary.behindBy) summaryBits.push(`${summary.behindBy} behind`);
+    if (summary.aheadBy)
+        summaryBits.push(`${summary.aheadBy} commit${summary.aheadBy !== 1 ? "s" : ""} ahead in comparison`);
+    if (summary.behindBy) {
+        summaryBits.push(`${summary.behindBy} commit${summary.behindBy !== 1 ? "s" : ""} behind in comparison`);
+    }
     const commitItems =
         summary.commits.length > 0
             ? `<ol class="diff-change-list">${summary.commits
