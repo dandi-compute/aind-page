@@ -670,21 +670,44 @@ describe("renderRegistryLink", () => {
 });
 
 describe("diff page helpers", () => {
-    it("builds GitHub compare URLs from unique pipeline versions", () => {
-        const pairs = buildPipelineDiffPairs([
-            { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
-            { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
-            { pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
-        ]);
+    it("builds GitHub compare URLs from expanded pipeline commit refs", async () => {
+        const originalFetch = global.fetch;
+        try {
+            global.fetch = vi
+                .fn()
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify({ sha: "abc1234567890abc1234567890abc1234567890a" }), {
+                        status: 200,
+                        headers: { "Content-Type": "application/json" },
+                    })
+                )
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify({ sha: "b268fd207886905b40a956e7f6a839884ce9835f" }), {
+                        status: 200,
+                        headers: { "Content-Type": "application/json" },
+                    })
+                );
 
-        expect(pairs).toEqual([
-            {
-                pipelineName: "aind+ephys",
-                baseVersion: "v1.0.0+abc1234",
-                headVersion: "v1.1.0+def5678",
-                compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
-            },
-        ]);
+            const pairs = await buildPipelineDiffPairs([
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2+5d20fd2" },
+            ]);
+
+            expect(pairs).toEqual([
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.1+b268fd2+5d20fd2",
+                    compareUrl:
+                        "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234567890abc1234567890abc1234567890a...b268fd207886905b40a956e7f6a839884ce9835f",
+                },
+            ]);
+
+            expect(global.fetch).toHaveBeenCalledTimes(2);
+        } finally {
+            global.fetch = originalFetch;
+        }
     });
 
     it("lists unique pipeline entries in sorted order", () => {
@@ -780,14 +803,12 @@ describe("diff page helpers", () => {
         expect(html).toContain('class="diff-matrix"');
         expect(html).toContain('class="diff-section-banner"');
         expect(html).toContain('class="diff-cell-trigger"');
-        expect(html).toContain(
-            'data-modal-external="https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"'
-        );
         expect(html).toContain("Registered params JSON diffs");
         expect(html).not.toContain("Quick links for pipeline GitHub comparisons");
         expect(html).toContain("View 1 change");
         expect(html).not.toContain('<details class="run-section" open>');
         expect(html).toContain('class="diff-matrix-cell diff-matrix-cell-empty"');
+        expect(html).not.toContain('class="count-badge"');
     });
 });
 
@@ -873,9 +894,11 @@ describe("diff modal interactions", () => {
         document.querySelector(".diff-cell-trigger").click();
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
-        expect(document.getElementById("log-modal-title").textContent).toContain("v1.0.0+abc1234");
-        expect(document.getElementById("log-modal-body").innerHTML).toContain("Open compare");
-        expect(document.getElementById("log-modal-external").hidden).toBe(false);
+        expect(document.getElementById("log-modal-title").hidden).toBe(true);
+        expect(document.getElementById("log-modal-body").textContent).toContain(
+            "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"
+        );
+        expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
 
     it("hides the external action when opening inline-only modal content", () => {
