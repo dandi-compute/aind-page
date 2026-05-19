@@ -425,16 +425,15 @@ async function fetchVisualizationData(runPath) {
 
 /* ─── Path helpers ──────────────────────────────────────────── */
 // Build a run directory path from a JSONL queue entry.
-// With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}/params-{params}_config-{config}_attempt-{attempt}
-// Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}/params-{params}_config-{config}_attempt-{attempt}
+// With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}_attempt-{attempt}
+// Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}_attempt-{attempt}
 function buildRunPath(entry) {
     const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${entry.subject}`];
     if (entry.session !== null && entry.session !== undefined) {
         parts.push(`ses-${entry.session}`);
     }
     parts.push(`pipeline-${entry.pipeline}`);
-    parts.push(`version-${entry.version}`);
-    parts.push(`params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`);
+    parts.push(`version-${entry.version}_params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`);
     return parts.join("/");
 }
 
@@ -459,30 +458,62 @@ function parseQueueEntries(entries) {
 }
 
 /* ─── Path parsing ──────────────────────────────────────────── */
-// Run paths are: derivatives/{dandiset}/{subject}/{session}/{pipeline}/{version}/{runId}
+// Run paths are one of:
+// - derivatives/{dandiset}/{subject}/{session?}/{pipeline}/version-{version}/{runId}
+// - derivatives/{dandiset}/{subject}/{session?}/{pipeline}/version-{version}_{runId}
 function parseRunPath(runPath) {
     const parts = runPath.split("/");
-    //  parts[0] = 'derivatives'
-    //  parts[1] = 'dandiset-XXXXXX'
-    //  parts[2] = 'sub-NAME'
-    //  parts[3] = 'ses-SESSION'
-    //  parts[4] = 'pipeline-NAME'
-    //  parts[5] = 'version-VER'
-    //  parts[6] = 'params-HASH_config-HASH_attempt-N'
 
-    const dandisetId = parts[1].replace(/^dandiset-/, "");
-    const subject = parts[2].replace(/^sub-/, "");
+    const dandisetPart = parts.find((part) => part.startsWith("dandiset-")) ?? "";
+    const subjectPart = parts.find((part) => part.startsWith("sub-")) ?? "";
+    const pipelineIndex = parts.findIndex((part) => part.startsWith("pipeline-"));
 
-    const sesMatch = parts[3].match(/^ses-(.+)$/);
-    const session = sesMatch ? sesMatch[1] : parts[3];
+    const dandisetId = dandisetPart.replace(/^dandiset-/, "");
+    const subject = subjectPart.replace(/^sub-/, "");
 
-    const pipelineName = parts[4].replace(/^pipeline-/, "");
-    const pipelineVersion = parts[5].replace(/^version-/, "");
+    const sessionPart = pipelineIndex > 0 ? parts[pipelineIndex - 1] : "";
+    const sesMatch = sessionPart?.match(/^ses-(.+)$/);
+    const session = sesMatch ? sesMatch[1] : null;
 
-    const runMatch = parts[6].match(/^params-(.+?)_config-(.+?)_attempt-(\d+)$/);
-    const paramsProfile = runMatch ? runMatch[1] : parts[6];
-    const configHash = runMatch ? runMatch[2] : "";
-    const attempt = runMatch ? parseInt(runMatch[3], 10) : 1;
+    const pipelineName = pipelineIndex >= 0 ? parts[pipelineIndex].replace(/^pipeline-/, "") : "";
+    const versionPart = pipelineIndex >= 0 ? (parts[pipelineIndex + 1] ?? "") : "";
+    const runPart = pipelineIndex >= 0 ? (parts[pipelineIndex + 2] ?? "") : "";
+
+    let pipelineVersion = versionPart.startsWith("version-") ? versionPart.slice("version-".length) : versionPart;
+    let capsulePart = runPart;
+    if (versionPart.startsWith("version-")) {
+        const versionBody = versionPart.slice("version-".length);
+        const flattenedMarker = "_params-";
+        const flattenedIndex = versionBody.indexOf(flattenedMarker);
+        if (flattenedIndex !== -1) {
+            pipelineVersion = versionBody.slice(0, flattenedIndex);
+            capsulePart = `params-${versionBody.slice(flattenedIndex + flattenedMarker.length)}`;
+        }
+    }
+
+    let paramsProfile = capsulePart;
+    let configHash = "";
+    let attempt = 1;
+    if (capsulePart.startsWith("params-")) {
+        const capsuleBody = capsulePart.slice("params-".length);
+        const attemptMarker = "_attempt-";
+        const attemptIndex = capsuleBody.lastIndexOf(attemptMarker);
+        if (attemptIndex !== -1) {
+            const attemptText = capsuleBody.slice(attemptIndex + attemptMarker.length);
+            if (/^\d+$/.test(attemptText)) {
+                attempt = parseInt(attemptText, 10);
+                const beforeAttempt = capsuleBody.slice(0, attemptIndex);
+                const configMarker = "_config-";
+                const configIndex = beforeAttempt.indexOf(configMarker);
+                if (configIndex !== -1) {
+                    paramsProfile = beforeAttempt.slice(0, configIndex);
+                    configHash = beforeAttempt.slice(configIndex + configMarker.length);
+                } else {
+                    paramsProfile = beforeAttempt;
+                }
+            }
+        }
+    }
 
     return {
         path: runPath,
