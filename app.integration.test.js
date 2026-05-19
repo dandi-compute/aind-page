@@ -79,4 +79,74 @@ describe("app integration behavior", () => {
         expect(banner.innerHTML).toContain('name="layout" value="flat"');
         expect(banner.innerHTML).toContain('href="?layout=flat"');
     });
+
+    it("scopes subject and session options based on selected dandiset and subject", () => {
+        renderFilterBanner(
+            {
+                dandisetId: "000363",
+                subject: "sub-a",
+                session: null,
+                pipelineVersion: null,
+                failureStep: null,
+            },
+            [
+                { dandisetId: "000363", subject: "sub-a", session: "ses-1", pipelineVersion: "v1", status: "success" },
+                { dandisetId: "000363", subject: "sub-a", session: "ses-2", pipelineVersion: "v1", status: "success" },
+                { dandisetId: "000363", subject: "sub-b", session: "ses-3", pipelineVersion: "v1", status: "success" },
+                {
+                    dandisetId: "999999",
+                    subject: "other-sub",
+                    session: "other-ses",
+                    pipelineVersion: "v1",
+                    status: "success",
+                },
+            ]
+        );
+
+        const subjectOptions = [...document.querySelectorAll("#filter-options-subject option")].map(
+            (option) => option.value
+        );
+        const sessionOptions = [...document.querySelectorAll("#filter-options-session option")].map(
+            (option) => option.value
+        );
+
+        expect(subjectOptions).toEqual(["sub-a", "sub-b"]);
+        expect(sessionOptions).toEqual(["ses-1", "ses-2"]);
+    });
+
+    it("updates subject and session options immediately when filter inputs change", () => {
+        renderFilterBanner(
+            {
+                dandisetId: null,
+                subject: null,
+                session: null,
+                pipelineVersion: null,
+                failureStep: null,
+            },
+            [
+                { dandisetId: "000363", subject: "sub-a", session: "ses-1", pipelineVersion: "v1", status: "success" },
+                { dandisetId: "000363", subject: "sub-b", session: "ses-2", pipelineVersion: "v1", status: "success" },
+                { dandisetId: "000364", subject: "sub-x", session: "ses-9", pipelineVersion: "v1", status: "success" },
+            ]
+        );
+
+        const dandisetInput = document.querySelector('input[name="dandiset"]');
+        const subjectInput = document.querySelector('input[name="subject"]');
+
+        dandisetInput.value = "000363";
+        dandisetInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+        let subjectOptions = [...document.querySelectorAll("#filter-options-subject option")].map(
+            (option) => option.value
+        );
+        expect(subjectOptions).toEqual(["sub-a", "sub-b"]);
+
+        subjectInput.value = "sub-a";
+        subjectInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+        const sessionOptions = [...document.querySelectorAll("#filter-options-session option")].map(
+            (option) => option.value
+        );
+        expect(sessionOptions).toEqual(["ses-1"]);
+    });
 });

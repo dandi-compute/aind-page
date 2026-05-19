@@ -210,9 +210,15 @@ function renderFilterBanner(filter, availableRuns = []) {
         );
     }
 
+    const runsMatchingDandiset = filter.dandisetId
+        ? availableRuns.filter((run) => run.dandisetId === filter.dandisetId)
+        : availableRuns;
+    const runsMatchingSubject = filter.subject
+        ? runsMatchingDandiset.filter((run) => run.subject === filter.subject)
+        : runsMatchingDandiset;
     const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
-    const subjects = uniqueSortedValues(availableRuns.map((r) => r.subject));
-    const sessions = uniqueSortedValues(availableRuns.map((r) => r.session));
+    const subjects = uniqueSortedValues(runsMatchingDandiset.map((r) => r.subject));
+    const sessions = uniqueSortedValues(runsMatchingSubject.map((r) => r.session));
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
@@ -260,6 +266,45 @@ ${testsPageHtml}<div class="filter-banner-main">
     </form>
 </div>
 ${filteredViewHtml}`;
+
+    const form = banner.querySelector(".filter-form");
+    const dandisetInput = form?.querySelector('input[name="dandiset"]');
+    const subjectInput = form?.querySelector('input[name="subject"]');
+    const sessionInput = form?.querySelector('input[name="session"]');
+    const subjectDatalist = banner.querySelector("#filter-options-subject");
+    const sessionDatalist = banner.querySelector("#filter-options-session");
+    const renderDatalistOptions = (datalist, values) => {
+        if (!datalist) return;
+        datalist.innerHTML = values.map((item) => `<option value="${e(item)}"></option>`).join("");
+    };
+    const refreshDependentFilterOptions = () => {
+        const selectedDandiset = dandisetInput?.value ?? "";
+        const nextRunsMatchingDandiset = selectedDandiset
+            ? availableRuns.filter((run) => run.dandisetId === selectedDandiset)
+            : availableRuns;
+        const nextSubjects = uniqueSortedValues(nextRunsMatchingDandiset.map((run) => run.subject));
+        renderDatalistOptions(subjectDatalist, nextSubjects);
+        if (subjectInput && subjectInput.value && !nextSubjects.includes(subjectInput.value)) {
+            subjectInput.value = "";
+        }
+
+        const selectedSubject = subjectInput?.value ?? "";
+        const nextRunsMatchingSubject = selectedSubject
+            ? nextRunsMatchingDandiset.filter((run) => run.subject === selectedSubject)
+            : nextRunsMatchingDandiset;
+        const nextSessions = uniqueSortedValues(nextRunsMatchingSubject.map((run) => run.session));
+        renderDatalistOptions(sessionDatalist, nextSessions);
+        if (sessionInput && sessionInput.value && !nextSessions.includes(sessionInput.value)) {
+            sessionInput.value = "";
+        }
+    };
+    if (dandisetInput) {
+        dandisetInput.addEventListener("input", refreshDependentFilterOptions);
+    }
+    if (subjectInput) {
+        subjectInput.addEventListener("input", refreshDependentFilterOptions);
+    }
+
     banner.style.display = "";
 }
 
