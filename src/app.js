@@ -955,7 +955,7 @@ function resolveRegistryAlias(hash, registry) {
 function renderRegistryLink(prefix, hash, registry, subdir) {
     if (!hash) return "";
     const match = resolveRegistryAlias(hash, registry);
-    if (!match) return `${prefix}:&nbsp;${e(hash)}`;
+    if (!match) return `${prefix}:&nbsp;${e(String(hash))}`;
     const sourceUrl = e(`${AIND_EPHYS_PIPELINE_CODE_URL}/${subdir}/${match.path}`);
     return `${prefix}:&nbsp;<a class="src-link" href="${sourceUrl}" target="_blank" rel="noopener">${e(match.alias)}</a>`;
 }
