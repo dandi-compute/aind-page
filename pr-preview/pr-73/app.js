@@ -1074,23 +1074,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
-    const byPipeline = groupBy(runs, (r) => `${r.pipelineName}\x00${r.pipelineVersion}`);
-    const pipelineKeys = [...byPipeline.keys()].sort();
-    const pipelineHtml = pipelineKeys
-        .map((key) => {
-            const sep = key.indexOf("\x00");
-            const pipelineName = key.slice(0, sep);
-            const pipelineVersion = key.slice(sep + 1);
-            return renderPipelineVersionGroup(
-                dandisetId,
-                subject,
-                session,
-                pipelineName,
-                pipelineVersion,
-                byPipeline.get(key)
-            );
-        })
-        .join("");
+    const runsHtml = runs.map(renderRunEntry).join("");
 
     return `
 <details class="session-group"${autoExpand ? " open" : ""}>
@@ -1098,7 +1082,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
         <span class="group-summary-inner">
             ${sessionLinkHtml}
             <span class="group-meta">
-                <span class="group-count">${pipelineKeys.length}&nbsp;pipeline${pipelineKeys.length !== 1 ? "s" : ""}</span>
+                <span class="group-count">${runs.length}&nbsp;job${runs.length !== 1 ? "s" : ""}</span>
             </span>
             <span class="group-badges">${renderGroupBadges(runs)}</span>
             <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId, subject, session })}"
@@ -1106,7 +1090,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
         </span>
     </summary>
     <div class="session-body">
-        ${pipelineHtml}
+        ${runsHtml}
     </div>
 </details>`;
 }
@@ -1223,8 +1207,6 @@ function renderFlatRunEntry(run) {
             <span class="run-sep">·</span>
             <a class="flat-ctx-link" href="${e(subjectUrl)}" target="_blank" rel="noopener">Sub:&nbsp;<strong>${e(run.subject)}</strong></a>
             ${sessionContextHtml}
-            <span class="run-sep">·</span>
-            <span class="flat-ctx-pipeline">${renderPipelineInfo(run.pipelineName, run.pipelineVersion)}</span>
             <span class="run-sep">·</span>
             <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
         </span>
@@ -1614,6 +1596,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseRunPath,
         parseTrace,
         parseViewMode,
+        renderDandisets,
         renderParamsGroup,
         renderFilterBanner,
         renderFlatList,
