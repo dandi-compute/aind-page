@@ -126,6 +126,7 @@ body {
 }
 
 .site-diffs-link {
+    /* Pull the second nav pill back slightly so the header links read as one cluster. */
     margin-left: -4px;
 }
 
