@@ -1139,7 +1139,11 @@ async function resolvePipelineCompareRef(version) {
             return ref;
         }
         if (_pipelineCompareRefCache.has(ref)) {
-            return _pipelineCompareRefCache.get(ref);
+            const cachedResolved = await _pipelineCompareRefCache.get(ref);
+            if (cachedResolved) {
+                return cachedResolved;
+            }
+            continue;
         }
         const request = (async () => {
             try {
