@@ -1196,6 +1196,39 @@ details[open] > .params-summary::before {
     outline-offset: 1px;
 }
 
+.filter-input-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.filter-input-clear {
+    color: var(--color-text-secondary);
+    font-size: 1em;
+    line-height: 1;
+    text-decoration: none;
+    padding: 2px 5px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+        color 0.15s,
+        border-color 0.15s;
+}
+
+.filter-input-clear:hover {
+    border-color: var(--color-border);
+}
+
+.filter-input-clear-active {
+    color: var(--color-failed);
+}
+
+.filter-input-clear-active:hover {
+    border-color: var(--color-failed);
+}
+
 .filter-apply {
     color: var(--color-accent);
     background: transparent;

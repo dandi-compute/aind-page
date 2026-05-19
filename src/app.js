@@ -153,13 +153,19 @@ const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
 const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
 
-function renderFilterInput(name, label, value, suggestions) {
+function renderFilterInput(name, label, value, suggestions, clearHref = null) {
     const listId = `filter-options-${name}`;
     const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
+    const clearBtn = clearHref
+        ? `<a class="filter-input-clear${value ? " filter-input-clear-active" : ""}" href="${e(clearHref)}" title="Clear ${label} filter" aria-label="Clear ${label} filter">×</a>`
+        : "";
     return `
 <label class="filter-input-wrap">
     <span class="filter-input-label">${label}</span>
-    <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off">
+    <span class="filter-input-row">
+        <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off">
+        ${clearBtn}
+    </span>
     <datalist id="${listId}">${options}</datalist>
 </label>`;
 }
@@ -256,11 +262,11 @@ ${testsPageHtml}<div class="filter-banner-main">
     <form class="filter-form" method="get" action="">
         ${viewHiddenInput}
         ${layoutHiddenInput}
-        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets)}
-        ${renderFilterInput("subject", "Subject", filter.subject, subjects)}
-        ${renderFilterInput("session", "Session", filter.session, sessions)}
-        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions)}
-        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps)}
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, failureStep: filter.failureStep }))}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, failureStep: filter.failureStep }))}
+        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, failureStep: filter.failureStep }))}
+        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, failureStep: filter.failureStep }))}
+        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion }))}
         <button class="filter-apply" type="submit">Apply</button>
         <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
     </form>
