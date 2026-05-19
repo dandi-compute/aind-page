@@ -1214,21 +1214,21 @@ async function fetchPipelineCompareSummary(baseRef, headRef) {
     }
 }
 
-function renderSourceTargetTable(rowLabel, sourceHtml, targetHtml) {
+function renderNamedPairTable(rowLabel, leftLabel, rightLabel, leftHtml, rightHtml) {
     return `<div class="diff-detail-table-wrap">
         <table class="diff-detail-table diff-detail-table-pair">
             <thead>
                 <tr>
                     <th class="diff-detail-corner" aria-hidden="true"></th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Target</th>
+                    <th scope="col">${e(leftLabel)}</th>
+                    <th scope="col">${e(rightLabel)}</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
                     <th scope="row" class="diff-detail-key">${e(rowLabel)}</th>
-                    <td>${sourceHtml}</td>
-                    <td>${targetHtml}</td>
+                    <td>${leftHtml}</td>
+                    <td>${rightHtml}</td>
                 </tr>
             </tbody>
         </table>
@@ -1277,7 +1277,7 @@ function renderTwoColumnTable(headers, rows) {
     </div>`;
 }
 
-function renderSourceTargetDiffTable(changes) {
+function renderNamedDiffTable(parameterLabel, leftLabel, rightLabel, changes) {
     if (changes.length === 0) {
         return '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
     }
@@ -1285,9 +1285,9 @@ function renderSourceTargetDiffTable(changes) {
         <table class="diff-detail-table">
             <thead>
                 <tr>
-                    <th scope="col">Path</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Target</th>
+                    <th scope="col">${e(parameterLabel)}</th>
+                    <th scope="col">${e(leftLabel)}</th>
+                    <th scope="col">${e(rightLabel)}</th>
                 </tr>
             </thead>
             <tbody>${changes
@@ -1356,12 +1356,10 @@ function renderPipelineCompareBody(baseVersion, headVersion, summary) {
                   ])
               )
             : '<p class="diff-empty-state diff-empty-state-inline">No changed files were returned.</p>';
+    const baseLabel = baseVersion.replace(/\+/g, "-");
+    const headLabel = headVersion.replace(/\+/g, "-");
     return `<div class="diff-pair-card">
-        ${renderSourceTargetTable(
-            "Pipeline version",
-            e(baseVersion.replace(/\+/g, "-")),
-            e(headVersion.replace(/\+/g, "-"))
-        )}
+        ${renderNamedPairTable("Pipeline version", baseLabel, headLabel, e(baseLabel), e(headLabel))}
         ${summaryTable}
         ${commitItems}
         ${fileItems}
@@ -1445,7 +1443,7 @@ async function buildParamsDiffPairs() {
 
 function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     if (entries.length < 2) return "";
-    const columnEntries = entries.slice(1);
+    const columnEntries = entries.slice(0, -1);
     const columnHeaders = columnEntries
         .map((entry) => `<th scope="col" class="diff-matrix-col-header">${renderHeaderCell(entry)}</th>`)
         .join("");
@@ -1453,11 +1451,10 @@ function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
         .map((rowEntry, rowIndex) => {
             const cells = columnEntries
                 .map((columnEntry, columnOffset) => {
-                    const columnIndex = columnOffset + 1;
-                    if (rowIndex >= columnIndex) {
+                    if (rowIndex <= columnOffset) {
                         return '<td class="diff-matrix-cell diff-matrix-cell-empty" aria-hidden="true"></td>';
                     }
-                    return `<td class="diff-matrix-cell">${renderBodyCell(rowEntry, columnEntry)}</td>`;
+                    return `<td class="diff-matrix-cell">${renderBodyCell(columnEntry, rowEntry)}</td>`;
                 })
                 .join("");
             return `<tr>
@@ -1508,20 +1505,21 @@ function renderDiffPage(data) {
                   (baseEntry, headEntry) => {
                       const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
                       const pairChanges = pair?.changes ?? [];
-                      const pairTitle = `${baseEntry.alias} → ${headEntry.alias}`;
                       const bodyHtml = `<div class="diff-pair-card">
-                           ${renderSourceTargetTable(
+                           ${renderNamedPairTable(
                                "Registered params",
+                               baseEntry.alias,
+                               headEntry.alias,
                                `<a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">${e(baseEntry.alias)}</a>`,
                                `<a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">${e(headEntry.alias)}</a>`
                            )}
-                           ${renderSourceTargetDiffTable(pairChanges)}
+                           ${renderNamedDiffTable("Parameter", baseEntry.alias, headEntry.alias, pairChanges)}
                        </div>`;
                       const buttonLabel =
                           pairChanges.length > 0
                               ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
                               : "View diff";
-                      return renderDiffModalTrigger(buttonLabel, bodyHtml, pairTitle);
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
                   }
               )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
