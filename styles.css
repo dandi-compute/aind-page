@@ -1332,3 +1332,105 @@ details[open] > .params-summary::before {
     background: var(--color-accent-subtle);
     text-decoration: none;
 }
+
+/* ─── Layout toggle bar (Tree / Flat) ───────────────────────── */
+.layout-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 12px;
+}
+
+.layout-bar-label {
+    font-size: 0.8em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    margin-right: 2px;
+}
+
+.layout-btn {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.82em;
+    font-weight: 600;
+    padding: 3px 12px;
+    transition:
+        color 0.15s,
+        border-color 0.15s,
+        background 0.15s;
+    white-space: nowrap;
+}
+.layout-btn:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+}
+.layout-btn-active {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+}
+
+/* ─── Flat list view ────────────────────────────────────────── */
+.flat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.flat-run-entry {
+    margin: 0;
+}
+
+.flat-run-header {
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.flat-run-context {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.88em;
+}
+
+.flat-ctx-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.flat-ctx-link:hover {
+    text-decoration: underline;
+}
+.flat-ctx-link strong {
+    font-weight: 700;
+}
+
+.flat-ctx-text {
+    color: var(--color-text);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.flat-ctx-text strong {
+    font-weight: 700;
+}
+
+.flat-ctx-pipeline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.flat-ctx-pipeline .pipeline-name,
+.flat-ctx-pipeline .pipeline-version {
+    font-size: 1em;
+}
