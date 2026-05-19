@@ -7,6 +7,7 @@ const {
     parseQueueEntries,
     parseRunPath,
     parseTrace,
+    renderDandisets,
     renderParamsGroup,
     renderRegistryLink,
     renderFlatList,
@@ -531,10 +532,9 @@ describe("renderFlatList", () => {
         expect(html).not.toContain("Ses:");
     });
 
-    it("includes pipeline info in each flat run entry", () => {
+    it("omits pipeline/version context from flat run header", () => {
         const html = renderFlatList([baseRun]);
-        expect(html).toContain("ephys");
-        expect(html).toContain("v1");
+        expect(html).not.toContain("flat-ctx-pipeline");
     });
 
     it("includes params profile in each flat run entry", () => {
@@ -575,6 +575,49 @@ describe("renderFlatList", () => {
         const run = { ...baseRun, status: "failed" };
         const html = renderFlatList([run]);
         expect(html).toContain("status-failed");
+    });
+});
+
+describe("renderDandisets", () => {
+    it("lists jobs directly under a session without version/config nested groups", () => {
+        const run1 = {
+            status: "success",
+            attempt: 1,
+            runDate: null,
+            tasks: [],
+            generatedBy: [],
+            vizData: null,
+            hasLogs: false,
+            hasOutput: true,
+            hasCode: true,
+            path: "derivatives/dandiset-001697/sub-A/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+            dandisetId: "001697",
+            subject: "A",
+            session: "S1",
+            pipelineName: "ephys",
+            pipelineVersion: "v1",
+            paramsProfile: "fast",
+            configHash: "abc",
+            assetId: null,
+            inSourcedata: false,
+            failureStep: null,
+        };
+        const run2 = {
+            ...run1,
+            status: "failed",
+            attempt: 2,
+            path: "derivatives/dandiset-001697/sub-A/ses-S1/pipeline-spike/version-v2/params-slow_config-def_attempt-2",
+            pipelineName: "spike",
+            pipelineVersion: "v2",
+            paramsProfile: "slow",
+            configHash: "def",
+        };
+
+        const html = renderDandisets([run1, run2]);
+        expect(html).toContain("2&nbsp;jobs");
+        expect(html).not.toContain("pipeline-version-group");
+        expect(html).not.toContain("params-group");
+        expect((html.match(/class="run-entry status-/g) || []).length).toBe(2);
     });
 });
 
