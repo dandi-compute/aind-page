@@ -125,6 +125,10 @@ body {
     border-color: var(--color-accent);
 }
 
+.site-diffs-link {
+    margin-left: -4px;
+}
+
 .site-github-link {
     color: rgba(255, 255, 255, 0.4);
     text-decoration: none;
@@ -1408,6 +1412,136 @@ details[open] > .params-summary::before {
     color: var(--color-accent);
     border-color: var(--color-accent);
     background: var(--color-accent-subtle);
+}
+
+/* ─── Diff page ──────────────────────────────────────────────── */
+.diff-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.diff-page-header {
+    background: var(--color-accent-subtle);
+    border: 1px solid rgba(var(--color-accent-rgb), 0.3);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+
+.diff-page-header p {
+    margin: 0;
+    color: var(--color-text-secondary);
+}
+
+.diff-page-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.diff-summary-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 0.82em;
+    font-weight: 600;
+}
+
+.diff-pair-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 0 8px;
+}
+
+.diff-pair-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+}
+
+.diff-pair-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.diff-pair-title {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.diff-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.diff-inline-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-accent);
+    text-decoration: none;
+    font-size: 0.85em;
+}
+
+.diff-inline-link:hover {
+    text-decoration: underline;
+}
+
+.diff-change-list {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--color-text-secondary);
+    font-size: 0.9em;
+}
+
+.diff-change-list li + li {
+    margin-top: 6px;
+}
+
+.diff-change-path {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    color: var(--color-text);
+}
+
+.diff-change-values {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.diff-change-before,
+.diff-change-after {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.92em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+}
+
+.diff-change-before {
+    color: var(--color-failed);
+}
+
+.diff-change-after {
+    color: var(--color-success);
+}
+
+.diff-empty-state {
+    padding: 0 14px 14px;
+    color: var(--color-text-secondary);
 }
 
 /* ─── Flat list view ────────────────────────────────────────── */
