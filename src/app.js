@@ -1102,12 +1102,13 @@ function buildPairwiseComparisons(items) {
 }
 
 function pipelineCompareRef(version) {
-    const parts = String(version ?? "").split("+");
+    const versionText = String(version ?? "");
+    const parts = versionText.split("+");
     const suffix = parts[parts.length - 1] ?? "";
     if (parts.length > 1 && COMMIT_HASH_PATTERN.test(suffix)) {
         return suffix;
     }
-    return String(version ?? "");
+    return versionText;
 }
 
 function buildPipelineDiffPairs(runs) {
@@ -1773,7 +1774,7 @@ async function init() {
         const diffsLink = document.querySelector(".site-diffs-link");
         if (diffsLink) diffsLink.hidden = true;
         setPageCopy(
-            "AIND Pipeline Diff Index",
+            "AIND Pipeline Diffs Index",
             'Assembled compare links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> plus diffs across the registered params JSON files.'
         );
     }
