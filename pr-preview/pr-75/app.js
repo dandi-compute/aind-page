@@ -138,7 +138,7 @@ function applyFilter(runs, filter) {
    When on the main page (_viewMode === null), no view param is emitted. */
 function narrowUrl(params) {
     const sp = new URLSearchParams();
-    sp.set("layout", _layoutMode);
+    sp.set("layout", parseLayoutMode());
     if (_viewMode === "tests") sp.set("view", "tests");
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
@@ -166,6 +166,7 @@ function renderFilterInput(name, label, value, suggestions) {
 
 function renderFilterBanner(filter, availableRuns = []) {
     const banner = document.getElementById("filter-banner");
+    const layoutMode = parseLayoutMode();
     const isFiltered = !!(
         filter.dandisetId ||
         filter.subject ||
@@ -237,9 +238,9 @@ function renderFilterBanner(filter, availableRuns = []) {
             : "";
 
     const viewHiddenInput = _viewMode === "tests" ? `<input type="hidden" name="view" value="tests">` : "";
-    const layoutHiddenInput = `<input type="hidden" name="layout" value="${_layoutMode}">`;
+    const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const clearAllParams = new URLSearchParams();
-    clearAllParams.set("layout", _layoutMode);
+    clearAllParams.set("layout", layoutMode);
     if (_viewMode === "tests") clearAllParams.set("view", "tests");
     const clearAllHref = `?${clearAllParams.toString()}`;
 

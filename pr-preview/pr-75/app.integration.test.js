@@ -63,6 +63,7 @@ describe("app integration behavior", () => {
     });
 
     it("includes layout mode in filter form and clear links for shareable URLs", () => {
+        window.history.replaceState(null, "", "/?layout=flat");
         renderFilterBanner(
             {
                 dandisetId: null,
@@ -75,7 +76,7 @@ describe("app integration behavior", () => {
         );
 
         const banner = document.getElementById("filter-banner");
-        expect(banner.innerHTML).toContain('name="layout"');
-        expect(banner.innerHTML).toContain('href="?layout=');
+        expect(banner.innerHTML).toContain('name="layout" value="flat"');
+        expect(banner.innerHTML).toContain('href="?layout=flat"');
     });
 });
