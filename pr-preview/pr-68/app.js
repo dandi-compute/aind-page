@@ -971,7 +971,8 @@ function resolveRegistryAlias(hash, registry) {
         }
     }
     const candidates = exactHashMatches.length > 0 ? exactHashMatches : prefixHashMatches;
-    const aliasPriority = (entry) => entry.priority ?? 1;
+    const FALLBACK_ALIAS_PRIORITY = 1;
+    const aliasPriority = (entry) => entry.priority ?? FALLBACK_ALIAS_PRIORITY;
     candidates.sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias));
     return candidates[0] ?? null;
 }
