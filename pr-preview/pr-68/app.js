@@ -961,17 +961,20 @@ function renderGroupBadges(runs) {
 function resolveRegistryAlias(hash, registry) {
     if (!hash) return null;
     const normalizedHash = String(hash).toLowerCase();
-    const exactMatches = registry.filter((entry) => entry.md5 === normalizedHash);
-    const candidates =
-        exactMatches.length > 0 ? exactMatches : registry.filter((entry) => entry.md5.startsWith(normalizedHash));
+    const exactMatches = [];
+    const prefixMatches = [];
+    for (const entry of registry) {
+        if (entry.md5 === normalizedHash) {
+            exactMatches.push(entry);
+        } else if (entry.md5.startsWith(normalizedHash)) {
+            prefixMatches.push(entry);
+        }
+    }
+    const candidates = exactMatches.length > 0 ? exactMatches : prefixMatches;
+    const aliasPriority = (entry) => entry.priority ?? (entry.alias === "default" ? 0 : 1);
     return (
-        candidates
-            .slice()
-            .sort(
-                (a, b) =>
-                    (b.priority ?? (b.alias === "default" ? 0 : 1)) - (a.priority ?? (a.alias === "default" ? 0 : 1)) ||
-                    a.alias.localeCompare(b.alias)
-            )[0] ?? null
+        candidates.slice().sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias))[0] ??
+        null
     );
 }
 
