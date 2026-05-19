@@ -9,6 +9,7 @@ const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/co
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
+const CODE_REPO_URL = "https://github.com/dandi-compute/code";
 const AIND_EPHYS_PIPELINE_CODE_URL =
     "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
 const PARAMS_REGISTRY = [
@@ -71,6 +72,14 @@ function updateLayoutModeUrl(mode) {
     params.set("layout", mode);
     const qs = params.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+}
+
+function codeRepoBlobUrl(path) {
+    return `${CODE_REPO_URL}/blob/main/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function codeRepoRawUrl(path) {
+    return `https://raw.githubusercontent.com/dandi-compute/code/main/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function dandiBaseUrl(dandisetId) {
@@ -312,6 +321,13 @@ ${filteredViewHtml}`;
     }
 
     banner.style.display = "";
+}
+
+function setPageCopy(title, subtitleHtml) {
+    const titleEl = document.querySelector("h1");
+    const subtitleEl = document.querySelector(".page-subtitle");
+    if (titleEl) titleEl.textContent = title;
+    if (subtitleEl) subtitleEl.innerHTML = subtitleHtml;
 }
 
 /* ─── Theme toggle ──────────────────────────────────────────── */
@@ -1053,6 +1069,177 @@ function renderRegistryLink(prefix, hash, registry, subdir) {
     return `${prefix}:&nbsp;<a class="src-link" href="${sourceUrl}" target="_blank" rel="noopener">${e(match.alias)}</a>`;
 }
 
+function uniqueRegistryEntries(registry) {
+    const entriesByHash = new Map();
+    const FALLBACK_ALIAS_PRIORITY = 1;
+    for (const entry of registry) {
+        const key = `${entry.md5}\x00${entry.path}`;
+        const existing = entriesByHash.get(key);
+        const existingPriority = existing?.priority ?? FALLBACK_ALIAS_PRIORITY;
+        const nextPriority = entry.priority ?? FALLBACK_ALIAS_PRIORITY;
+        if (!existing || nextPriority > existingPriority || (nextPriority === existingPriority && entry.alias < existing.alias)) {
+            entriesByHash.set(key, entry);
+        }
+    }
+    return [...entriesByHash.values()].sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+function buildPairwiseComparisons(items) {
+    const pairs = [];
+    for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+            pairs.push([items[i], items[j]]);
+        }
+    }
+    return pairs;
+}
+
+function pipelineCompareRef(version) {
+    const parts = String(version ?? "").split("+");
+    const suffix = parts[parts.length - 1] ?? "";
+    if (parts.length > 1 && /^[0-9a-f]{6,40}$/i.test(suffix)) return suffix;
+    return String(version ?? "");
+}
+
+function buildPipelineDiffPairs(runs) {
+    const uniqueVersions = [...groupBy(runs, (run) => run.pipelineVersion).values()]
+        .map((versions) => versions[0])
+        .sort((a, b) => FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion));
+    return buildPairwiseComparisons(uniqueVersions).map(([base, head]) => ({
+        pipelineName: base.pipelineName,
+        baseVersion: base.pipelineVersion,
+        headVersion: head.pipelineVersion,
+        compareUrl: `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(pipelineCompareRef(base.pipelineVersion))}...${encodeURIComponent(pipelineCompareRef(head.pipelineVersion))}`,
+    }));
+}
+
+function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === "[object Object]";
+}
+
+function collectJsonDiffs(left, right, path = []) {
+    if (Array.isArray(left) && Array.isArray(right)) {
+        const maxLength = Math.max(left.length, right.length);
+        return Array.from({ length: maxLength }, (_, index) => collectJsonDiffs(left[index], right[index], [...path, index]))
+            .flat()
+            .filter(Boolean);
+    }
+    if (isPlainObject(left) && isPlainObject(right)) {
+        return [...new Set([...Object.keys(left), ...Object.keys(right)])]
+            .sort(FILTER_VALUE_COLLATOR.compare)
+            .flatMap((key) => collectJsonDiffs(left[key], right[key], [...path, key]))
+            .filter(Boolean);
+    }
+    const leftText = JSON.stringify(left);
+    const rightText = JSON.stringify(right);
+    if (leftText === rightText) return [];
+    return [{ path: path.join("."), left, right }];
+}
+
+function renderDiffValue(value) {
+    return value === undefined ? "∅" : JSON.stringify(value);
+}
+
+async function fetchRegistryJson(path) {
+    const resp = await cachedFetch(codeRepoRawUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${path}`));
+    if (!resp.ok) {
+        throw new Error(`Failed to load registered params file ${path} (HTTP ${resp.status}).`);
+    }
+    return resp.json();
+}
+
+async function buildParamsDiffPairs() {
+    const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY);
+    const paramsWithJson = await Promise.all(
+        paramsEntries.map(async (entry) => ({
+            ...entry,
+            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
+            json: await fetchRegistryJson(entry.path),
+        }))
+    );
+    return buildPairwiseComparisons(paramsWithJson).map(([base, head]) => ({
+        baseAlias: base.alias,
+        headAlias: head.alias,
+        baseSourceUrl: base.sourceUrl,
+        headSourceUrl: head.sourceUrl,
+        changes: collectJsonDiffs(base.json, head.json),
+    }));
+}
+
+function renderDiffPage(data) {
+    const pipelineHtml =
+        data.pipelinePairs.length > 0
+            ? `<div class="diff-pair-list">${data.pipelinePairs
+                  .map(
+                      (pair) => `<div class="diff-pair-card">
+                <div class="diff-pair-header">
+                    <span class="diff-pair-title">${renderPipelineInfo(pair.pipelineName, pair.baseVersion)}&nbsp;→&nbsp;${e(pair.headVersion)}</span>
+                    <a class="run-entry-github-link" href="${e(pair.compareUrl)}" target="_blank" rel="noopener">Open compare</a>
+                </div>
+            </div>`
+                  )
+                  .join("")}</div>`
+            : '<p class="diff-empty-state">Only one pipeline version is currently present, so there are no pipeline comparisons to show.</p>';
+    const paramsHtml =
+        data.paramsPairs.length > 0
+            ? data.paramsPairs
+                  .map((pair) => {
+                      const changeItems =
+                          pair.changes.length > 0
+                              ? `<ol class="diff-change-list">${pair.changes
+                                    .map(
+                                        (change) => `<li>
+                                <span class="diff-change-path">${e(change.path || "(root)")}</span>
+                                <span class="diff-change-values">
+                                    <span class="diff-change-before">− ${e(renderDiffValue(change.left))}</span>
+                                    <span class="diff-change-after">+ ${e(renderDiffValue(change.right))}</span>
+                                </span>
+                            </li>`
+                                    )
+                                    .join("")}</ol>`
+                              : '<p class="diff-empty-state">No JSON differences detected.</p>';
+                      return `<details class="run-section">
+                <summary class="run-section-title">
+                    Registered params: ${e(pair.baseAlias)} → ${e(pair.headAlias)}
+                    <span class="count-badge">${pair.changes.length}</span>
+                </summary>
+                <div class="diff-pair-card">
+                    <div class="diff-link-row">
+                        <a class="diff-inline-link" href="${e(pair.baseSourceUrl)}" target="_blank" rel="noopener">↗ ${e(pair.baseAlias)} source</a>
+                        <a class="diff-inline-link" href="${e(pair.headSourceUrl)}" target="_blank" rel="noopener">↗ ${e(pair.headAlias)} source</a>
+                    </div>
+                    ${changeItems}
+                </div>
+            </details>`;
+                  })
+                  .join("")
+            : '<p class="diff-empty-state">No registered params files were found.</p>';
+
+    return `<div class="diff-page">
+    <div class="diff-page-header">
+        <p>Quick links for pipeline GitHub comparisons, plus assembled JSON diffs for the registered params files.</p>
+        <div class="diff-page-summary">
+            <span class="diff-summary-chip">${data.pipelinePairs.length}&nbsp;pipeline compare${data.pipelinePairs.length !== 1 ? "s" : ""}</span>
+            <span class="diff-summary-chip">${data.paramsPairs.length}&nbsp;params diff${data.paramsPairs.length !== 1 ? "s" : ""}</span>
+        </div>
+    </div>
+    <details class="run-section" open>
+        <summary class="run-section-title">
+            Pipeline GitHub compares
+            <span class="count-badge">${data.pipelinePairs.length}</span>
+        </summary>
+        ${pipelineHtml}
+    </details>
+    <details class="run-section" open>
+        <summary class="run-section-title">
+            Registered params JSON diffs
+            <span class="count-badge">${data.paramsPairs.length}</span>
+        </summary>
+        ${paramsHtml}
+    </details>
+</div>`;
+}
+
 /* ─── Nested rendering ──────────────────────────────────────── */
 function renderDandisets(runs) {
     const byDandiset = groupBy(runs, (r) => r.dandisetId);
@@ -1546,6 +1733,15 @@ function showResults() {
     document.getElementById("runs").style.display = "";
 }
 
+function showDiffResults() {
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("error").style.display = "none";
+    document.getElementById("filter-banner").style.display = "none";
+    document.getElementById("summary").style.display = "none";
+    document.getElementById("layout-bar").style.display = "none";
+    document.getElementById("runs").style.display = "";
+}
+
 /* ─── Utility ───────────────────────────────────────────────── */
 function e(str) {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -1562,8 +1758,31 @@ async function init() {
         const testsLink = document.querySelector(".site-tests-link");
         if (testsLink) testsLink.hidden = true;
     }
+    if (_viewMode === "diffs") {
+        const diffsLink = document.querySelector(".site-diffs-link");
+        if (diffsLink) diffsLink.hidden = true;
+        setPageCopy(
+            "AIND Pipeline Diff Index",
+            'Assembled compare links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> plus diffs across the registered params JSON files.'
+        );
+    }
 
     showLoading();
+    if (_viewMode === "diffs") {
+        try {
+            const entries = await fetchQueueState();
+            const runs = parseQueueEntries(entries);
+            const diffData = {
+                pipelinePairs: buildPipelineDiffPairs(runs),
+                paramsPairs: await buildParamsDiffPairs(),
+            };
+            document.getElementById("runs").innerHTML = renderDiffPage(diffData);
+            showDiffResults();
+        } catch (err) {
+            showError(err.message || "An unexpected error occurred.");
+        }
+        return;
+    }
     renderFilterBanner(parseFilter(), []);
 
     try {
@@ -1669,13 +1888,18 @@ if (typeof module !== "undefined" && module.exports) {
         parseTrace,
         parseViewMode,
         renderDandisets,
+        buildPipelineDiffPairs,
+        collectJsonDiffs,
         renderParamsGroup,
+        renderDiffPage,
         renderFilterBanner,
         renderFlatList,
         renderRegistryLink,
         renderVisualizationSection,
         runFailureStep,
+        uniqueRegistryEntries,
         showError,
+        showDiffResults,
         showLoading,
         showResults,
         TEST_DANDISETS,
