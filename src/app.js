@@ -12,6 +12,7 @@ const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline"
 const AIND_EPHYS_PIPELINE_CODE_URL =
     "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
 const PARAMS_REGISTRY = [
+    { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json" },
     { alias: "default", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json" },
     { alias: "original", md5: "98fd947595f60b65812a4b0ea29b7141", path: "name-original.json" },
     { alias: "all+channels", md5: "e6a0e8603a19444c0006a1a4d279047a", path: "name-all+channels.json" },
@@ -19,6 +20,7 @@ const PARAMS_REGISTRY = [
     { alias: "no+motion_v0", md5: "aa073df2761666edbf0bb66cab85ca4c", path: "name-no+motion_revision-0.json" },
 ];
 const CONFIG_REGISTRY = [
+    { alias: "v1", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config" },
     { alias: "default", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config" },
     { alias: "v0", md5: "6568ddacdedabc7b855769340ed8874f", path: "name-mit+engaging_revision-0.config" },
 ];
@@ -944,10 +946,10 @@ function renderGroupBadges(runs) {
 function resolveRegistryAlias(hash, registry) {
     if (!hash) return null;
     const normalizedHash = String(hash).toLowerCase();
-    return (
-        registry.find((entry) => entry.md5 === normalizedHash) ??
-        registry.find((entry) => entry.md5.startsWith(normalizedHash))
-    );
+    const exactMatches = registry.filter((entry) => entry.md5 === normalizedHash);
+    const prefixMatches = registry.filter((entry) => entry.md5.startsWith(normalizedHash));
+    const candidates = exactMatches.length > 0 ? exactMatches : prefixMatches;
+    return candidates.find((entry) => entry.alias !== "default") ?? candidates[0] ?? null;
 }
 
 function renderRegistryLink(prefix, hash, registry, subdir) {

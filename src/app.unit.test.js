@@ -543,11 +543,11 @@ describe("renderFlatList", () => {
         expect(html).toContain("fast");
     });
 
-    it("aliases known params hash to registry name with source link", () => {
+    it("aliases known params hash to explicit registry name with source link", () => {
         const run = { ...baseRun, paramsProfile: "4af6a25" };
         const html = renderFlatList([run]);
         expect(html).toContain("Params:");
-        expect(html).toContain(">default<");
+        expect(html).toContain(">deterministic<");
         expect(html).toContain(
             'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json"'
         );
@@ -579,9 +579,10 @@ describe("renderFlatList", () => {
 });
 
 describe("renderParamsGroup", () => {
-    it("aliases params and config hashes to registry names with source links", () => {
+    it("aliases params and config hashes to explicit registry names with source links", () => {
         const html = renderParamsGroup("4af6a25", "0d4bf36", []);
-        expect(html).toContain(">default<");
+        expect(html).toContain(">deterministic<");
+        expect(html).toContain(">v1<");
         expect(html).toContain(
             'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json"'
         );
