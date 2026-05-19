@@ -9,6 +9,21 @@ const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/co
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
 const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
+const AIND_EPHYS_PIPELINE_CODE_URL =
+    "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
+const PARAMS_REGISTRY = [
+    { alias: "default", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json" },
+    { alias: "original", md5: "98fd947595f60b65812a4b0ea29b7141", path: "name-original.json" },
+    { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json" },
+    { alias: "all+channels", md5: "e6a0e8603a19444c0006a1a4d279047a", path: "name-all+channels.json" },
+    { alias: "no+motion", md5: "0d25c9ddf35d3653a693f63b7418c598", path: "name-no+motion_revision-1.json" },
+    { alias: "no+motion_v0", md5: "aa073df2761666edbf0bb66cab85ca4c", path: "name-no+motion_revision-0.json" },
+];
+const CONFIG_REGISTRY = [
+    { alias: "default", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config" },
+    { alias: "v0", md5: "6568ddacdedabc7b855769340ed8874f", path: "name-mit+engaging_revision-0.config" },
+    { alias: "v1", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config" },
+];
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(["214527"]);
 /* Dandisets used for internal testing – hidden from the main view and moved to
@@ -928,6 +943,23 @@ function renderGroupBadges(runs) {
     return parts.join("");
 }
 
+function resolveRegistryAlias(hash, registry) {
+    if (!hash) return null;
+    const normalizedHash = String(hash).toLowerCase();
+    return (
+        registry.find((entry) => entry.md5 === normalizedHash) ??
+        registry.find((entry) => entry.md5.startsWith(normalizedHash))
+    );
+}
+
+function renderRegistryLink(prefix, hash, registry, subdir) {
+    if (!hash) return "";
+    const match = resolveRegistryAlias(hash, registry);
+    if (!match) return `${prefix}:&nbsp;${e(hash)}`;
+    const sourceUrl = e(`${AIND_EPHYS_PIPELINE_CODE_URL}/${subdir}/${match.path}`);
+    return `${prefix}:&nbsp;<a class="src-link" href="${sourceUrl}" target="_blank" rel="noopener">${e(match.alias)}</a>`;
+}
+
 /* ─── Nested rendering ──────────────────────────────────────── */
 function renderDandisets(runs) {
     const byDandiset = groupBy(runs, (r) => r.dandisetId);
@@ -1087,8 +1119,10 @@ function renderPipelineVersionGroup(dandisetId, subject, session, pipelineName, 
 
 function renderParamsGroup(paramsProfile, configHash, runs) {
     const runsHtml = runs.map(renderRunEntry).join("");
-    const paramsLabel = `Params:&nbsp;${e(paramsProfile)}`;
-    const configLabel = configHash ? `&nbsp;·&nbsp;Config:&nbsp;${e(configHash)}` : "";
+    const paramsLabel = renderRegistryLink("Params", paramsProfile, PARAMS_REGISTRY, "params");
+    const configLabel = configHash
+        ? `&nbsp;·&nbsp;${renderRegistryLink("Config", configHash, CONFIG_REGISTRY, "configs")}`
+        : "";
 
     return `
 <details class="params-group">
@@ -1167,7 +1201,7 @@ function renderFlatRunEntry(run) {
             <span class="run-sep">·</span>
             <span class="flat-ctx-pipeline">${renderPipelineInfo(run.pipelineName, run.pipelineVersion)}</span>
             <span class="run-sep">·</span>
-            <span class="flat-ctx-text">Params:&nbsp;${e(run.paramsProfile)}</span>
+            <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
         </span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
@@ -1555,8 +1589,10 @@ if (typeof module !== "undefined" && module.exports) {
         parseRunPath,
         parseTrace,
         parseViewMode,
+        renderParamsGroup,
         renderFilterBanner,
         renderFlatList,
+        renderRegistryLink,
         renderVisualizationSection,
         runFailureStep,
         showError,
