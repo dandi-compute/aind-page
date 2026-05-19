@@ -6,7 +6,9 @@ const {
     collectJsonDiffs,
     fetchQueueState,
     fetchVisualizationData,
+    initModal,
     initLayoutToggle,
+    openHtmlModal,
     parseQueueEntries,
     parseLayoutMode,
     parseRunPath,
@@ -776,13 +778,112 @@ describe("diff page helpers", () => {
 
         expect(html).toContain("Pipeline GitHub compares");
         expect(html).toContain('class="diff-matrix"');
-        expect(html).toContain('href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"');
+        expect(html).toContain('class="diff-section-banner"');
+        expect(html).toContain('class="diff-cell-trigger"');
+        expect(html).toContain(
+            'data-modal-external="https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"'
+        );
         expect(html).toContain("Registered params JSON diffs");
         expect(html).not.toContain("Quick links for pipeline GitHub comparisons");
-        expect(html).toContain("sorter.detect_sign");
-        expect(html).toContain("deterministic source");
-        expect(html).toContain("original source");
+        expect(html).toContain("View 1 change");
+        expect(html).not.toContain('<details class="run-section" open>');
         expect(html).toContain('class="diff-matrix-cell diff-matrix-cell-empty"');
+    });
+});
+
+describe("diff modal interactions", () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="runs"></div>
+            <div id="log-modal" class="log-modal-overlay" hidden>
+                <div class="log-modal-box" role="dialog" aria-modal="true" aria-labelledby="log-modal-title">
+                    <div class="log-modal-header">
+                        <span id="log-modal-title" class="log-modal-title"></span>
+                        <div class="log-modal-actions">
+                            <a id="log-modal-external" href="#" class="log-modal-btn-external" target="_blank" rel="noopener"
+                                >↗ Open</a
+                            >
+                            <button id="log-modal-close" class="log-modal-btn-close" aria-label="Close">✕</button>
+                        </div>
+                    </div>
+                    <div id="log-modal-body" class="log-modal-body"></div>
+                </div>
+            </div>
+        `;
+    });
+
+    it("opens diff cell content inside the shared modal", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [
+                { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+            ],
+            pipelinePairs: [
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.0+def5678",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                },
+            ],
+            pipelinePairMap: new Map([
+                [
+                    "v1.0.0+abc1234\x00v1.1.0+def5678",
+                    "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                ],
+            ]),
+            paramsEntries: [
+                {
+                    key: "deterministic",
+                    alias: "deterministic",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                },
+                {
+                    key: "original",
+                    alias: "original",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                },
+            ],
+            paramsPairs: [
+                {
+                    baseAlias: "deterministic",
+                    headAlias: "original",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                    changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                },
+            ],
+            paramsPairMap: new Map([
+                [
+                    "deterministic\x00original",
+                    {
+                        baseAlias: "deterministic",
+                        headAlias: "original",
+                        changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                    },
+                ],
+            ]),
+        });
+
+        initModal();
+        document.querySelector(".diff-cell-trigger").click();
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-title").textContent).toContain("v1.0.0+abc1234");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("Open compare");
+        expect(document.getElementById("log-modal-external").hidden).toBe(false);
+    });
+
+    it("hides the external action when opening inline-only modal content", () => {
+        openHtmlModal("Params diff", "<p>Only modal content</p>");
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("Only modal content");
+        expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
 });
 
