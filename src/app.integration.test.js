@@ -6,6 +6,7 @@ beforeEach(() => {
         <div id="error"></div>
         <div id="filter-banner"></div>
         <div id="summary"></div>
+        <div id="layout-bar"></div>
         <div id="runs"></div>
     `;
 });
