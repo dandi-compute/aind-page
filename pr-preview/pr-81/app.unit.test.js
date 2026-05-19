@@ -698,6 +698,13 @@ describe("diff page helpers", () => {
         ]);
     });
 
+    it("handles empty and single-entry pipeline grids", () => {
+        expect(uniquePipelineEntries([])).toEqual([]);
+        expect(uniquePipelineEntries([{ pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" }])).toEqual([
+            { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+        ]);
+    });
+
     it("collects nested JSON differences with stable paths", () => {
         expect(
             collectJsonDiffs(
