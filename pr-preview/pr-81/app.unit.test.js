@@ -1,7 +1,9 @@
 const {
     applyFilter,
     buildRunPath,
+    buildPipelineDiffPairs,
     classifyFailedTaskStep,
+    collectJsonDiffs,
     fetchQueueState,
     fetchVisualizationData,
     initLayoutToggle,
@@ -9,6 +11,7 @@ const {
     parseLayoutMode,
     parseRunPath,
     parseTrace,
+    renderDiffPage,
     renderDandisets,
     renderParamsGroup,
     renderRegistryLink,
@@ -660,6 +663,68 @@ describe("renderRegistryLink", () => {
         expect(renderRegistryLink("Params", '<script>alert("xss")</script>', [], "params")).toBe(
             "Params:&nbsp;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"
         );
+    });
+});
+
+describe("diff page helpers", () => {
+    it("builds GitHub compare URLs from unique pipeline versions", () => {
+        const pairs = buildPipelineDiffPairs([
+            { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+            { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+            { pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+        ]);
+
+        expect(pairs).toEqual([
+            {
+                pipelineName: "aind+ephys",
+                baseVersion: "v1.0.0+abc1234",
+                headVersion: "v1.1.0+def5678",
+                compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+            },
+        ]);
+    });
+
+    it("collects nested JSON differences with stable paths", () => {
+        expect(
+            collectJsonDiffs(
+                { sorter: { detect_sign: false }, streams: ["ap"] },
+                { sorter: { detect_sign: true }, streams: ["ap", "lf"] }
+            )
+        ).toEqual([
+            { path: "sorter.detect_sign", left: false, right: true },
+            { path: "streams.1", left: undefined, right: "lf" },
+        ]);
+    });
+
+    it("renders pipeline compare links and params diff summaries", () => {
+        const html = renderDiffPage({
+            pipelinePairs: [
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.0+def5678",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                },
+            ],
+            paramsPairs: [
+                {
+                    baseAlias: "deterministic",
+                    headAlias: "original",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                    changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                },
+            ],
+        });
+
+        expect(html).toContain("Pipeline GitHub compares");
+        expect(html).toContain('href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678"');
+        expect(html).toContain("Registered params JSON diffs");
+        expect(html).toContain("sorter.detect_sign");
+        expect(html).toContain("deterministic source");
+        expect(html).toContain("original source");
     });
 });
 
