@@ -1335,18 +1335,19 @@ async function buildParamsDiffPairs() {
 
 function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
     if (entries.length < 2) return "";
-    const columnEntries = entries.slice(0, -1);
+    const columnEntries = entries.slice(1);
     const columnHeaders = columnEntries
         .map((entry) => `<th scope="col" class="diff-matrix-col-header">${renderHeaderCell(entry)}</th>`)
         .join("");
     const bodyRows = entries
         .map((rowEntry, rowIndex) => {
             const cells = columnEntries
-                .map((columnEntry, columnIndex) => {
-                    if (rowIndex <= columnIndex) {
+                .map((columnEntry, columnOffset) => {
+                    const columnIndex = columnOffset + 1;
+                    if (rowIndex >= columnIndex) {
                         return '<td class="diff-matrix-cell diff-matrix-cell-empty" aria-hidden="true"></td>';
                     }
-                    return `<td class="diff-matrix-cell">${renderBodyCell(columnEntry, rowEntry)}</td>`;
+                    return `<td class="diff-matrix-cell">${renderBodyCell(rowEntry, columnEntry)}</td>`;
                 })
                 .join("");
             return `<tr>
