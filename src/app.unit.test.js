@@ -617,7 +617,7 @@ describe("renderDandisets", () => {
         expect(html).toContain("2&nbsp;jobs");
         expect(html).not.toContain("pipeline-version-group");
         expect(html).not.toContain("params-group");
-        expect((html.match(/class="run-entry /g) || []).length).toBe(2);
+        expect((html.match(/class="run-entry status-/g) || []).length).toBe(2);
     });
 });
 
