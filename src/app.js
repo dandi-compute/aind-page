@@ -284,7 +284,9 @@ ${filteredViewHtml}`;
             : availableRuns;
         const nextSubjects = uniqueSortedValues(nextRunsMatchingDandiset.map((run) => run.subject));
         renderDatalistOptions(subjectDatalist, nextSubjects);
-        if (subjectInput && subjectInput.value && !nextSubjects.includes(subjectInput.value)) subjectInput.value = "";
+        if (subjectInput && subjectInput.value && !nextSubjects.includes(subjectInput.value)) {
+            subjectInput.value = "";
+        }
 
         const selectedSubject = subjectInput?.value ?? "";
         const nextRunsMatchingSubject = selectedSubject
@@ -292,15 +294,15 @@ ${filteredViewHtml}`;
             : nextRunsMatchingDandiset;
         const nextSessions = uniqueSortedValues(nextRunsMatchingSubject.map((run) => run.session));
         renderDatalistOptions(sessionDatalist, nextSessions);
-        if (sessionInput && sessionInput.value && !nextSessions.includes(sessionInput.value)) sessionInput.value = "";
+        if (sessionInput && sessionInput.value && !nextSessions.includes(sessionInput.value)) {
+            sessionInput.value = "";
+        }
     };
     if (dandisetInput) {
         dandisetInput.addEventListener("input", refreshDependentFilterOptions);
-        dandisetInput.addEventListener("change", refreshDependentFilterOptions);
     }
     if (subjectInput) {
         subjectInput.addEventListener("input", refreshDependentFilterOptions);
-        subjectInput.addEventListener("change", refreshDependentFilterOptions);
     }
 
     banner.style.display = "";
