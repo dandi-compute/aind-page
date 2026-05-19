@@ -14,7 +14,6 @@ const AIND_EPHYS_PIPELINE_CODE_URL =
 const PARAMS_REGISTRY = [
     { alias: "default", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json" },
     { alias: "original", md5: "98fd947595f60b65812a4b0ea29b7141", path: "name-original.json" },
-    { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json" },
     { alias: "all+channels", md5: "e6a0e8603a19444c0006a1a4d279047a", path: "name-all+channels.json" },
     { alias: "no+motion", md5: "0d25c9ddf35d3653a693f63b7418c598", path: "name-no+motion_revision-1.json" },
     { alias: "no+motion_v0", md5: "aa073df2761666edbf0bb66cab85ca4c", path: "name-no+motion_revision-0.json" },
@@ -22,7 +21,6 @@ const PARAMS_REGISTRY = [
 const CONFIG_REGISTRY = [
     { alias: "default", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config" },
     { alias: "v0", md5: "6568ddacdedabc7b855769340ed8874f", path: "name-mit+engaging_revision-0.config" },
-    { alias: "v1", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config" },
 ];
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(["214527"]);
