@@ -961,21 +961,21 @@ function renderGroupBadges(runs) {
 function resolveRegistryAlias(hash, registry) {
     if (!hash) return null;
     const normalizedHash = String(hash).toLowerCase();
-    const exactMatches = [];
-    const prefixMatches = [];
+    const exactHashMatches = [];
+    const prefixHashMatches = [];
     for (const entry of registry) {
         if (entry.md5 === normalizedHash) {
-            exactMatches.push(entry);
+            exactHashMatches.push(entry);
         } else if (entry.md5.startsWith(normalizedHash)) {
-            prefixMatches.push(entry);
+            prefixHashMatches.push(entry);
         }
     }
-    const candidates = exactMatches.length > 0 ? exactMatches : prefixMatches;
+    const candidates = exactHashMatches.length > 0 ? exactHashMatches : prefixHashMatches;
     const aliasPriority = (entry) => entry.priority ?? (entry.alias === "default" ? 0 : 1);
-    return (
-        candidates.slice().sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias))[0] ??
-        null
-    );
+    const sortedCandidates = candidates
+        .slice()
+        .sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias));
+    return sortedCandidates[0] ?? null;
 }
 
 function renderRegistryLink(prefix, hash, registry, subdir) {
