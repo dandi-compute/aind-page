@@ -66,6 +66,7 @@ function parseLayoutMode() {
 }
 
 function updateLayoutModeUrl(mode) {
+    if (mode !== "flat" && mode !== "tree") return;
     const params = new URLSearchParams(window.location.search);
     params.set("layout", mode);
     const qs = params.toString();

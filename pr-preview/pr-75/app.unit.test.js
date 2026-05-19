@@ -44,6 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    document.body.innerHTML = "";
     localStorage.clear();
     window.history.replaceState(null, "", "/");
 });
