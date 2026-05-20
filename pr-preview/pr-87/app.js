@@ -128,14 +128,23 @@ function runDandiCodebaseHash(run) {
     return null;
 }
 
+// Resolve a run params identifier to a registered alias when available;
+// otherwise preserve the raw params value for matching and display.
 function runParamsType(run) {
     const alias = resolveRegistryAlias(run.paramsProfile, PARAMS_REGISTRY)?.alias;
-    return alias ?? String(run.paramsProfile ?? "");
+    return alias ?? run.paramsProfile ?? null;
 }
 
+// Resolve a run config identifier to a registered alias when available;
+// otherwise preserve the raw config value for matching and display.
 function runConfigType(run) {
     const alias = resolveRegistryAlias(run.configHash, CONFIG_REGISTRY)?.alias;
-    return alias ?? String(run.configHash ?? "");
+    return alias ?? run.configHash ?? null;
+}
+
+function matchesResolvedOrRawValue(filterValue, resolvedValue, rawValue) {
+    if (!filterValue) return true;
+    return resolvedValue === filterValue || rawValue === filterValue;
 }
 
 function classifyFailedTaskStep(taskName = "") {
@@ -168,10 +177,8 @@ function applyFilter(runs, filter) {
         if (filter.subject && r.subject !== filter.subject) return false;
         if (filter.session && r.session !== filter.session) return false;
         if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
-        if (filter.paramsType && runParamsType(r) !== filter.paramsType && r.paramsProfile !== filter.paramsType)
-            return false;
-        if (filter.configType && runConfigType(r) !== filter.configType && r.configHash !== filter.configType)
-            return false;
+        if (!matchesResolvedOrRawValue(filter.paramsType, runParamsType(r), r.paramsProfile)) return false;
+        if (!matchesResolvedOrRawValue(filter.configType, runConfigType(r), r.configHash)) return false;
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
