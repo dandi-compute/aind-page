@@ -11,6 +11,7 @@ const {
     openHtmlModal,
     neurosiftBlobUrl,
     neurosiftDandisetUrl,
+    neurosiftSessionUrl,
     parseQueueEntries,
     parseLayoutMode,
     parseRunPath,
@@ -308,6 +309,23 @@ describe("Neurosift URL helpers", () => {
 
     it("neurosiftDandisetUrl builds correct dandiset URL", () => {
         expect(neurosiftDandisetUrl("000233")).toBe("https://neurosift.app/dandiset/000233");
+    });
+
+    it("neurosiftSessionUrl prefers blob URL when contentHash is present", () => {
+        const hash = "abcdef1234567890abcdef1234567890abcdef12";
+        const url = neurosiftSessionUrl("000233", hash, "some-asset-id");
+        expect(url).toContain("neurosift.app/nwb?url=");
+        expect(url).toContain(encodeURIComponent("dandiarchive.s3.amazonaws.com/blobs/abc/def/"));
+    });
+
+    it("neurosiftSessionUrl falls back to DANDI API URL when contentHash is absent", () => {
+        const url = neurosiftSessionUrl("000233", null, "some-asset-id");
+        expect(url).toContain("dandiarchive.org");
+        expect(url).toContain("some-asset-id");
+    });
+
+    it("neurosiftSessionUrl returns null when neither contentHash nor assetId is available", () => {
+        expect(neurosiftSessionUrl("000233", null, null)).toBeNull();
     });
 });
 
