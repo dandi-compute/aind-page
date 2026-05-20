@@ -4,6 +4,7 @@ const {
     buildPipelineDiffPairs,
     classifyFailedTaskStep,
     collectJsonDiffs,
+    collectTextDiffs,
     fetchQueueState,
     fetchVisualizationData,
     initModal,
@@ -952,6 +953,23 @@ describe("diff page helpers", () => {
         ).toEqual([
             { path: "sorter.detect_sign", left: false, right: true },
             { path: "streams.1", left: undefined, right: "lf" },
+        ]);
+    });
+
+    it("expands config text diffs to include a +/- 3 line context window", () => {
+        expect(
+            collectTextDiffs(
+                ["line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8"].join("\n"),
+                ["line 1", "line 2", "line 3", "line 4 changed", "line 5", "line 6", "line 7", "line 8"].join("\n")
+            )
+        ).toEqual([
+            { path: "line 1", left: "line 1", right: "line 1" },
+            { path: "line 2", left: "line 2", right: "line 2" },
+            { path: "line 3", left: "line 3", right: "line 3" },
+            { path: "line 4", left: "line 4", right: "line 4 changed" },
+            { path: "line 5", left: "line 5", right: "line 5" },
+            { path: "line 6", left: "line 6", right: "line 6" },
+            { path: "line 7", left: "line 7", right: "line 7" },
         ]);
     });
 
