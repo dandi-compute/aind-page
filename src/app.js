@@ -568,6 +568,11 @@ async function fetchDatasetDescription(runPath) {
 async function fetchDandiAssetId(dandisetId, subject, session) {
     // Asset lookup requires a session path; return null when session is absent
     if (!session) return null;
+    // The staging API (used by sandbox dandisets) does not set Access-Control-Allow-Origin,
+    // so browser fetches from GitHub Pages are blocked by CORS policy.  Skip the lookup
+    // entirely for sandbox dandisets to avoid the console error; Neurosift links will fall
+    // back to the content-hash blob URL when available.
+    if (SANDBOX_DANDISETS.has(dandisetId)) return null;
     const apiBase = dandiApiBaseUrl(dandisetId);
     async function queryPath(assetPath) {
         const url = `${apiBase}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
