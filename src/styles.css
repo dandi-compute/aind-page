@@ -1648,11 +1648,11 @@ details[open] > .params-summary::before {
 }
 
 .diff-change-before {
-    color: var(--color-failed);
+    color: var(--color-success);
 }
 
 .diff-change-after {
-    color: var(--color-success);
+    color: var(--color-failed);
 }
 
 .diff-empty-state {
