@@ -627,8 +627,10 @@ function parseDandiPath(dandiPath) {
     const pathParts = String(dandiPath ?? "")
         .split("/")
         .filter(Boolean);
-    const subjectPart = pathParts.find((part) => part.startsWith("sub-")) ?? "";
-    const sessionPart = pathParts.find((part) => part.startsWith("ses-")) ?? "";
+    const subjectIndex = pathParts.findIndex((part) => part.startsWith("sub-"));
+    const subjectPart = subjectIndex >= 0 ? pathParts[subjectIndex] : "";
+    const searchAfterSubject = subjectIndex >= 0 ? pathParts.slice(subjectIndex + 1) : pathParts;
+    const sessionPart = searchAfterSubject.find((part) => part.startsWith("ses-")) ?? "";
     return {
         subject: subjectPart ? subjectPart.replace(/^sub-/, "") : null,
         session: sessionPart ? sessionPart.replace(/^ses-/, "") : null,
