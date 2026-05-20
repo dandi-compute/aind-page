@@ -340,7 +340,6 @@ describe("app unit behavior", () => {
             session: "recording049",
             path: "derivatives/dandiset-001747/sub-chip19894/ses-recording049/pipeline-aind+ephys/version-v1.1.1+b268fd2_params-98fd947_config-6568dda_attempt-1",
         });
-        expect(runs[0].path).not.toContain("sub-undefined");
     });
 });
 
