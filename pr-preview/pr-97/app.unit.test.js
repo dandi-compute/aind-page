@@ -973,6 +973,21 @@ describe("diff page helpers", () => {
         ]);
     });
 
+    it("handles context windows at boundaries and across multiple changes", () => {
+        expect(
+            collectTextDiffs(
+                ["line 1", "line 2", "line 3", "line 4", "line 5"].join("\n"),
+                ["line 1 changed", "line 2", "line 3", "line 4", "line 5 changed"].join("\n")
+            )
+        ).toEqual([
+            { path: "line 1", left: "line 1", right: "line 1 changed" },
+            { path: "line 2", left: "line 2", right: "line 2" },
+            { path: "line 3", left: "line 3", right: "line 3" },
+            { path: "line 4", left: "line 4", right: "line 4" },
+            { path: "line 5", left: "line 5", right: "line 5 changed" },
+        ]);
+    });
+
     it("renders pipeline compare links and params diff summaries", () => {
         const html = renderDiffPage({
             pipelineEntries: [
