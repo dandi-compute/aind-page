@@ -125,11 +125,21 @@ describe("app unit behavior", () => {
                 configHash: "cfg-a",
                 generatedBy: [{ CodeURL: "https://github.com/other/repo", Version: "xyz9876" }],
             },
+            {
+                configHash: "cfg-c",
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "release-tag" }],
+            },
+            {
+                configHash: "cfg-d",
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: null }],
+            },
         ];
 
         expect(applyFilter(runs, { configHash: "cfg-a" })).toEqual([runs[0], runs[2]]);
         expect(applyFilter(runs, { dandiCodebaseHash: "abc1234" })).toEqual([runs[0]]);
         expect(applyFilter(runs, { dandiCodebaseHash: "def5678" })).toEqual([runs[1]]);
+        expect(applyFilter(runs, { dandiCodebaseHash: "release-tag" })).toEqual([runs[3]]);
+        expect(applyFilter(runs, { dandiCodebaseHash: "missing" })).toEqual([]);
     });
 
     it("parses run path segments", () => {

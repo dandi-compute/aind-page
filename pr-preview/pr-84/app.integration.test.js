@@ -56,6 +56,7 @@ describe("app integration behavior", () => {
         expect(banner.innerHTML).toContain('option value="v1"');
         expect(banner.innerHTML).toContain('option value="cfg-a"');
         expect(banner.innerHTML).toContain('option value="abc1234"');
+        expect(banner.innerHTML).toContain('option value="def5678"');
     });
 
     it("updates page state displays and escapes error content", () => {
