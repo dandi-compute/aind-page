@@ -987,7 +987,7 @@ describe("diff modal interactions", () => {
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
         expect(document.getElementById("log-modal-title").hidden).toBe(true);
-        expect(document.getElementById("log-modal-body").innerHTML).toContain("Registered params");
+        expect(document.getElementById("log-modal-body").innerHTML).not.toContain("Registered params");
         expect(document.getElementById("log-modal-body").innerHTML).toContain(
             '<th scope="col"><a class="diff-inline-link" href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json" target="_blank" rel="noopener">deterministic</a></th>'
         );
@@ -996,6 +996,7 @@ describe("diff modal interactions", () => {
         );
         expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Parameter</th>');
         expect(document.getElementById("log-modal-body").textContent).toContain("sorter.detect_sign");
+        expect(document.getElementById("log-modal-body").querySelectorAll("table")).toHaveLength(1);
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
 
