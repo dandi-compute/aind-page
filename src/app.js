@@ -849,31 +849,18 @@ function neurosiftUrl(dandisetId, assetId) {
 function neurosiftBlobUrl(contentHash) {
     const blobFileUrl = `https://dandiarchive.s3.amazonaws.com/blobs/${contentHash.slice(0, 3)}/${contentHash.slice(3, 6)}/${contentHash}`;
     const neurosiftUrl_ = `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
-    console.log("[neurosiftBlobUrl] contentHash:", contentHash);
-    console.log("[neurosiftBlobUrl] S3 blob URL:", blobFileUrl);
-    console.log("[neurosiftBlobUrl] Neurosift URL:", neurosiftUrl_);
     return neurosiftUrl_;
 }
 
 /* Build the best available Neurosift NWB URL: prefer blob URL (no API call), fall back to asset download URL */
 function neurosiftSessionUrl(dandisetId, contentHash, assetId) {
     if (contentHash) {
-        console.log("[neurosiftSessionUrl] path=blob  dandisetId:", dandisetId, "contentHash:", contentHash);
         return neurosiftBlobUrl(contentHash);
     }
     if (assetId) {
         const url = neurosiftUrl(dandisetId, assetId);
-        console.log("[neurosiftSessionUrl] path=asset dandisetId:", dandisetId, "assetId:", assetId, "url:", url);
         return url;
     }
-    console.log(
-        "[neurosiftSessionUrl] path=null  dandisetId:",
-        dandisetId,
-        "contentHash:",
-        contentHash,
-        "assetId:",
-        assetId
-    );
     return null;
 }
 
