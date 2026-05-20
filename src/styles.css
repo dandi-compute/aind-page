@@ -1726,29 +1726,6 @@ details[open] > .params-summary::before {
     font-weight: 700;
 }
 
-.flat-ctx-dandi-link {
-    color: var(--color-text-secondary);
-    text-decoration: none;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    padding: 2px 6px;
-    font-size: 0.78em;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-    flex-shrink: 0;
-    transition:
-        color 0.15s,
-        border-color 0.15s,
-        background 0.15s;
-}
-.flat-ctx-dandi-link:hover {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-    background: var(--color-accent-subtle);
-    text-decoration: none;
-}
-
 .flat-ctx-text {
     color: var(--color-text);
     font-weight: 600;
