@@ -1181,7 +1181,25 @@ describe("diff page helpers", () => {
                         "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
                     headSourceUrl:
                         "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
-                    changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                    changes: [
+                        {
+                            path: "lines 22-26",
+                            left: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 -         cpus=4",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                            right: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 +         cpus=1",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                        },
+                    ],
                 },
             ],
             configPairMap: new Map([
@@ -1190,7 +1208,25 @@ describe("diff page helpers", () => {
                     {
                         baseAlias: "v0",
                         headAlias: "v1",
-                        changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                        changes: [
+                            {
+                                path: "lines 22-26",
+                                left: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 -         cpus=4",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                                right: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 +         cpus=1",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                            },
+                        ],
                     },
                 ],
             ]),
@@ -1336,7 +1372,25 @@ describe("diff modal interactions", () => {
                         "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
                     headSourceUrl:
                         "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
-                    changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                    changes: [
+                        {
+                            path: "lines 22-26",
+                            left: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 -         cpus=4",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                            right: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 +         cpus=1",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                        },
+                    ],
                 },
             ],
             configPairMap: new Map([
@@ -1345,7 +1399,25 @@ describe("diff modal interactions", () => {
                     {
                         baseAlias: "v0",
                         headAlias: "v1",
-                        changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                        changes: [
+                            {
+                                path: "lines 22-26",
+                                left: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 -         cpus=4",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                                right: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 +         cpus=1",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                            },
+                        ],
                     },
                 ],
             ]),
@@ -1356,9 +1428,15 @@ describe("diff modal interactions", () => {
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
         expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Config snippet</th>');
-        expect(document.getElementById("log-modal-body").textContent).toContain("line 24");
+        expect(document.getElementById("log-modal-body").textContent).toContain("lines 22-26");
         expect(document.getElementById("log-modal-body").textContent).toContain("cpus=4");
         expect(document.getElementById("log-modal-body").textContent).toContain("cpus=1");
+        expect(document.getElementById("log-modal-body").querySelectorAll(".diff-config-line-changed")).toHaveLength(2);
+        expect(
+            document
+                .getElementById("log-modal-body")
+                .querySelectorAll(".diff-config-line:not(.diff-config-line-changed)").length
+        ).toBeGreaterThan(0);
     });
 
     it("shows pipeline compare modal details in tables", () => {
