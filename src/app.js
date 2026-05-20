@@ -1532,15 +1532,6 @@ function renderDiffPage(data) {
                       const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
                       const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
                       const bodyHtml = `<div class="diff-pair-card">
-                            ${renderNamedPairTable(
-                                "Registered params",
-                                baseEntry.alias,
-                                headEntry.alias,
-                                baseLinkHtml,
-                                headLinkHtml,
-                                baseLinkHtml,
-                                headLinkHtml
-                            )}
                             ${renderNamedDiffTable(
                                 "Parameter",
                                 baseEntry.alias,
