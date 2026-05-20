@@ -1535,12 +1535,12 @@ function renderDiffValue(value) {
     return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
-async function fetchRegistryJson(path) {
-    const resp = await cachedFetch(codeRepoRawUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${path}`));
+async function fetchRegistryFile(path, subdir, kindLabel) {
+    const resp = await cachedFetch(codeRepoRawUrl(`src/dandi_compute_code/aind_ephys_pipeline/${subdir}/${path}`));
     if (!resp.ok) {
-        throw new Error(`Failed to load registered params file ${path} (HTTP ${resp.status}).`);
+        throw new Error(`Failed to load registered ${kindLabel} file ${path} (HTTP ${resp.status}).`);
     }
-    return resp.json();
+    return resp;
 }
 
 async function buildParamsDiffPairs() {
@@ -1549,7 +1549,7 @@ async function buildParamsDiffPairs() {
         paramsEntries.map(async (entry) => ({
             ...entry,
             sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
-            json: await fetchRegistryJson(entry.path),
+            json: await (await fetchRegistryFile(entry.path, "params", "params")).json(),
         }))
     );
     return buildPairwiseComparisons(paramsWithJson).map(([base, head]) => ({
@@ -1558,6 +1558,32 @@ async function buildParamsDiffPairs() {
         baseSourceUrl: base.sourceUrl,
         headSourceUrl: head.sourceUrl,
         changes: collectJsonDiffs(base.json, head.json),
+    }));
+}
+
+function collectTextDiffs(leftText, rightText) {
+    return collectJsonDiffs(String(leftText ?? "").split("\n"), String(rightText ?? "").split("\n")).map((change) => ({
+        path: change.path ? `line ${Number(change.path) + 1}` : ROOT_DIFF_PATH_LABEL,
+        left: change.left,
+        right: change.right,
+    }));
+}
+
+async function buildConfigDiffPairs() {
+    const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY);
+    const configWithText = await Promise.all(
+        configEntries.map(async (entry) => ({
+            ...entry,
+            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            text: await (await fetchRegistryFile(entry.path, "configs", "config")).text(),
+        }))
+    );
+    return buildPairwiseComparisons(configWithText).map(([base, head]) => ({
+        baseAlias: base.alias,
+        headAlias: head.alias,
+        baseSourceUrl: base.sourceUrl,
+        headSourceUrl: head.sourceUrl,
+        changes: collectTextDiffs(base.text, head.text),
     }));
 }
 
@@ -1604,6 +1630,8 @@ function renderDiffModalTrigger(label, bodyHtml, title = null) {
 }
 
 function renderDiffPage(data) {
+    const configEntries = data.configEntries ?? [];
+    const configPairMap = data.configPairMap ?? new Map();
     const pipelineHtml =
         data.pipelineEntries.length > 1
             ? renderDiffMatrix(
@@ -1644,6 +1672,34 @@ function renderDiffPage(data) {
                   }
               )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
+    const configHtml =
+        configEntries.length > 1
+            ? renderDiffMatrix(
+                  configEntries,
+                  (entry) => renderDiffInlineLink(entry.sourceUrl, entry.alias),
+                  (baseEntry, headEntry) => {
+                      const pair = configPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      const pairChanges = pair?.changes ?? [];
+                      const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
+                      const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
+                      const bodyHtml = `<div class="diff-pair-card">
+                            ${renderNamedDiffTable(
+                                "Config line",
+                                baseEntry.alias,
+                                headEntry.alias,
+                                pairChanges,
+                                baseLinkHtml,
+                                headLinkHtml
+                            )}
+                        </div>`;
+                      const buttonLabel =
+                          pairChanges.length > 0
+                              ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
+                              : "View diff";
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
+                  }
+              )
+            : '<p class="diff-empty-state">No registered config files were found.</p>';
 
     return `<div class="diff-page">
     <section class="diff-section">
@@ -1657,6 +1713,12 @@ function renderDiffPage(data) {
             Registered params JSON diffs
         </div>
         ${paramsHtml}
+    </section>
+    <section class="diff-section">
+        <div class="diff-section-banner">
+            Registered config diffs
+        </div>
+        ${configHtml}
     </section>
 </div>`;
 }
@@ -2275,6 +2337,12 @@ async function init() {
                 sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
             }));
             const paramsPairs = await buildParamsDiffPairs();
+            const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY).map((entry) => ({
+                key: entry.alias,
+                alias: entry.alias,
+                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            }));
+            const configPairs = await buildConfigDiffPairs();
             const diffData = {
                 pipelineEntries,
                 pipelinePairs,
@@ -2284,6 +2352,9 @@ async function init() {
                 paramsEntries,
                 paramsPairs,
                 paramsPairMap: new Map(paramsPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
+                configEntries,
+                configPairs,
+                configPairMap: new Map(configPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
             };
             document.getElementById("runs").innerHTML = renderDiffPage(diffData);
             showDiffResults();
