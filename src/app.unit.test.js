@@ -655,6 +655,7 @@ describe("fetchVisualizationData", () => {
         );
 
         expect(result).not.toBeNull();
+        expect(result[0].images[0].url).toContain("raw.githubusercontent.com");
         expect(result[0].images[0].url).toContain("/visualization/recording1/drift_map.png");
         expect(global.fetch.mock.calls[0][0]).toContain("/derivatives/visualization?");
         expect(global.fetch.mock.calls[1][0]).toContain("/visualization?ref=");

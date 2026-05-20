@@ -599,7 +599,7 @@ async function fetchVisualizationData(runPath) {
             const vizDirResp = await cachedFetch(vizDirUrl);
             if (!vizDirResp.ok) continue;
             const items = await vizDirResp.json();
-            if (!Array.isArray(items)) continue;
+            if (!items || !Array.isArray(items)) continue;
             resolvedVizPath = candidatePath;
             vizDirItems = items;
             break;
