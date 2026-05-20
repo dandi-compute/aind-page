@@ -13,6 +13,10 @@ const PIPELINE_API_BASE = "https://api.github.com/repos/CodyCBakerPhD/aind-ephys
 const CODE_REPO_URL = "https://github.com/dandi-compute/code";
 const AIND_EPHYS_PIPELINE_CODE_URL =
     "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
+const PARAMS_SCHEMA_URL =
+    "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params_schema.json";
+const PARAMS_DEFAULTS_URL =
+    "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params.json";
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
 const FULL_COMMIT_HASH_LENGTH = 40;
@@ -2236,6 +2240,443 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
     );
 }
 
+/* ─── Params Editor ─────────────────────────────────────────── */
+
+/* Module-level params editor state */
+let _paramsSchema = null;
+let _paramsCurrentValues = null;
+let _paramsDefaultValues = null;
+
+function paramsResolveRef(node) {
+    if (!node || typeof node !== "object") return node;
+    if (node.$ref) {
+        const parts = node.$ref.replace(/^#\//, "").split("/");
+        let resolved = _paramsSchema;
+        for (const p of parts) resolved = resolved[p];
+        // eslint-disable-next-line no-unused-vars
+        const { $ref: _unused, ...rest } = node;
+        return { ...paramsResolveRef(resolved), ...rest };
+    }
+    return node;
+}
+
+function paramsBuildDefaults(schemaNode) {
+    const node = paramsResolveRef(schemaNode);
+    if (!node) return undefined;
+    if (node.type === "object" && node.properties) {
+        const obj = {};
+        for (const [k, v] of Object.entries(node.properties)) {
+            const val = paramsBuildDefaults(v);
+            if (val !== undefined) obj[k] = val;
+        }
+        return Object.keys(obj).length ? obj : {};
+    }
+    if ("default" in node) return JSON.parse(JSON.stringify(node.default));
+    return undefined;
+}
+
+function paramsDeepGet(obj, path) {
+    let cur = obj;
+    for (const p of path) {
+        if (cur == null || typeof cur !== "object") return undefined;
+        cur = cur[p];
+    }
+    return cur;
+}
+
+function paramsDeepSet(obj, path, value) {
+    let cur = obj;
+    for (let i = 0; i < path.length - 1; i++) {
+        if (!(path[i] in cur) || typeof cur[path[i]] !== "object") cur[path[i]] = {};
+        cur = cur[path[i]];
+    }
+    cur[path[path.length - 1]] = value;
+}
+
+function paramsGetTypeDefault(type) {
+    if (type === "string") return "";
+    if (type === "number" || type === "integer") return 0;
+    if (type === "boolean") return false;
+    if (type === "array") return [];
+    if (type === "object") return {};
+    return null;
+}
+
+function paramsEl(tag, attrs, ...children) {
+    const elem = document.createElement(tag);
+    if (attrs) {
+        for (const [k, v] of Object.entries(attrs)) {
+            if (k === "class") {
+                elem.className = v;
+            } else if (k.startsWith("on")) {
+                elem.addEventListener(k.slice(2), v);
+            } else if (v === true) {
+                elem.setAttribute(k, "");
+            } else if (v !== false && v !== null && v !== undefined) {
+                elem.setAttribute(k, v);
+            }
+        }
+    }
+    for (const c of children) {
+        if (c == null) continue;
+        if (typeof c === "string") elem.appendChild(document.createTextNode(c));
+        else elem.appendChild(c);
+    }
+    return elem;
+}
+
+function updateParamsPreview() {
+    const output = document.getElementById("params-output");
+    if (output) output.textContent = JSON.stringify(_paramsCurrentValues, null, 4);
+}
+
+function paramsMarkChanged(field, path) {
+    const defVal = paramsDeepGet(_paramsDefaultValues, path);
+    const curVal = paramsDeepGet(_paramsCurrentValues, path);
+    field.classList.toggle("changed", JSON.stringify(curVal) !== JSON.stringify(defVal));
+    updateParamsPreview();
+}
+
+function buildParamsField(label, schemaNode, path) {
+    const node = paramsResolveRef(schemaNode);
+    const curVal = paramsDeepGet(_paramsCurrentValues, path);
+    const defVal = paramsDeepGet(_paramsDefaultValues, path);
+    const isChanged = JSON.stringify(curVal) !== JSON.stringify(defVal);
+
+    const field = paramsEl("div", { class: "params-field" + (isChanged ? " changed" : "") });
+    field.dataset.path = path.join(".");
+
+    const labelEl = paramsEl("div", { class: "params-field-label" }, label);
+    if (node.description) {
+        labelEl.appendChild(paramsEl("span", { class: "params-field-desc" }, node.description));
+    }
+    field.appendChild(labelEl);
+
+    const inputWrap = paramsEl("div", { class: "params-field-input" });
+
+    const nullable = Array.isArray(node.type) && node.type.includes("null");
+    const types = Array.isArray(node.type) ? node.type.filter((t) => t !== "null") : [node.type];
+    const primaryType = types[0] || "string";
+
+    if (nullable) {
+        const isNull = curVal === null || curVal === undefined;
+        const toggle = paramsEl(
+            "label",
+            { class: "params-null-toggle" },
+            paramsEl("input", {
+                type: "checkbox",
+                checked: isNull ? true : false,
+                onchange: function () {
+                    if (this.checked) {
+                        paramsDeepSet(_paramsCurrentValues, path, null);
+                    } else {
+                        const fallback =
+                            defVal !== null && defVal !== undefined ? defVal : paramsGetTypeDefault(primaryType);
+                        paramsDeepSet(_paramsCurrentValues, path, JSON.parse(JSON.stringify(fallback)));
+                    }
+                    buildParamsForm();
+                    updateParamsPreview();
+                },
+            }),
+            "null"
+        );
+        inputWrap.appendChild(toggle);
+        if (isNull) {
+            field.appendChild(inputWrap);
+            return field;
+        }
+    }
+
+    if (node.enum) {
+        const select = paramsEl("select", {
+            onchange: function () {
+                let v = this.value;
+                if (v === "__null__") v = null;
+                else if (primaryType === "number" || primaryType === "integer") v = Number(v);
+                paramsDeepSet(_paramsCurrentValues, path, v);
+                paramsMarkChanged(field, path);
+            },
+        });
+        if (nullable) select.appendChild(paramsEl("option", { value: "__null__" }, "(null)"));
+        for (const opt of node.enum) {
+            if (opt === null) continue;
+            const option = paramsEl("option", { value: String(opt) }, String(opt));
+            if (String(curVal) === String(opt)) option.selected = true;
+            select.appendChild(option);
+        }
+        inputWrap.appendChild(select);
+    } else if (primaryType === "boolean") {
+        const select = paramsEl("select", {
+            onchange: function () {
+                paramsDeepSet(_paramsCurrentValues, path, this.value === "true");
+                paramsMarkChanged(field, path);
+            },
+        });
+        [true, false].forEach((val) => {
+            const opt = paramsEl("option", { value: String(val) }, String(val));
+            if (curVal === val) opt.selected = true;
+            select.appendChild(opt);
+        });
+        inputWrap.appendChild(select);
+    } else if (primaryType === "array" || primaryType === "object") {
+        const ta = document.createElement("textarea");
+        ta.value = JSON.stringify(curVal ?? (primaryType === "array" ? [] : {}), null, 2);
+        ta.addEventListener("input", function () {
+            try {
+                const parsed = JSON.parse(this.value);
+                paramsDeepSet(_paramsCurrentValues, path, parsed);
+                this.style.borderColor = "";
+                paramsMarkChanged(field, path);
+            } catch {
+                this.style.borderColor = "var(--color-failed)";
+            }
+        });
+        inputWrap.appendChild(ta);
+    } else if (primaryType === "integer" || primaryType === "number") {
+        const attrs = {
+            type: "number",
+            value: curVal != null ? String(curVal) : "",
+            step: primaryType === "integer" ? "1" : "any",
+            oninput: function () {
+                const v = primaryType === "integer" ? parseInt(this.value, 10) : parseFloat(this.value);
+                if (!isNaN(v)) {
+                    paramsDeepSet(_paramsCurrentValues, path, v);
+                    paramsMarkChanged(field, path);
+                }
+            },
+        };
+        if (node.minimum != null) attrs.min = String(node.minimum);
+        if (node.maximum != null) attrs.max = String(node.maximum);
+        inputWrap.appendChild(paramsEl("input", attrs));
+    } else {
+        inputWrap.appendChild(
+            paramsEl("input", {
+                type: "text",
+                value: curVal != null ? String(curVal) : "",
+                oninput: function () {
+                    paramsDeepSet(_paramsCurrentValues, path, this.value);
+                    paramsMarkChanged(field, path);
+                },
+            })
+        );
+    }
+
+    field.appendChild(inputWrap);
+    return field;
+}
+
+function buildParamsSection(label, schemaNode, path) {
+    const node = paramsResolveRef(schemaNode);
+    const wrapper = paramsEl("div", { class: "params-section collapsed" });
+
+    const header = paramsEl(
+        "div",
+        { class: "params-section-header" },
+        paramsEl("span", { class: "params-section-arrow" }, "▼"),
+        document.createTextNode(label)
+    );
+    if (node.description) {
+        header.appendChild(paramsEl("span", { class: "params-section-desc" }, node.description));
+    }
+    header.addEventListener("click", () => wrapper.classList.toggle("collapsed"));
+    wrapper.appendChild(header);
+
+    const body = paramsEl("div", { class: "params-section-body" });
+    const nodeTypes = Array.isArray(node.type) ? node.type : [node.type];
+    if (nodeTypes.includes("object") && node.properties) {
+        for (const [k, v] of Object.entries(node.properties)) {
+            const resolved = paramsResolveRef(v);
+            const childPath = [...path, k];
+            const resolvedTypes = Array.isArray(resolved.type) ? resolved.type : [resolved.type];
+            if (resolvedTypes.includes("object") && resolved.properties) {
+                body.appendChild(buildParamsSection(k, resolved, childPath));
+            } else {
+                body.appendChild(buildParamsField(k, resolved, childPath));
+            }
+        }
+    }
+    wrapper.appendChild(body);
+    return wrapper;
+}
+
+function buildParamsForm() {
+    const formRoot = document.getElementById("params-form-root");
+    if (!formRoot) return;
+    formRoot.innerHTML = "";
+
+    for (const [key, propSchema] of Object.entries(_paramsSchema.properties)) {
+        const resolved = paramsResolveRef(propSchema);
+        formRoot.appendChild(buildParamsSection(key, resolved, [key]));
+    }
+
+    const chk = document.getElementById("params-chk-only-changed");
+    if (chk && chk.checked) {
+        formRoot.querySelectorAll(".params-field").forEach((f) => {
+            f.style.display = f.classList.contains("changed") ? "" : "none";
+        });
+    }
+}
+
+function renderParamsEditorShell() {
+    const readmeUrl = "https://github.com/dandi-compute/code#contributing-non-code-files";
+    const codeRepoUrl = "https://github.com/dandi-compute/code";
+    const paramsDir = "src/dandi_compute_code/aind_ephys_pipeline/params/";
+    const registryFile = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json";
+
+    return `<div class="params-editor">
+    <div class="params-editor-split">
+        <div class="params-editor-left">
+            <div class="params-toolbar">
+                <button class="params-toolbar-btn" id="params-btn-defaults">Load Defaults</button>
+                <button class="params-toolbar-btn" id="params-btn-collapse">Collapse All</button>
+                <button class="params-toolbar-btn" id="params-btn-expand">Expand All</button>
+                <label class="params-toolbar-toggle">
+                    <input type="checkbox" id="params-chk-only-changed"> Show only changed
+                </label>
+            </div>
+            <div id="params-form-root"></div>
+        </div>
+        <div class="params-editor-right">
+            <div class="params-output-header">
+                <span class="params-output-title">Generated JSON</span>
+                <div class="params-toolbar">
+                    <button class="params-toolbar-btn" id="params-btn-download">Download</button>
+                    <button class="params-toolbar-btn" id="params-btn-copy">Copy</button>
+                    <label class="params-toolbar-file-label">Import…<input type="file" id="params-file-import" accept=".json"></label>
+                </div>
+            </div>
+            <pre id="params-output" class="params-output-pre"></pre>
+        </div>
+    </div>
+    <div class="params-instructions">
+        <div class="params-instructions-title">How to submit your params file</div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">1</span>
+            <span>Create a free GitHub account at <a href="https://github.com/join" target="_blank" rel="noopener">github.com/join</a> if you don't already have one.</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">2</span>
+            <span>Customize your parameters using the form above, then click <strong>Download</strong> and rename the file to a short descriptive name (e.g.&nbsp;<code>my-params.json</code>).</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">3</span>
+            <span>Open the <a href="${e(codeRepoUrl)}" target="_blank" rel="noopener">dandi-compute/code</a> repository, click <strong>Fork</strong>, and create your own copy.</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">4</span>
+            <span>In your fork, upload your JSON file to <code>${e(paramsDir)}</code> and register it in <code>${e(registryFile)}</code> following the <a href="${e(readmeUrl)}" target="_blank" rel="noopener">contributing instructions in the README</a>.</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">5</span>
+            <span>Open a Pull Request from your fork back to <code>dandi-compute/code</code>. A maintainer will review and merge your file.</span>
+        </div>
+    </div>
+</div>`;
+}
+
+function initParamsEditorUI() {
+    buildParamsForm();
+    updateParamsPreview();
+
+    document.getElementById("params-btn-defaults").addEventListener("click", () => {
+        _paramsCurrentValues = JSON.parse(JSON.stringify(_paramsDefaultValues));
+        buildParamsForm();
+        updateParamsPreview();
+    });
+
+    document.getElementById("params-btn-collapse").addEventListener("click", () => {
+        document
+            .getElementById("params-form-root")
+            .querySelectorAll(".params-section")
+            .forEach((s) => s.classList.add("collapsed"));
+    });
+
+    document.getElementById("params-btn-expand").addEventListener("click", () => {
+        document
+            .getElementById("params-form-root")
+            .querySelectorAll(".params-section")
+            .forEach((s) => s.classList.remove("collapsed"));
+    });
+
+    document.getElementById("params-chk-only-changed").addEventListener("change", function () {
+        document
+            .getElementById("params-form-root")
+            .querySelectorAll(".params-field")
+            .forEach((f) => {
+                f.style.display = this.checked ? (f.classList.contains("changed") ? "" : "none") : "";
+            });
+    });
+
+    document.getElementById("params-btn-download").addEventListener("click", () => {
+        const json = JSON.stringify(_paramsCurrentValues, null, 4);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "params.json";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("params-btn-copy").addEventListener("click", () => {
+        const json = JSON.stringify(_paramsCurrentValues, null, 4);
+        navigator.clipboard.writeText(json).then(() => {
+            const btn = document.getElementById("params-btn-copy");
+            btn.textContent = "Copied!";
+            setTimeout(() => (btn.textContent = "Copy"), 1500);
+        });
+    });
+
+    document.getElementById("params-file-import").addEventListener("change", function () {
+        const file = this.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                let text = reader.result;
+                text = text.replace(/,\s*([}\]])/g, "$1");
+                _paramsCurrentValues = JSON.parse(text);
+                buildParamsForm();
+                updateParamsPreview();
+            } catch (err) {
+                alert("Invalid JSON: " + err.message);
+            }
+        };
+        reader.readAsText(file);
+        this.value = "";
+    });
+}
+
+async function initParamsEditor() {
+    const schemaResp = await cachedFetch(PARAMS_SCHEMA_URL);
+    if (!schemaResp.ok) {
+        throw new Error(`Failed to load parameter schema (HTTP ${schemaResp.status}).`);
+    }
+    _paramsSchema = await schemaResp.json();
+
+    try {
+        const defResp = await cachedFetch(PARAMS_DEFAULTS_URL);
+        if (defResp.ok) {
+            let text = await defResp.text();
+            text = text.replace(/,\s*([}\]])/g, "$1");
+            _paramsDefaultValues = JSON.parse(text);
+        } else {
+            _paramsDefaultValues = paramsBuildDefaults(_paramsSchema);
+        }
+    } catch {
+        _paramsDefaultValues = paramsBuildDefaults(_paramsSchema);
+    }
+
+    _paramsCurrentValues = JSON.parse(JSON.stringify(_paramsDefaultValues));
+
+    const pageContent = document.querySelector(".page-content");
+    if (pageContent) pageContent.classList.add("params-page");
+
+    document.getElementById("runs").innerHTML = renderParamsEditorShell();
+    showDiffResults();
+    initParamsEditorUI();
+}
+
 /* ─── Page state helpers ────────────────────────────────────── */
 function showLoading() {
     document.getElementById("loading").style.display = "";
@@ -2292,6 +2733,14 @@ async function init() {
             'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions .'
         );
     }
+    if (_viewMode === "params") {
+        const paramsLink = document.querySelector(".site-params-link");
+        if (paramsLink) paramsLink.hidden = true;
+        setPageCopy(
+            "Register New Params File",
+            'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
+        );
+    }
 
     showLoading();
     if (_viewMode === "compare") {
@@ -2320,6 +2769,14 @@ async function init() {
             showDiffResults();
         } catch (err) {
             showError(err.message || "An unexpected error occurred.");
+        }
+        return;
+    }
+    if (_viewMode === "params") {
+        try {
+            await initParamsEditor();
+        } catch (err) {
+            showError(err.message || "Failed to load the parameter schema.");
         }
         return;
     }
