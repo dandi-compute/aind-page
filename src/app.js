@@ -1646,7 +1646,7 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
                target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
             <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
-               target="_blank" rel="noopener" onclick="event.stopPropagation()">View on DANDI</a>
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">DANDI</a>
             <span class="group-meta">
                 <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? "s" : ""}</span>
                 <span class="run-sep">·</span>
@@ -1836,10 +1836,10 @@ function renderFlatRunEntry(run) {
     return `
 <div class="run-entry flat-run-entry ${sc}">
     <div class="run-entry-header flat-run-header">
+        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">DANDI</a>
         <span class="status-badge ${sc}">${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
-            <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">View on DANDI</a>
             <span class="run-sep">·</span>
             <a class="flat-ctx-link" href="${e(subjectUrl)}" target="_blank" rel="noopener">Sub:&nbsp;<strong>${e(run.subject)}</strong></a>
             ${sessionContextHtml}
