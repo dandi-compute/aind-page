@@ -1026,6 +1026,56 @@ describe("diff page helpers", () => {
         expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(0);
         expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(2);
     });
+
+    it("renders config diff summaries in a comparison matrix", () => {
+        const html = renderDiffPage({
+            pipelineEntries: [],
+            pipelinePairs: [],
+            pipelinePairMap: new Map(),
+            paramsEntries: [],
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+            configEntries: [
+                {
+                    key: "v0",
+                    alias: "v0",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                },
+                {
+                    key: "v1",
+                    alias: "v1",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                },
+            ],
+            configPairs: [
+                {
+                    baseAlias: "v0",
+                    headAlias: "v1",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                    changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                },
+            ],
+            configPairMap: new Map([
+                [
+                    "v0\x00v1",
+                    {
+                        baseAlias: "v0",
+                        headAlias: "v1",
+                        changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                    },
+                ],
+            ]),
+        });
+
+        expect(html).toContain("Registered config diffs");
+        expect(html).toContain("View 1 change");
+        expect(html).toContain("No registered params files were found.");
+    });
 });
 
 describe("diff modal interactions", () => {
@@ -1130,6 +1180,61 @@ describe("diff modal interactions", () => {
         expect(document.getElementById("log-modal-body").textContent).toContain("true");
         expect(document.getElementById("log-modal-body").querySelectorAll("table")).toHaveLength(1);
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
+    });
+
+    it("opens config diff content inside the shared modal", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [],
+            pipelinePairs: [],
+            pipelinePairMap: new Map(),
+            paramsEntries: [],
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+            configEntries: [
+                {
+                    key: "v0",
+                    alias: "v0",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                },
+                {
+                    key: "v1",
+                    alias: "v1",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                },
+            ],
+            configPairs: [
+                {
+                    baseAlias: "v0",
+                    headAlias: "v1",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                    changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                },
+            ],
+            configPairMap: new Map([
+                [
+                    "v0\x00v1",
+                    {
+                        baseAlias: "v0",
+                        headAlias: "v1",
+                        changes: [{ path: "line 24", left: "        cpus=4", right: "        cpus=1" }],
+                    },
+                ],
+            ]),
+        });
+
+        initModal();
+        document.querySelector(".diff-cell-trigger").click();
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Config line</th>');
+        expect(document.getElementById("log-modal-body").textContent).toContain("line 24");
+        expect(document.getElementById("log-modal-body").textContent).toContain("cpus=4");
+        expect(document.getElementById("log-modal-body").textContent).toContain("cpus=1");
     });
 
     it("shows pipeline compare modal details in tables", () => {
