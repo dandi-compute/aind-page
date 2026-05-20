@@ -1585,18 +1585,27 @@ function collectTextDiffs(leftText, rightText) {
     const leftLines = (leftText ?? "").split("\n");
     const rightLines = (rightText ?? "").split("\n");
     const maxLength = Math.max(leftLines.length, rightLines.length);
-    const changes = [];
+    const changedLineIndexes = [];
     for (let index = 0; index < maxLength; index += 1) {
-        const left = leftLines[index];
-        const right = rightLines[index];
-        if (left === right) continue;
-        changes.push({
-            path: `line ${index + 1}`,
-            left,
-            right,
-        });
+        if (leftLines[index] !== rightLines[index]) {
+            changedLineIndexes.push(index);
+        }
     }
-    return changes;
+    const contextLineIndexes = new Set();
+    for (const changedLineIndex of changedLineIndexes) {
+        const startIndex = Math.max(0, changedLineIndex - 3);
+        const endIndex = Math.min(maxLength - 1, changedLineIndex + 3);
+        for (let index = startIndex; index <= endIndex; index += 1) {
+            contextLineIndexes.add(index);
+        }
+    }
+    return [...contextLineIndexes]
+        .sort((a, b) => a - b)
+        .map((index) => ({
+            path: `line ${index + 1}`,
+            left: leftLines[index],
+            right: rightLines[index],
+        }));
 }
 
 async function buildConfigDiffPairs() {
@@ -2508,6 +2517,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderDandisets,
         buildPipelineDiffPairs,
         collectJsonDiffs,
+        collectTextDiffs,
         renderParamsGroup,
         renderDiffPage,
         renderFilterBanner,
