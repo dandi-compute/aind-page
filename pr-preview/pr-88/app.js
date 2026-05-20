@@ -1839,7 +1839,7 @@ function renderFlatRunEntry(run) {
         <span class="status-badge ${sc}">${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
-            <a class="flat-ctx-dandi-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">View on DANDI</a>
+            <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">View on DANDI</a>
             <span class="run-sep">·</span>
             <a class="flat-ctx-link" href="${e(subjectUrl)}" target="_blank" rel="noopener">Sub:&nbsp;<strong>${e(run.subject)}</strong></a>
             ${sessionContextHtml}
