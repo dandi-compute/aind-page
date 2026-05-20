@@ -652,7 +652,7 @@ function parseQueueEntries(entries) {
         hasCode: entry.has_code,
         hasOutput: entry.has_output,
         hasLogs: entry.has_logs,
-        contentHash: entry.content_hash ?? null,
+        contentHash: entry.content_id ?? null,
         runDate: null,
     }));
 }
