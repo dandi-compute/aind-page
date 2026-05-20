@@ -1214,14 +1214,22 @@ async function fetchPipelineCompareSummary(baseRef, headRef) {
     }
 }
 
-function renderNamedPairTable(rowLabel, leftColumnLabel, rightColumnLabel, leftCellHtml, rightCellHtml) {
+function renderNamedPairTable(
+    rowLabel,
+    leftColumnLabel,
+    rightColumnLabel,
+    leftCellHtml,
+    rightCellHtml,
+    leftColumnHtml = null,
+    rightColumnHtml = null
+) {
     return `<div class="diff-detail-table-wrap">
         <table class="diff-detail-table diff-detail-table-pair">
             <thead>
                 <tr>
                     <th class="diff-detail-corner" aria-hidden="true"></th>
-                    <th scope="col">${e(leftColumnLabel)}</th>
-                    <th scope="col">${e(rightColumnLabel)}</th>
+                    <th scope="col">${leftColumnHtml ?? e(leftColumnLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightColumnLabel)}</th>
                 </tr>
             </thead>
             <tbody>
@@ -1283,7 +1291,14 @@ function renderTwoColumnTable(headers, rows) {
     </div>`;
 }
 
-function renderNamedDiffTable(parameterLabel, leftLabel, rightLabel, changes) {
+function renderNamedDiffTable(
+    parameterLabel,
+    leftLabel,
+    rightLabel,
+    changes,
+    leftColumnHtml = null,
+    rightColumnHtml = null
+) {
     if (changes.length === 0) {
         return '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
     }
@@ -1292,8 +1307,8 @@ function renderNamedDiffTable(parameterLabel, leftLabel, rightLabel, changes) {
             <thead>
                 <tr>
                     <th scope="col">${e(parameterLabel)}</th>
-                    <th scope="col">${e(leftLabel)}</th>
-                    <th scope="col">${e(rightLabel)}</th>
+                    <th scope="col">${leftColumnHtml ?? e(leftLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightLabel)}</th>
                 </tr>
             </thead>
             <tbody>${changes
@@ -1511,16 +1526,27 @@ function renderDiffPage(data) {
                   (baseEntry, headEntry) => {
                       const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
                       const pairChanges = pair?.changes ?? [];
+                      const baseLinkHtml = `<a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">${e(baseEntry.alias)}</a>`;
+                      const headLinkHtml = `<a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">${e(headEntry.alias)}</a>`;
                       const bodyHtml = `<div class="diff-pair-card">
-                           ${renderNamedPairTable(
-                               "Registered params",
-                               baseEntry.alias,
-                               headEntry.alias,
-                               `<a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">${e(baseEntry.alias)}</a>`,
-                               `<a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">${e(headEntry.alias)}</a>`
-                           )}
-                           ${renderNamedDiffTable("Parameter", baseEntry.alias, headEntry.alias, pairChanges)}
-                       </div>`;
+                            ${renderNamedPairTable(
+                                "Registered params",
+                                baseEntry.alias,
+                                headEntry.alias,
+                                baseLinkHtml,
+                                headLinkHtml,
+                                baseLinkHtml,
+                                headLinkHtml
+                            )}
+                            ${renderNamedDiffTable(
+                                "Parameter",
+                                baseEntry.alias,
+                                headEntry.alias,
+                                pairChanges,
+                                baseLinkHtml,
+                                headLinkHtml
+                            )}
+                        </div>`;
                       const buttonLabel =
                           pairChanges.length > 0
                               ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
