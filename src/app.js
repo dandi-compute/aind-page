@@ -590,11 +590,22 @@ async function fetchDandiAssetId(dandisetId, subject, session) {
 
 async function fetchVisualizationData(runPath) {
     try {
-        const encodedPath = runPath.split("/").map(encodeURIComponent).join("/");
-        const vizDirUrl = `${GITHUB_API_BASE}/contents/${encodedPath}/visualization?ref=${BRANCH}`;
-        const vizDirResp = await cachedFetch(vizDirUrl);
-        if (!vizDirResp.ok) return null;
-        const vizDirItems = await vizDirResp.json();
+        const candidatePaths = [`${runPath}/derivatives/visualization`, `${runPath}/visualization`];
+        let resolvedVizPath = null;
+        let vizDirItems = null;
+        for (const candidatePath of candidatePaths) {
+            const encodedPath = candidatePath.split("/").map(encodeURIComponent).join("/");
+            const vizDirUrl = `${GITHUB_API_BASE}/contents/${encodedPath}?ref=${BRANCH}`;
+            const vizDirResp = await cachedFetch(vizDirUrl);
+            if (!vizDirResp.ok) continue;
+            const items = await vizDirResp.json();
+            if (!items || !Array.isArray(items)) continue;
+            resolvedVizPath = candidatePath;
+            vizDirItems = items;
+            break;
+        }
+        if (!resolvedVizPath || !vizDirItems) return null;
+
         const recordingDirs = vizDirItems.filter((item) => item.type === "dir");
         if (recordingDirs.length === 0) return null;
 
@@ -609,7 +620,7 @@ async function fetchVisualizationData(runPath) {
                     .sort((a, b) => a.path.localeCompare(b.path))
                     .map((f) => ({
                         name: f.path,
-                        url: cdnUrl(`${runPath}/visualization/${dir.name}/${f.path}`),
+                        url: cdnUrl(`${resolvedVizPath}/${dir.name}/${f.path}`),
                     }));
                 return { name: dir.name, images };
             })
