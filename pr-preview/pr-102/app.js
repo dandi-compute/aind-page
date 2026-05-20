@@ -2252,14 +2252,19 @@ let _paramsSchema = null;
 let _paramsCurrentValues = null;
 let _paramsDefaultValues = null;
 
+/* Strip trailing commas from JSON-like text so files authored with them
+   (e.g. default_params.json from the pipeline repo) can be parsed. */
+function stripTrailingCommas(text) {
+    return text.replace(/,\s*([}\]])/g, "$1");
+}
+
 function paramsResolveRef(node) {
     if (!node || typeof node !== "object") return node;
     if (node.$ref) {
         const parts = node.$ref.replace(/^#\//, "").split("/");
         let resolved = _paramsSchema;
         for (const p of parts) resolved = resolved[p];
-        // eslint-disable-next-line no-unused-vars
-        const { $ref: _unused, ...rest } = node;
+        const { $ref: _, ...rest } = node;
         return { ...paramsResolveRef(resolved), ...rest };
     }
     return node;
@@ -2638,8 +2643,7 @@ function initParamsEditorUI() {
         const reader = new FileReader();
         reader.onload = () => {
             try {
-                let text = reader.result;
-                text = text.replace(/,\s*([}\]])/g, "$1");
+                const text = stripTrailingCommas(reader.result);
                 _paramsCurrentValues = JSON.parse(text);
                 buildParamsForm();
                 updateParamsPreview();
@@ -2662,8 +2666,7 @@ async function initParamsEditor() {
     try {
         const defResp = await cachedFetch(PARAMS_DEFAULTS_URL);
         if (defResp.ok) {
-            let text = await defResp.text();
-            text = text.replace(/,\s*([}\]])/g, "$1");
+            const text = stripTrailingCommas(await defResp.text());
             _paramsDefaultValues = JSON.parse(text);
         } else {
             _paramsDefaultValues = paramsBuildDefaults(_paramsSchema);
