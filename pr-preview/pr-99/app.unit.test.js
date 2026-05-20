@@ -608,7 +608,10 @@ describe("fetchVisualizationData", () => {
                 })
             )
             .mockResolvedValueOnce(
-                new Response(JSON.stringify(treeData), { status: 200, headers: { "Content-Type": "application/json" } })
+                new Response(JSON.stringify(treeData), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
             );
 
         const result = await fetchVisualizationData(
