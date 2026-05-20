@@ -1319,8 +1319,8 @@ function renderNamedDiffTable(
                 .map(
                     (change) => `<tr>
                     <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
-                    <td><span class="diff-detail-chip diff-change-before">− ${e(renderDiffValue(change.left))}</span></td>
-                    <td><span class="diff-detail-chip diff-change-after">+ ${e(renderDiffValue(change.right))}</span></td>
+                    <td><span class="diff-detail-chip diff-change-before">${e(renderDiffValue(change.left))}</span></td>
+                    <td><span class="diff-detail-chip diff-change-after">${e(renderDiffValue(change.right))}</span></td>
                 </tr>`
                 )
                 .join("")}</tbody>

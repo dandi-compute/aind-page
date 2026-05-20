@@ -996,6 +996,10 @@ describe("diff modal interactions", () => {
         );
         expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Parameter</th>');
         expect(document.getElementById("log-modal-body").textContent).toContain("sorter.detect_sign");
+        expect(document.getElementById("log-modal-body").textContent).not.toContain("− false");
+        expect(document.getElementById("log-modal-body").textContent).not.toContain("+ true");
+        expect(document.getElementById("log-modal-body").textContent).toContain("false");
+        expect(document.getElementById("log-modal-body").textContent).toContain("true");
         expect(document.getElementById("log-modal-body").querySelectorAll("table")).toHaveLength(1);
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
