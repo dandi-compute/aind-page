@@ -1,20 +1,26 @@
 const {
     applyFilter,
     buildRunPath,
+    buildPipelineDiffPairs,
     classifyFailedTaskStep,
+    collectJsonDiffs,
     fetchQueueState,
     fetchVisualizationData,
+    initModal,
     initLayoutToggle,
+    openHtmlModal,
     parseQueueEntries,
     parseLayoutMode,
     parseRunPath,
     parseTrace,
+    renderDiffPage,
     renderDandisets,
     renderParamsGroup,
     renderRegistryLink,
     renderFlatList,
     renderVisualizationSection,
     runFailureStep,
+    uniquePipelineEntries,
 } = require("./app");
 
 const QUEUE_STATE_CACHE_KEY =
@@ -660,6 +666,391 @@ describe("renderRegistryLink", () => {
         expect(renderRegistryLink("Params", '<script>alert("xss")</script>', [], "params")).toBe(
             "Params:&nbsp;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"
         );
+    });
+});
+
+describe("diff page helpers", () => {
+    it("builds GitHub compare URLs and summaries from expanded pipeline commit refs", async () => {
+        const originalFetch = global.fetch;
+        try {
+            global.fetch = vi
+                .fn()
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify({ sha: "20abeb66850ec6ce0127c1489c22bd949d9bb642" }), {
+                        status: 200,
+                        headers: { "Content-Type": "application/json" },
+                    })
+                )
+                .mockResolvedValueOnce(
+                    new Response(JSON.stringify({ sha: "b268fd207886905b40a956e7f6a839884ce9835f" }), {
+                        status: 200,
+                        headers: { "Content-Type": "application/json" },
+                    })
+                )
+                .mockResolvedValueOnce(
+                    new Response(
+                        JSON.stringify({
+                            ahead_by: 1,
+                            behind_by: 0,
+                            total_commits: 1,
+                            commits: [
+                                {
+                                    sha: "b268fd207886905b40a956e7f6a839884ce9835f",
+                                    commit: { message: "Minor 1.1.1 release (#102)" },
+                                },
+                            ],
+                            files: [{ filename: "pyproject.toml", status: "modified" }],
+                        }),
+                        {
+                            status: 200,
+                            headers: { "Content-Type": "application/json" },
+                        }
+                    )
+                );
+
+            const pairs = await buildPipelineDiffPairs([
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.1+20abeb6" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.1+20abeb6" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2+5d20fd2" },
+            ]);
+
+            expect(pairs).toEqual([
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.1+20abeb6",
+                    headVersion: "v1.1.1+b268fd2+5d20fd2",
+                    compareUrl:
+                        "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/20abeb66850ec6ce0127c1489c22bd949d9bb642...b268fd207886905b40a956e7f6a839884ce9835f",
+                    modalHtml: expect.stringContaining("Pipeline version"),
+                },
+            ]);
+            expect(pairs[0].modalHtml).toContain("Minor 1.1.1 release (#102)");
+            expect(pairs[0].modalHtml).toContain('<th scope="col">v1.0.1-20abeb6</th>');
+            expect(pairs[0].modalHtml).toContain('<th scope="col">v1.1.1-b268fd2-5d20fd2</th>');
+
+            expect(global.fetch).toHaveBeenCalledTimes(3);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it("omits pipeline compares when version suffixes resolve to the same pipeline commit", async () => {
+        const originalFetch = global.fetch;
+        try {
+            global.fetch = vi.fn().mockResolvedValue(
+                new Response(JSON.stringify({ sha: "b268fd207886905b40a956e7f6a839884ce9835f" }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
+            );
+
+            const pairs = await buildPipelineDiffPairs([
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.1+b268fd2+3fac55c" },
+            ]);
+
+            expect(pairs).toEqual([]);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    it("lists unique pipeline entries in sorted order", () => {
+        expect(
+            uniquePipelineEntries([
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+            ])
+        ).toEqual([
+            { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+            { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+        ]);
+    });
+
+    it("handles empty and single-entry pipeline grids", () => {
+        expect(uniquePipelineEntries([])).toEqual([]);
+        expect(uniquePipelineEntries([{ pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" }])).toEqual([
+            { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+        ]);
+    });
+
+    it("collects nested JSON differences with stable paths", () => {
+        expect(
+            collectJsonDiffs(
+                { sorter: { detect_sign: false }, streams: ["ap"] },
+                { sorter: { detect_sign: true }, streams: ["ap", "lf"] }
+            )
+        ).toEqual([
+            { path: "sorter.detect_sign", left: false, right: true },
+            { path: "streams.1", left: undefined, right: "lf" },
+        ]);
+    });
+
+    it("renders pipeline compare links and params diff summaries", () => {
+        const html = renderDiffPage({
+            pipelineEntries: [
+                { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+                { key: "v1.2.0+fedcba9", pipelineName: "aind+ephys", pipelineVersion: "v1.2.0+fedcba9" },
+            ],
+            pipelinePairs: [
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.0+def5678",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    modalHtml: "<p>1 commit · 1 file</p>",
+                },
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.2.0+fedcba9",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...fedcba9",
+                    modalHtml: "<p>2 commits · 2 files</p>",
+                },
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.1.0+def5678",
+                    headVersion: "v1.2.0+fedcba9",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/def5678...fedcba9",
+                    modalHtml: "<p>1 commit · 1 file</p>",
+                },
+            ],
+            pipelinePairMap: new Map([
+                [
+                    "v1.0.0+abc1234\x00v1.1.0+def5678",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                        modalHtml: "<p>1 commit · 1 file</p>",
+                    },
+                ],
+                [
+                    "v1.0.0+abc1234\x00v1.2.0+fedcba9",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...fedcba9",
+                        modalHtml: "<p>2 commits · 2 files</p>",
+                    },
+                ],
+                [
+                    "v1.1.0+def5678\x00v1.2.0+fedcba9",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/def5678...fedcba9",
+                        modalHtml: "<p>1 commit · 1 file</p>",
+                    },
+                ],
+            ]),
+            paramsEntries: [
+                {
+                    key: "deterministic",
+                    alias: "deterministic",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                },
+                {
+                    key: "original",
+                    alias: "original",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                },
+            ],
+            paramsPairs: [
+                {
+                    baseAlias: "deterministic",
+                    headAlias: "original",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                    changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                },
+            ],
+            paramsPairMap: new Map([
+                [
+                    "deterministic\x00original",
+                    {
+                        baseAlias: "deterministic",
+                        headAlias: "original",
+                        changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                    },
+                ],
+            ]),
+        });
+
+        expect(html).toContain("Pipeline GitHub compares");
+        expect(html).toContain('class="diff-matrix"');
+        expect(html).toContain('class="diff-section-banner"');
+        expect(html).toContain('class="diff-cell-trigger"');
+        expect(html).toContain("Registered params JSON diffs");
+        expect(html).not.toContain("Quick links for pipeline GitHub comparisons");
+        expect(html).toContain("View 1 change");
+        expect(html).not.toContain('<details class="run-section" open>');
+        expect(html).toContain('class="diff-matrix-cell diff-matrix-cell-empty"');
+        expect(html).not.toContain('class="count-badge"');
+        expect((html.match(/class="diff-matrix-col-header"/g) ?? []).length).toBe(3);
+
+        document.body.innerHTML = html;
+        const pipelineRows = document.querySelector(".diff-matrix").querySelectorAll("tbody tr");
+        expect(pipelineRows[0].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(2);
+        expect(pipelineRows[0].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(0);
+        expect(pipelineRows[1].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(1);
+        expect(pipelineRows[1].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(1);
+        expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(0);
+        expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(2);
+    });
+});
+
+describe("diff modal interactions", () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="runs"></div>
+            <div id="log-modal" class="log-modal-overlay" hidden>
+                <div class="log-modal-box" role="dialog" aria-modal="true" aria-labelledby="log-modal-title">
+                    <div class="log-modal-header">
+                        <span id="log-modal-title" class="log-modal-title"></span>
+                        <div class="log-modal-actions">
+                            <a id="log-modal-external" href="#" class="log-modal-btn-external" target="_blank" rel="noopener"
+                                >↗ Open</a
+                            >
+                            <button id="log-modal-close" class="log-modal-btn-close" aria-label="Close">✕</button>
+                        </div>
+                    </div>
+                    <div id="log-modal-body" class="log-modal-body"></div>
+                </div>
+            </div>
+        `;
+    });
+
+    it("opens diff cell content inside the shared modal", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [
+                { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+            ],
+            pipelinePairs: [
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.0+def5678",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    modalHtml: "<p>1 commit · 1 file</p>",
+                },
+            ],
+            pipelinePairMap: new Map([
+                [
+                    "v1.0.0+abc1234\x00v1.1.0+def5678",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                        modalHtml: "<p>1 commit · 1 file</p>",
+                    },
+                ],
+            ]),
+            paramsEntries: [
+                {
+                    key: "deterministic",
+                    alias: "deterministic",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                },
+                {
+                    key: "original",
+                    alias: "original",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                },
+            ],
+            paramsPairs: [
+                {
+                    baseAlias: "deterministic",
+                    headAlias: "original",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+                    changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                },
+            ],
+            paramsPairMap: new Map([
+                [
+                    "deterministic\x00original",
+                    {
+                        baseAlias: "deterministic",
+                        headAlias: "original",
+                        changes: [{ path: "sorter.detect_sign", left: false, right: true }],
+                    },
+                ],
+            ]),
+        });
+
+        initModal();
+        document.querySelectorAll(".diff-cell-trigger")[1].click();
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-title").hidden).toBe(true);
+        expect(document.getElementById("log-modal-body").innerHTML).not.toContain("Registered params");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain(
+            '<th scope="col"><a class="diff-inline-link" href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json" target="_blank" rel="noopener">deterministic</a></th>'
+        );
+        expect(document.getElementById("log-modal-body").innerHTML).toContain(
+            '<th scope="col"><a class="diff-inline-link" href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json" target="_blank" rel="noopener">original</a></th>'
+        );
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Parameter</th>');
+        expect(document.getElementById("log-modal-body").textContent).toContain("sorter.detect_sign");
+        expect(document.getElementById("log-modal-body").textContent).not.toContain("− false");
+        expect(document.getElementById("log-modal-body").textContent).not.toContain("+ true");
+        expect(document.getElementById("log-modal-body").textContent).toContain("false");
+        expect(document.getElementById("log-modal-body").textContent).toContain("true");
+        expect(document.getElementById("log-modal-body").querySelectorAll("table")).toHaveLength(1);
+        expect(document.getElementById("log-modal-external").hidden).toBe(true);
+    });
+
+    it("shows pipeline compare modal details in tables", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [
+                { key: "v1.0.0+abc1234", pipelineName: "aind+ephys", pipelineVersion: "v1.0.0+abc1234" },
+                { key: "v1.1.0+def5678", pipelineName: "aind+ephys", pipelineVersion: "v1.1.0+def5678" },
+            ],
+            pipelinePairs: [
+                {
+                    pipelineName: "aind+ephys",
+                    baseVersion: "v1.0.0+abc1234",
+                    headVersion: "v1.1.0+def5678",
+                    compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                    modalHtml: "",
+                },
+            ],
+            pipelinePairMap: new Map([
+                [
+                    "v1.0.0+abc1234\x00v1.1.0+def5678",
+                    {
+                        compareUrl: "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/abc1234...def5678",
+                        modalHtml:
+                            '<div class="diff-pair-card"><table class="diff-detail-table diff-detail-table-pair"><thead><tr><th class="diff-detail-corner" aria-hidden="true"></th><th scope="col">v1.0.0-abc1234</th><th scope="col">v1.1.0-def5678</th></tr></thead><tbody><tr><th scope="row" class="diff-detail-key">Pipeline version</th><td>v1.0.0-abc1234</td><td>v1.1.0-def5678</td></tr></tbody></table><table class="diff-detail-table"><thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead><tbody><tr><th scope="row" class="diff-detail-key">Commits</th><td>1 commit</td></tr></tbody></table></div>',
+                    },
+                ],
+            ]),
+            paramsEntries: [],
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+        });
+
+        initModal();
+        document.querySelector(".diff-cell-trigger").click();
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-title").hidden).toBe(true);
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("diff-detail-table");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("v1.0.0-abc1234");
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("v1.1.0-def5678");
+        expect(document.getElementById("log-modal-body").textContent).toContain("Commits");
+    });
+
+    it("hides the external action when opening inline-only modal content", () => {
+        openHtmlModal("Params diff", "<p>Only modal content</p>");
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-body").innerHTML).toContain("Only modal content");
+        expect(document.getElementById("log-modal-external").hidden).toBe(true);
     });
 });
 
