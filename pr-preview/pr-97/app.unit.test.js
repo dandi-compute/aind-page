@@ -217,6 +217,21 @@ describe("app unit behavior", () => {
         );
     });
 
+    it("builds run path from dandi_path when subject/session fields are absent", () => {
+        const path = buildRunPath({
+            dandiset_id: "001747",
+            dandi_path: "sub-chip19894/ses-recording049",
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2",
+            params: "98fd947",
+            config: "6568dda",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001747/sub-chip19894/ses-recording049/pipeline-aind+ephys/version-v1.1.1+b268fd2_params-98fd947_config-6568dda_attempt-1"
+        );
+    });
+
     it("parses JSONL queue entries into run objects", () => {
         const entries = [
             {
@@ -300,6 +315,31 @@ describe("app unit behavior", () => {
         const runs = parseQueueEntries(entries);
         expect(runs[0].contentHash).toBe("abcdef1234567890abcdef1234567890abcdef12");
         expect(runs[1].contentHash).toBeNull();
+    });
+
+    it("parses subject and session from dandi_path when queue entry omits fields", () => {
+        const entries = [
+            {
+                dandiset_id: "001747",
+                dandi_path: "sub-chip19894/ses-recording049",
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            subject: "chip19894",
+            session: "recording049",
+            path: "derivatives/dandiset-001747/sub-chip19894/ses-recording049/pipeline-aind+ephys/version-v1.1.1+b268fd2_params-98fd947_config-6568dda_attempt-1",
+        });
     });
 });
 
