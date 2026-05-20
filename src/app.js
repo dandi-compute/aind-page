@@ -16,6 +16,7 @@ const AIND_EPHYS_PIPELINE_CODE_URL =
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
 const FULL_COMMIT_HASH_LENGTH = 40;
+const DANDI_CODE_REPO_PATTERN = /github\.com\/dandi-compute\/code(?:\/|$)/;
 const ROOT_DIFF_PATH_LABEL = "(root)";
 const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
 const PARAMS_REGISTRY = [
@@ -109,10 +110,13 @@ function parseFilter() {
     };
 }
 
+// Extract a stable hash-like identifier for the dandi-compute/code source
+// backing a run. Prefer explicit commit-looking versions, then commit-like
+// `+hash` segments, and finally fall back to the raw version text.
 function runDandiCodebaseHash(run) {
     const generatedByEntries = Array.isArray(run.generatedBy) ? run.generatedBy : [];
     for (const entry of generatedByEntries) {
-        if (!/github\.com\/dandi-compute\/code(?:\/|$)/i.test(String(entry.CodeURL ?? ""))) continue;
+        if (!DANDI_CODE_REPO_PATTERN.test(String(entry.CodeURL ?? ""))) continue;
         const version = String(entry.Version ?? "").trim();
         if (!version) continue;
         if (COMMIT_HASH_PATTERN.test(version)) return version;
