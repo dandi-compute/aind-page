@@ -821,6 +821,13 @@ function neurosiftBlobUrl(contentHash) {
     return `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
 }
 
+/* Build the best available Neurosift NWB URL: prefer blob URL (no API call), fall back to asset download URL */
+function neurosiftSessionUrl(dandisetId, contentHash, assetId) {
+    if (contentHash) return neurosiftBlobUrl(contentHash);
+    if (assetId) return neurosiftUrl(dandisetId, assetId);
+    return null;
+}
+
 /* Build a Neurosift dandiset URL */
 function neurosiftDandisetUrl(dandisetId) {
     return `https://neurosift.app/dandiset/${encodeURIComponent(dandisetId)}`;
@@ -1702,10 +1709,11 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
 }
 
 function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
-    const rep = runs.find((r) => r.contentHash) ?? runs[0];
+    const rep = runs.find((r) => r.contentHash || r.assetId) ?? runs[0];
     const sessionLabel = session !== null ? session : "—";
-    const sessionLinkHtml = rep.contentHash
-        ? `<a class="group-link" href="${e(neurosiftBlobUrl(rep.contentHash))}"
+    const sessionHref = neurosiftSessionUrl(dandisetId, rep.contentHash, rep.assetId);
+    const sessionLinkHtml = sessionHref
+        ? `<a class="group-link" href="${e(sessionHref)}"
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
@@ -1826,10 +1834,11 @@ function renderFlatRunEntry(run) {
 
     const location = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
     const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
+    const sessionHref = neurosiftSessionUrl(run.dandisetId, run.contentHash, run.assetId);
     const sessionContextHtml =
         run.session !== null
-            ? run.contentHash
-                ? `<span class="run-sep">·</span><a class="flat-ctx-link" href="${e(neurosiftBlobUrl(run.contentHash))}" target="_blank" rel="noopener">Ses:&nbsp;<strong>${e(run.session)}</strong></a>`
+            ? sessionHref
+                ? `<span class="run-sep">·</span><a class="flat-ctx-link" href="${e(sessionHref)}" target="_blank" rel="noopener">Ses:&nbsp;<strong>${e(run.session)}</strong></a>`
                 : `<span class="run-sep">·</span><span class="flat-ctx-text">Ses:&nbsp;<strong>${e(run.session)}</strong></span>`
             : "";
 
@@ -2329,6 +2338,7 @@ if (typeof module !== "undefined" && module.exports) {
         openHtmlModal,
         neurosiftBlobUrl,
         neurosiftDandisetUrl,
+        neurosiftSessionUrl,
         parseQueueEntries,
         parseLayoutMode,
         parseRunPath,
