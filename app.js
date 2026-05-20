@@ -16,6 +16,7 @@ const AIND_EPHYS_PIPELINE_CODE_URL =
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
 const FULL_COMMIT_HASH_LENGTH = 40;
+const DANDI_CODE_REPO_PATTERN = /github\.com\/dandi-compute\/code(?:\/|$)/;
 const ROOT_DIFF_PATH_LABEL = "(root)";
 const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
 const PARAMS_REGISTRY = [
@@ -103,8 +104,27 @@ function parseFilter() {
         subject: params.get("subject") ?? null,
         session: params.get("session") ?? null,
         pipelineVersion: params.get("version") ?? null,
+        configHash: params.get("config") ?? null,
+        dandiCodebaseHash: params.get("codebaseHash") ?? null,
         failureStep: params.get("failureStep") ?? null,
     };
+}
+
+// Extract a stable hash-like identifier for the dandi-compute/code source
+// backing a run. Prefer explicit commit-looking versions, then commit-like
+// `+hash` segments, and finally fall back to the raw version text.
+function runDandiCodebaseHash(run) {
+    const generatedByEntries = Array.isArray(run.generatedBy) ? run.generatedBy : [];
+    for (const entry of generatedByEntries) {
+        if (!DANDI_CODE_REPO_PATTERN.test(String(entry.CodeURL ?? ""))) continue;
+        const version = String(entry.Version ?? "").trim();
+        if (!version) continue;
+        if (COMMIT_HASH_PATTERN.test(version)) return version;
+        const refCandidate = pipelineCompareRefCandidates(version)[0];
+        if (refCandidate) return refCandidate;
+        return version;
+    }
+    return null;
 }
 
 function classifyFailedTaskStep(taskName = "") {
@@ -137,6 +157,8 @@ function applyFilter(runs, filter) {
         if (filter.subject && r.subject !== filter.subject) return false;
         if (filter.session && r.session !== filter.session) return false;
         if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
+        if (filter.configHash && r.configHash !== filter.configHash) return false;
+        if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
             const failedStep = r.failureStep;
@@ -159,6 +181,8 @@ function narrowUrl(params) {
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
     if (params.pipelineVersion) sp.set("version", params.pipelineVersion);
+    if (params.configHash) sp.set("config", params.configHash);
+    if (params.dandiCodebaseHash) sp.set("codebaseHash", params.dandiCodebaseHash);
     if (params.failureStep) sp.set("failureStep", params.failureStep);
     const qs = sp.toString();
     return qs ? `?${qs}` : "./";
@@ -193,6 +217,8 @@ function renderFilterBanner(filter, availableRuns = []) {
         filter.subject ||
         filter.session ||
         filter.pipelineVersion ||
+        filter.configHash ||
+        filter.dandiCodebaseHash ||
         filter.failureStep
     );
 
@@ -215,6 +241,16 @@ function renderFilterBanner(filter, availableRuns = []) {
     if (filter.pipelineVersion) {
         crumbs.push(
             `<a class="filter-crumb" href="${e(narrowUrl({ pipelineVersion: filter.pipelineVersion }))}">Ver:&nbsp;${e(filter.pipelineVersion)}</a>`
+        );
+    }
+    if (filter.configHash) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ configHash: filter.configHash }))}">Config:&nbsp;${e(filter.configHash)}</a>`
+        );
+    }
+    if (filter.dandiCodebaseHash) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseHash: filter.dandiCodebaseHash }))}">Codebase:&nbsp;${e(filter.dandiCodebaseHash)}</a>`
         );
     }
     if (filter.failureStep) {
@@ -241,6 +277,8 @@ function renderFilterBanner(filter, availableRuns = []) {
     const subjects = uniqueSortedValues(runsMatchingDandiset.map((r) => r.subject));
     const sessions = uniqueSortedValues(runsMatchingSubject.map((r) => r.session));
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
+    const configHashes = uniqueSortedValues(availableRuns.map((r) => r.configHash));
+    const dandiCodebaseHashes = uniqueSortedValues(availableRuns.map(runDandiCodebaseHash));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
         ...availableRuns
@@ -277,11 +315,13 @@ ${testsPageHtml}<div class="filter-banner-main">
     <form class="filter-form" method="get" action="">
         ${viewHiddenInput}
         ${layoutHiddenInput}
-        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, failureStep: filter.failureStep }))}
-        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, failureStep: filter.failureStep }))}
-        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, failureStep: filter.failureStep }))}
-        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, failureStep: filter.failureStep }))}
-        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion }))}
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, configHash: filter.configHash, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, configHash: filter.configHash, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
+        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, configHash: filter.configHash, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
+        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, configHash: filter.configHash, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
+        ${renderFilterInput("config", "Config Hash", filter.configHash, configHashes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
+        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, configHash: filter.configHash, failureStep: filter.failureStep }))}
+        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, configHash: filter.configHash, dandiCodebaseHash: filter.dandiCodebaseHash }))}
         <button class="filter-apply" type="submit">Apply</button>
         <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
     </form>
@@ -2229,6 +2269,8 @@ async function init() {
             filter.subject ||
             filter.session ||
             filter.pipelineVersion ||
+            filter.configHash ||
+            filter.dandiCodebaseHash ||
             filter.failureStep
         );
         const filteredRuns = applyFilter(runsInScope, filter);
