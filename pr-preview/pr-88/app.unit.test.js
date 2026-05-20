@@ -267,7 +267,7 @@ describe("app unit behavior", () => {
         expect(runs[1].path).not.toContain("ses-");
     });
 
-    it("parses content_hash from JSONL entries into run objects", () => {
+    it("parses content_id from JSONL entries into run objects", () => {
         const entries = [
             {
                 dandiset_id: "000233",
@@ -281,7 +281,7 @@ describe("app unit behavior", () => {
                 has_code: true,
                 has_output: true,
                 has_logs: true,
-                content_hash: "abcdef1234567890abcdef1234567890abcdef12",
+                content_id: "abcdef1234567890abcdef1234567890abcdef12",
             },
             {
                 dandiset_id: "001469",
