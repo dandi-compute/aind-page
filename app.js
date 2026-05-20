@@ -2126,19 +2126,40 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
         }
     });
 
-    // When a <details> containing inline frames is opened, request a fresh height
-    // measurement after layout has settled (the iframe was hidden while collapsed).
+    // patchedContent holds the fully-patched HTML for each iframe, populated asynchronously.
+    // injectedFrames tracks which iframes have already had their srcdoc set.
+    // srcdoc is set lazily: only once the iframe's parent <details> is open (visible), so
+    // that chart libraries (e.g. Highcharts in timeline.html) render in a non-zero container
+    // and avoid producing invalid negative <rect> widths in the browser console.
+    const patchedContent = new Map();
+    const injectedFrames = new Set();
+
+    function maybeInjectFrame(iframe) {
+        if (injectedFrames.has(iframe)) return;
+        if (!patchedContent.has(iframe)) return; // content not yet fetched
+        if (iframe.closest("details:not([open])")) return; // still inside a closed <details>
+        injectedFrames.add(iframe);
+        iframe.srcdoc = patchedContent.get(iframe);
+    }
+
+    // When a <details> containing inline frames is opened, inject any pending frames
+    // whose content is already available, and request a fresh height measurement from
+    // frames that are already loaded.
     document.querySelectorAll("details").forEach((details) => {
         if (!details.querySelector("iframe[data-srcdoc-path]")) return;
         details.addEventListener("toggle", () => {
             if (!details.open) return;
             requestAnimationFrame(() => {
                 details.querySelectorAll("iframe[data-srcdoc-path]").forEach((iframe) => {
-                    if (iframe.contentWindow) {
-                        // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
-                        // which is not a valid targetOrigin — only '*' reaches them.
-                        // The message contains no sensitive data ({type:'requestHeight'} only).
-                        iframe.contentWindow.postMessage({ type: "requestHeight" }, "*");
+                    if (injectedFrames.has(iframe)) {
+                        if (iframe.contentWindow) {
+                            // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
+                            // which is not a valid targetOrigin — only '*' reaches them.
+                            // The message contains no sensitive data ({type:'requestHeight'} only).
+                            iframe.contentWindow.postMessage({ type: "requestHeight" }, "*");
+                        }
+                    } else {
+                        maybeInjectFrame(iframe);
                     }
                 });
             });
@@ -2178,7 +2199,8 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
                 adjustedBodyClose !== -1
                     ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
                     : patched + heightScript;
-            iframe.srcdoc = patched;
+            patchedContent.set(iframe, patched);
+            maybeInjectFrame(iframe);
         })
     );
 }
