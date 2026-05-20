@@ -618,6 +618,16 @@ describe("renderFlatList", () => {
         );
     });
 
+    it("aliases known config hash to explicit registry name with source link", () => {
+        const run = { ...baseRun, configHash: "0d4bf36" };
+        const html = renderFlatList([run]);
+        expect(html).toContain("Config:");
+        expect(html).toContain(">v1<");
+        expect(html).toContain(
+            'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config"'
+        );
+    });
+
     it("shows attempt number", () => {
         const html = renderFlatList([baseRun]);
         expect(html).toContain("Attempt");
