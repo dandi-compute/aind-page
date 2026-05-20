@@ -19,7 +19,8 @@ describe("app integration behavior", () => {
                 subject: null,
                 session: null,
                 pipelineVersion: null,
-                configHash: "cfg-a",
+                paramsType: "deterministic",
+                configType: "v1",
                 dandiCodebaseHash: "abc1234",
                 failureStep: "pre-processing",
             },
@@ -29,7 +30,8 @@ describe("app integration behavior", () => {
                     subject: "a",
                     session: "s1",
                     pipelineVersion: "v1",
-                    configHash: "cfg-a",
+                    paramsProfile: "4af6a25",
+                    configHash: "0d4bf36",
                     generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "abc1234" }],
                     status: "failed",
                     failureStep: "pre-processing",
@@ -39,7 +41,8 @@ describe("app integration behavior", () => {
                     subject: "b",
                     session: "s2",
                     pipelineVersion: "v2",
-                    configHash: "cfg-b",
+                    paramsProfile: "98fd947",
+                    configHash: "6568dda",
                     generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "def5678" }],
                     status: "success",
                     failureStep: null,
@@ -51,10 +54,13 @@ describe("app integration behavior", () => {
         expect(banner.style.display).toBe("");
         expect(banner.innerHTML).toContain("Filtered view:");
         expect(banner.innerHTML).toContain("Failed in pre-processing");
-        expect(banner.innerHTML).toContain("Config:&nbsp;cfg-a");
+        expect(banner.innerHTML).toContain("Params:&nbsp;deterministic");
+        expect(banner.innerHTML).toContain("Config:&nbsp;v1");
         expect(banner.innerHTML).toContain("Codebase:&nbsp;abc1234");
         expect(banner.innerHTML).toContain('option value="v1"');
-        expect(banner.innerHTML).toContain('option value="cfg-a"');
+        expect(banner.innerHTML).toContain('option value="deterministic"');
+        expect(banner.innerHTML).toContain('option value="original"');
+        expect(banner.innerHTML).toContain('option value="v0"');
         expect(banner.innerHTML).toContain('option value="abc1234"');
         expect(banner.innerHTML).toContain('option value="def5678"');
     });
@@ -90,7 +96,8 @@ describe("app integration behavior", () => {
                 subject: null,
                 session: null,
                 pipelineVersion: null,
-                configHash: null,
+                paramsType: null,
+                configType: null,
                 dandiCodebaseHash: null,
                 failureStep: null,
             },
@@ -109,7 +116,8 @@ describe("app integration behavior", () => {
                 subject: "sub-a",
                 session: null,
                 pipelineVersion: null,
-                configHash: null,
+                paramsType: null,
+                configType: null,
                 dandiCodebaseHash: null,
                 failureStep: null,
             },
@@ -119,7 +127,8 @@ describe("app integration behavior", () => {
                     subject: "sub-a",
                     session: "ses-1",
                     pipelineVersion: "v1",
-                    configHash: "cfg-a",
+                    paramsProfile: "4af6a25",
+                    configHash: "0d4bf36",
                     status: "success",
                 },
                 {
@@ -127,7 +136,8 @@ describe("app integration behavior", () => {
                     subject: "sub-a",
                     session: "ses-2",
                     pipelineVersion: "v1",
-                    configHash: "cfg-a",
+                    paramsProfile: "4af6a25",
+                    configHash: "0d4bf36",
                     status: "success",
                 },
                 {
@@ -135,7 +145,8 @@ describe("app integration behavior", () => {
                     subject: "sub-b",
                     session: "ses-3",
                     pipelineVersion: "v1",
-                    configHash: "cfg-b",
+                    paramsProfile: "98fd947",
+                    configHash: "6568dda",
                     status: "success",
                 },
                 {
@@ -143,7 +154,8 @@ describe("app integration behavior", () => {
                     subject: "other-sub",
                     session: "other-ses",
                     pipelineVersion: "v1",
-                    configHash: "cfg-c",
+                    paramsProfile: "98fd947",
+                    configHash: "beef123",
                     status: "success",
                 },
             ]
@@ -167,7 +179,8 @@ describe("app integration behavior", () => {
                 subject: null,
                 session: null,
                 pipelineVersion: null,
-                configHash: null,
+                paramsType: null,
+                configType: null,
                 dandiCodebaseHash: null,
                 failureStep: null,
             },
@@ -177,7 +190,8 @@ describe("app integration behavior", () => {
                     subject: "sub-a",
                     session: "ses-1",
                     pipelineVersion: "v1",
-                    configHash: "cfg-a",
+                    paramsProfile: "4af6a25",
+                    configHash: "0d4bf36",
                     status: "success",
                 },
                 {
@@ -185,7 +199,8 @@ describe("app integration behavior", () => {
                     subject: "sub-b",
                     session: "ses-2",
                     pipelineVersion: "v1",
-                    configHash: "cfg-b",
+                    paramsProfile: "98fd947",
+                    configHash: "6568dda",
                     status: "success",
                 },
                 {
@@ -193,7 +208,8 @@ describe("app integration behavior", () => {
                     subject: "sub-x",
                     session: "ses-9",
                     pipelineVersion: "v1",
-                    configHash: "cfg-c",
+                    paramsProfile: "aa073df",
+                    configHash: "beef123",
                     status: "success",
                 },
             ]

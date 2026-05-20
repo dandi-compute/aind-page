@@ -111,31 +111,39 @@ describe("app unit behavior", () => {
         expect(filtered).toEqual([{ status: "failed", failureStep: "pre-processing" }]);
     });
 
-    it("filters runs by config hash and dandi codebase hash", () => {
+    it("filters runs by params/config types and dandi codebase hash", () => {
         const runs = [
             {
-                configHash: "cfg-a",
+                paramsProfile: "4af6a25",
+                configHash: "0d4bf36",
                 generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "1.0.0+abc1234" }],
             },
             {
-                configHash: "cfg-b",
+                paramsProfile: "98fd947",
+                configHash: "6568dda",
                 generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code/tree/main", Version: "def5678" }],
             },
             {
-                configHash: "cfg-a",
+                paramsProfile: "4af6a25",
+                configHash: "0d4bf36",
                 generatedBy: [{ CodeURL: "https://github.com/other/repo", Version: "xyz9876" }],
             },
             {
-                configHash: "cfg-c",
+                paramsProfile: "aa073df",
+                configHash: "6568dda",
                 generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "release-tag" }],
             },
             {
-                configHash: "cfg-d",
+                paramsProfile: "unknown-params",
+                configHash: "unknown-config",
                 generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: null }],
             },
         ];
 
-        expect(applyFilter(runs, { configHash: "cfg-a" })).toEqual([runs[0], runs[2]]);
+        expect(applyFilter(runs, { paramsType: "deterministic" })).toEqual([runs[0], runs[2]]);
+        expect(applyFilter(runs, { configType: "v1" })).toEqual([runs[0], runs[2]]);
+        expect(applyFilter(runs, { paramsType: "4af6a25" })).toEqual([runs[0], runs[2]]);
+        expect(applyFilter(runs, { configType: "0d4bf36" })).toEqual([runs[0], runs[2]]);
         expect(applyFilter(runs, { dandiCodebaseHash: "abc1234" })).toEqual([runs[0]]);
         expect(applyFilter(runs, { dandiCodebaseHash: "def5678" })).toEqual([runs[1]]);
         expect(applyFilter(runs, { dandiCodebaseHash: "release-tag" })).toEqual([runs[3]]);
