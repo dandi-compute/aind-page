@@ -128,7 +128,7 @@ describe("app integration behavior", () => {
                     session: "ses-1",
                     pipelineVersion: "v1",
                     paramsProfile: "4af6a25",
-                    configHash: "cfg-a",
+                    configHash: "0d4bf36",
                     status: "success",
                 },
                 {
@@ -137,7 +137,7 @@ describe("app integration behavior", () => {
                     session: "ses-2",
                     pipelineVersion: "v1",
                     paramsProfile: "4af6a25",
-                    configHash: "cfg-a",
+                    configHash: "0d4bf36",
                     status: "success",
                 },
                 {
@@ -146,7 +146,7 @@ describe("app integration behavior", () => {
                     session: "ses-3",
                     pipelineVersion: "v1",
                     paramsProfile: "98fd947",
-                    configHash: "cfg-b",
+                    configHash: "6568dda",
                     status: "success",
                 },
                 {
@@ -155,7 +155,7 @@ describe("app integration behavior", () => {
                     session: "other-ses",
                     pipelineVersion: "v1",
                     paramsProfile: "98fd947",
-                    configHash: "cfg-c",
+                    configHash: "beef123",
                     status: "success",
                 },
             ]
@@ -191,7 +191,7 @@ describe("app integration behavior", () => {
                     session: "ses-1",
                     pipelineVersion: "v1",
                     paramsProfile: "4af6a25",
-                    configHash: "cfg-a",
+                    configHash: "0d4bf36",
                     status: "success",
                 },
                 {
@@ -200,7 +200,7 @@ describe("app integration behavior", () => {
                     session: "ses-2",
                     pipelineVersion: "v1",
                     paramsProfile: "98fd947",
-                    configHash: "cfg-b",
+                    configHash: "6568dda",
                     status: "success",
                 },
                 {
@@ -209,7 +209,7 @@ describe("app integration behavior", () => {
                     session: "ses-9",
                     pipelineVersion: "v1",
                     paramsProfile: "aa073df",
-                    configHash: "cfg-c",
+                    configHash: "beef123",
                     status: "success",
                 },
             ]
