@@ -1860,6 +1860,7 @@ function renderFlatRunEntry(run) {
             ${sessionContextHtml}
             <span class="run-sep">·</span>
             <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
+            ${run.configHash ? `<span class="run-sep">·</span><span class="flat-ctx-text">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         </span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
