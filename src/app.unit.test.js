@@ -111,6 +111,27 @@ describe("app unit behavior", () => {
         expect(filtered).toEqual([{ status: "failed", failureStep: "pre-processing" }]);
     });
 
+    it("filters runs by config hash and dandi codebase hash", () => {
+        const runs = [
+            {
+                configHash: "cfg-a",
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "1.0.0+abc1234" }],
+            },
+            {
+                configHash: "cfg-b",
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code/tree/main", Version: "def5678" }],
+            },
+            {
+                configHash: "cfg-a",
+                generatedBy: [{ CodeURL: "https://github.com/other/repo", Version: "xyz9876" }],
+            },
+        ];
+
+        expect(applyFilter(runs, { configHash: "cfg-a" })).toEqual([runs[0], runs[2]]);
+        expect(applyFilter(runs, { dandiCodebaseHash: "abc1234" })).toEqual([runs[0]]);
+        expect(applyFilter(runs, { dandiCodebaseHash: "def5678" })).toEqual([runs[1]]);
+    });
+
     it("parses run path segments", () => {
         const parsed = parseRunPath(
             "derivatives/dandiset-001697/sub-123/ses-456/pipeline-ephys/version-v2/params-fast_config-abcdef_attempt-3"
