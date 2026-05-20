@@ -592,7 +592,7 @@ details[open] > .run-section-title::before {
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     width: 100%;
-    max-width: 1250px;
+    max-width: 1500px;
     max-height: calc(100vh - 48px);
     display: flex;
     flex-direction: column;
@@ -1679,11 +1679,50 @@ details[open] > .params-summary::before {
 }
 
 .diff-config-snippet {
+    display: block;
     margin: 0;
     font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
     font-size: 0.85em;
     line-height: 1.4;
     white-space: pre;
+}
+
+.diff-config-line {
+    display: grid;
+    grid-template-columns: auto 1.4ch minmax(0, 1fr);
+    column-gap: 8px;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.diff-config-line-number {
+    color: var(--color-text-secondary);
+}
+
+.diff-config-line-marker {
+    color: var(--color-text-secondary);
+}
+
+.diff-config-line-content {
+    color: var(--color-text);
+}
+
+.diff-config-snippet-before .diff-config-line-changed {
+    background: var(--color-success-bg);
+}
+
+.diff-config-snippet-before .diff-config-line-changed .diff-config-line-marker,
+.diff-config-snippet-before .diff-config-line-changed .diff-config-line-content {
+    color: var(--color-success);
+}
+
+.diff-config-snippet-after .diff-config-line-changed {
+    background: var(--color-failed-bg);
+}
+
+.diff-config-snippet-after .diff-config-line-changed .diff-config-line-marker,
+.diff-config-snippet-after .diff-config-line-changed .diff-config-line-content {
+    color: var(--color-failed);
 }
 
 .diff-empty-state {

@@ -1476,13 +1476,31 @@ function renderConfigDiffTable(leftLabel, rightLabel, changes, leftColumnHtml = 
                 .map(
                     (change) => `<tr>
                     <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
-                    <td><pre class="diff-config-snippet diff-config-snippet-before">${e(change.left ?? "")}</pre></td>
-                    <td><pre class="diff-config-snippet diff-config-snippet-after">${e(change.right ?? "")}</pre></td>
+                    <td>${renderConfigSnippet(change.left, "before")}</td>
+                    <td>${renderConfigSnippet(change.right, "after")}</td>
                 </tr>`
                 )
                 .join("")}</tbody>
         </table>
     </div>`;
+}
+
+function renderConfigSnippet(snippetText, side) {
+    const lines = (snippetText ?? "").split("\n");
+    return `<code class="diff-config-snippet diff-config-snippet-${e(side)}">${lines
+        .map((line) => {
+            const match = line.match(/^(\s*\d+)\s([ +-])\s(.*)$/);
+            const lineNumber = match ? match[1] : "";
+            const marker = match ? match[2] : " ";
+            const content = match ? match[3] : line;
+            const isChanged = marker === "+" || marker === "-";
+            return `<span class="diff-config-line${isChanged ? " diff-config-line-changed" : ""}">
+                <span class="diff-config-line-number">${e(lineNumber)}</span>
+                <span class="diff-config-line-marker">${e(marker === " " ? "·" : marker)}</span>
+                <span class="diff-config-line-content">${e(content)}</span>
+            </span>`;
+        })
+        .join("")}</code>`;
 }
 
 function renderPipelineCompareBody(baseVersion, headVersion, summary) {
