@@ -1291,6 +1291,10 @@ function renderTwoColumnTable(headers, rows) {
     </div>`;
 }
 
+function renderDiffInlineLink(url, label) {
+    return `<a class="diff-inline-link" href="${e(url)}" target="_blank" rel="noopener">${e(label)}</a>`;
+}
+
 function renderNamedDiffTable(
     parameterLabel,
     leftLabel,
@@ -1521,13 +1525,12 @@ function renderDiffPage(data) {
         data.paramsEntries.length > 1
             ? renderDiffMatrix(
                   data.paramsEntries,
-                  (entry) =>
-                      `<a class="diff-inline-link" href="${e(entry.sourceUrl)}" target="_blank" rel="noopener">${e(entry.alias)}</a>`,
+                  (entry) => renderDiffInlineLink(entry.sourceUrl, entry.alias),
                   (baseEntry, headEntry) => {
                       const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
                       const pairChanges = pair?.changes ?? [];
-                      const baseLinkHtml = `<a class="diff-inline-link" href="${e(baseEntry.sourceUrl)}" target="_blank" rel="noopener">${e(baseEntry.alias)}</a>`;
-                      const headLinkHtml = `<a class="diff-inline-link" href="${e(headEntry.sourceUrl)}" target="_blank" rel="noopener">${e(headEntry.alias)}</a>`;
+                      const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
+                      const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
                       const bodyHtml = `<div class="diff-pair-card">
                             ${renderNamedPairTable(
                                 "Registered params",
