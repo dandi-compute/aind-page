@@ -1489,10 +1489,10 @@ function renderConfigSnippet(snippetText, side) {
     const lines = (snippetText ?? "").split("\n");
     return `<code class="diff-config-snippet diff-config-snippet-${e(side)}">${lines
         .map((line) => {
-            const match = line.match(/^(\s*\d+)\s+([ +-])\s?(.*)$/);
+            const match = line.match(/^(\s*\d+)\s*([ +-])(.*)$/);
             const lineNumber = match ? match[1] : "";
             const marker = match ? match[2] : " ";
-            const content = match ? match[3] : line;
+            const content = match ? match[3].replace(/^ /, "") : line;
             const isChanged = marker === "+" || marker === "-";
             return `<span class="diff-config-line${isChanged ? " diff-config-line-changed" : ""}">
                 <span class="diff-config-line-number">${e(lineNumber)}</span>

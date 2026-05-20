@@ -1708,21 +1708,21 @@ details[open] > .params-summary::before {
 }
 
 .diff-config-snippet-before .diff-config-line-changed {
-    background: var(--color-success-bg);
+    background: var(--color-failed-bg);
 }
 
 .diff-config-snippet-before .diff-config-line-changed .diff-config-line-marker,
 .diff-config-snippet-before .diff-config-line-changed .diff-config-line-content {
-    color: var(--color-success);
+    color: var(--color-failed);
 }
 
 .diff-config-snippet-after .diff-config-line-changed {
-    background: var(--color-failed-bg);
+    background: var(--color-success-bg);
 }
 
 .diff-config-snippet-after .diff-config-line-changed .diff-config-line-marker,
 .diff-config-snippet-after .diff-config-line-changed .diff-config-line-content {
-    color: var(--color-failed);
+    color: var(--color-success);
 }
 
 .diff-empty-state {
