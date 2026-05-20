@@ -623,13 +623,30 @@ async function fetchVisualizationData(runPath) {
 }
 
 /* ─── Path helpers ──────────────────────────────────────────── */
+function parseDandiPath(dandiPath) {
+    const pathParts = String(dandiPath ?? "")
+        .split("/")
+        .filter(Boolean);
+    const subjectIndex = pathParts.findIndex((part) => part.startsWith("sub-"));
+    const subjectPart = subjectIndex >= 0 ? pathParts[subjectIndex] : "";
+    const searchAfterSubject = subjectIndex >= 0 ? pathParts.slice(subjectIndex + 1) : pathParts;
+    const sessionPart = searchAfterSubject.find((part) => part.startsWith("ses-")) ?? "";
+    return {
+        subject: subjectPart ? subjectPart.replace(/^sub-/, "") : null,
+        session: sessionPart ? sessionPart.replace(/^ses-/, "") : null,
+    };
+}
+
 // Build a run directory path from a JSONL queue entry.
 // With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}_attempt-{attempt}
 // Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}_attempt-{attempt}
 function buildRunPath(entry) {
-    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${entry.subject}`];
-    if (entry.session !== null && entry.session !== undefined) {
-        parts.push(`ses-${entry.session}`);
+    const parsed = parseDandiPath(entry.dandi_path);
+    const subject = entry.subject ?? parsed.subject;
+    const session = entry.session ?? parsed.session;
+    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${subject}`];
+    if (session !== null && session !== undefined) {
+        parts.push(`ses-${session}`);
     }
     parts.push(`pipeline-${entry.pipeline}`);
     parts.push(`version-${entry.version}_params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`);
@@ -639,22 +656,25 @@ function buildRunPath(entry) {
 /* ─── Queue entry parsing ───────────────────────────────────── */
 // Convert raw JSONL entries from the queue state file into run objects.
 function parseQueueEntries(entries) {
-    return entries.map((entry) => ({
-        path: buildRunPath(entry),
-        dandisetId: entry.dandiset_id,
-        subject: entry.subject,
-        session: entry.session ?? null,
-        pipelineName: entry.pipeline,
-        pipelineVersion: entry.version,
-        paramsProfile: entry.params,
-        configHash: entry.config,
-        attempt: entry.attempt,
-        hasCode: entry.has_code,
-        hasOutput: entry.has_output,
-        hasLogs: entry.has_logs,
-        contentHash: entry.content_id ?? null,
-        runDate: null,
-    }));
+    return entries.map((entry) => {
+        const parsed = parseDandiPath(entry.dandi_path);
+        return {
+            path: buildRunPath(entry),
+            dandisetId: entry.dandiset_id,
+            subject: entry.subject ?? parsed.subject,
+            session: entry.session ?? parsed.session,
+            pipelineName: entry.pipeline,
+            pipelineVersion: entry.version,
+            paramsProfile: entry.params,
+            configHash: entry.config,
+            attempt: entry.attempt,
+            hasCode: entry.has_code,
+            hasOutput: entry.has_output,
+            hasLogs: entry.has_logs,
+            contentHash: entry.content_id ?? null,
+            runDate: null,
+        };
+    });
 }
 
 /* ─── Path parsing ──────────────────────────────────────────── */
