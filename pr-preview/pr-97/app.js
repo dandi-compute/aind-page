@@ -1562,11 +1562,21 @@ async function buildParamsDiffPairs() {
 }
 
 function collectTextDiffs(leftText, rightText) {
-    return collectJsonDiffs(String(leftText ?? "").split("\n"), String(rightText ?? "").split("\n")).map((change) => ({
-        path: change.path ? `line ${Number(change.path) + 1}` : ROOT_DIFF_PATH_LABEL,
-        left: change.left,
-        right: change.right,
-    }));
+    const leftLines = (leftText ?? "").split("\n");
+    const rightLines = (rightText ?? "").split("\n");
+    const maxLength = Math.max(leftLines.length, rightLines.length);
+    const changes = [];
+    for (let index = 0; index < maxLength; index += 1) {
+        const left = leftLines[index];
+        const right = rightLines[index];
+        if (left === right) continue;
+        changes.push({
+            path: `line ${index + 1}`,
+            left,
+            right,
+        });
+    }
+    return changes;
 }
 
 async function buildConfigDiffPairs() {
