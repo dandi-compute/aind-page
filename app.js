@@ -2130,7 +2130,7 @@ async function init() {
         const testsLink = document.querySelector(".site-tests-link");
         if (testsLink) testsLink.hidden = true;
     }
-    if (_viewMode === "diffs") {
+    if (_viewMode === "compare") {
         const diffsLink = document.querySelector(".site-diffs-link");
         if (diffsLink) diffsLink.hidden = true;
         setPageCopy(
@@ -2140,7 +2140,7 @@ async function init() {
     }
 
     showLoading();
-    if (_viewMode === "diffs") {
+    if (_viewMode === "compare") {
         try {
             const entries = await fetchQueueState();
             const runs = parseQueueEntries(entries);
