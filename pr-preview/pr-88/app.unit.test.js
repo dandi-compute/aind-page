@@ -9,6 +9,8 @@ const {
     initModal,
     initLayoutToggle,
     openHtmlModal,
+    neurosiftBlobUrl,
+    neurosiftDandisetUrl,
     parseQueueEntries,
     parseLayoutMode,
     parseRunPath,
@@ -254,6 +256,58 @@ describe("app unit behavior", () => {
         expect(runs[1].hasLogs).toBe(false);
         // null session should not appear in path
         expect(runs[1].path).not.toContain("ses-");
+    });
+
+    it("parses content_hash from JSONL entries into run objects", () => {
+        const entries = [
+            {
+                dandiset_id: "000233",
+                subject: "CGM3",
+                session: "CGM3",
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+                content_hash: "abcdef1234567890abcdef1234567890abcdef12",
+            },
+            {
+                dandiset_id: "001469",
+                subject: "Chronic-Implant-2",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "aa073df",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: false,
+            },
+        ];
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].contentHash).toBe("abcdef1234567890abcdef1234567890abcdef12");
+        expect(runs[1].contentHash).toBeNull();
+    });
+});
+
+describe("Neurosift URL helpers", () => {
+    it("neurosiftBlobUrl builds correct S3 blob URL", () => {
+        const hash = "abcdef1234567890abcdef1234567890abcdef12";
+        const url = neurosiftBlobUrl(hash);
+        expect(url).toBe(
+            "https://neurosift.app/nwb?url=" +
+                encodeURIComponent(
+                    "https://dandiarchive.s3.amazonaws.com/blobs/abc/def/abcdef1234567890abcdef1234567890abcdef12"
+                )
+        );
+    });
+
+    it("neurosiftDandisetUrl builds correct dandiset URL", () => {
+        expect(neurosiftDandisetUrl("000233")).toBe("https://neurosift.app/dandiset/000233");
     });
 });
 

@@ -622,6 +622,7 @@ function parseQueueEntries(entries) {
         hasCode: entry.has_code,
         hasOutput: entry.has_output,
         hasLogs: entry.has_logs,
+        contentHash: entry.content_hash ?? null,
         runDate: null,
     }));
 }
@@ -806,12 +807,23 @@ function blobUrl(filePath) {
     return `https://github.com/${OWNER}/${REPO}/blob/${BRANCH}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/* Build a Neurosift URL for a DANDI asset */
+/* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
 function neurosiftUrl(dandisetId, assetId) {
     const isSandbox = SANDBOX_DANDISETS.has(dandisetId);
     const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
     const url = `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
     return isSandbox ? `${url}&staging=true` : url;
+}
+
+/* Build a Neurosift NWB URL from a DANDI S3 content hash */
+function neurosiftBlobUrl(contentHash) {
+    const blobFileUrl = `https://dandiarchive.s3.amazonaws.com/blobs/${contentHash.slice(0, 3)}/${contentHash.slice(3, 6)}/${contentHash}`;
+    return `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
+}
+
+/* Build a Neurosift dandiset URL */
+function neurosiftDandisetUrl(dandisetId) {
+    return `https://neurosift.app/dandiset/${encodeURIComponent(dandisetId)}`;
 }
 
 function renderRunEntry(run) {
@@ -1631,8 +1643,10 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
 <details class="dandiset-group"${autoExpand ? " open" : ""}>
     <summary class="dandiset-summary">
         <span class="dandiset-summary-inner">
-            <a class="dandiset-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
+            <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
                target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
+            <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">View on DANDI</a>
             <span class="group-meta">
                 <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? "s" : ""}</span>
                 <span class="run-sep">·</span>
@@ -1688,10 +1702,10 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
 }
 
 function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
-    const rep = runs.find((r) => r.assetId) ?? runs[0];
+    const rep = runs.find((r) => r.contentHash) ?? runs[0];
     const sessionLabel = session !== null ? session : "—";
-    const sessionLinkHtml = rep.assetId
-        ? `<a class="group-link" href="${e(neurosiftUrl(dandisetId, rep.assetId))}"
+    const sessionLinkHtml = rep.contentHash
+        ? `<a class="group-link" href="${e(neurosiftBlobUrl(rep.contentHash))}"
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
@@ -1814,8 +1828,8 @@ function renderFlatRunEntry(run) {
     const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
     const sessionContextHtml =
         run.session !== null
-            ? run.assetId
-                ? `<span class="run-sep">·</span><a class="flat-ctx-link" href="${e(neurosiftUrl(run.dandisetId, run.assetId))}" target="_blank" rel="noopener">Ses:&nbsp;<strong>${e(run.session)}</strong></a>`
+            ? run.contentHash
+                ? `<span class="run-sep">·</span><a class="flat-ctx-link" href="${e(neurosiftBlobUrl(run.contentHash))}" target="_blank" rel="noopener">Ses:&nbsp;<strong>${e(run.session)}</strong></a>`
                 : `<span class="run-sep">·</span><span class="flat-ctx-text">Ses:&nbsp;<strong>${e(run.session)}</strong></span>`
             : "";
 
@@ -1824,7 +1838,8 @@ function renderFlatRunEntry(run) {
     <div class="run-entry-header flat-run-header">
         <span class="status-badge ${sc}">${slbl}</span>
         <span class="flat-run-context">
-            <a class="flat-ctx-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
+            <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
+            <a class="flat-ctx-dandi-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">View on DANDI</a>
             <span class="run-sep">·</span>
             <a class="flat-ctx-link" href="${e(subjectUrl)}" target="_blank" rel="noopener">Sub:&nbsp;<strong>${e(run.subject)}</strong></a>
             ${sessionContextHtml}
@@ -2312,6 +2327,8 @@ if (typeof module !== "undefined" && module.exports) {
         initModal,
         initLayoutToggle,
         openHtmlModal,
+        neurosiftBlobUrl,
+        neurosiftDandisetUrl,
         parseQueueEntries,
         parseLayoutMode,
         parseRunPath,
