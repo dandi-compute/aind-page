@@ -4,6 +4,7 @@ const {
     buildPipelineDiffPairs,
     classifyFailedTaskStep,
     collectJsonDiffs,
+    collectTextDiffs,
     fetchQueueState,
     fetchVisualizationData,
     initModal,
@@ -990,6 +991,54 @@ describe("diff page helpers", () => {
         ]);
     });
 
+    it("expands config text diffs to include a +/- 3 line context window", () => {
+        expect(
+            collectTextDiffs(
+                ["line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8"].join("\n"),
+                ["line 1", "line 2", "line 3", "line 4 changed", "line 5", "line 6", "line 7", "line 8"].join("\n")
+            )
+        ).toEqual([
+            {
+                path: "lines 1-7",
+                left: [
+                    "1   line 1",
+                    "2   line 2",
+                    "3   line 3",
+                    "4 - line 4",
+                    "5   line 5",
+                    "6   line 6",
+                    "7   line 7",
+                ].join("\n"),
+                right: [
+                    "1   line 1",
+                    "2   line 2",
+                    "3   line 3",
+                    "4 + line 4 changed",
+                    "5   line 5",
+                    "6   line 6",
+                    "7   line 7",
+                ].join("\n"),
+            },
+        ]);
+    });
+
+    it("handles context windows at boundaries and across multiple changes", () => {
+        expect(
+            collectTextDiffs(
+                ["line 1", "line 2", "line 3", "line 4", "line 5"].join("\n"),
+                ["line 1 changed", "line 2", "line 3", "line 4", "line 5 changed"].join("\n")
+            )
+        ).toEqual([
+            {
+                path: "lines 1-5",
+                left: ["1 - line 1", "2   line 2", "3   line 3", "4   line 4", "5 - line 5"].join("\n"),
+                right: ["1 + line 1 changed", "2   line 2", "3   line 3", "4   line 4", "5 + line 5 changed"].join(
+                    "\n"
+                ),
+            },
+        ]);
+    });
+
     it("renders pipeline compare links and params diff summaries", () => {
         const html = renderDiffPage({
             pipelineEntries: [
@@ -1101,6 +1150,92 @@ describe("diff page helpers", () => {
         expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell-empty")).toHaveLength(0);
         expect(pipelineRows[2].querySelectorAll(".diff-matrix-cell .diff-cell-trigger")).toHaveLength(2);
     });
+
+    it("renders config diff summaries in a comparison matrix", () => {
+        const html = renderDiffPage({
+            pipelineEntries: [],
+            pipelinePairs: [],
+            pipelinePairMap: new Map(),
+            paramsEntries: [],
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+            configEntries: [
+                {
+                    key: "v0",
+                    alias: "v0",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                },
+                {
+                    key: "v1",
+                    alias: "v1",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                },
+            ],
+            configPairs: [
+                {
+                    baseAlias: "v0",
+                    headAlias: "v1",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                    changes: [
+                        {
+                            path: "lines 22-26",
+                            left: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 -         cpus=4",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                            right: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 +         cpus=1",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                        },
+                    ],
+                },
+            ],
+            configPairMap: new Map([
+                [
+                    "v0\x00v1",
+                    {
+                        baseAlias: "v0",
+                        headAlias: "v1",
+                        changes: [
+                            {
+                                path: "lines 22-26",
+                                left: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 -         cpus=4",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                                right: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 +         cpus=1",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                            },
+                        ],
+                    },
+                ],
+            ]),
+        });
+
+        expect(html).toContain("Registered config diffs");
+        expect(html).toContain("View 1 change");
+        expect(html).toContain("No registered params files were found.");
+    });
 });
 
 describe("diff modal interactions", () => {
@@ -1205,6 +1340,103 @@ describe("diff modal interactions", () => {
         expect(document.getElementById("log-modal-body").textContent).toContain("true");
         expect(document.getElementById("log-modal-body").querySelectorAll("table")).toHaveLength(1);
         expect(document.getElementById("log-modal-external").hidden).toBe(true);
+    });
+
+    it("opens config diff content inside the shared modal", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [],
+            pipelinePairs: [],
+            pipelinePairMap: new Map(),
+            paramsEntries: [],
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+            configEntries: [
+                {
+                    key: "v0",
+                    alias: "v0",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                },
+                {
+                    key: "v1",
+                    alias: "v1",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                },
+            ],
+            configPairs: [
+                {
+                    baseAlias: "v0",
+                    headAlias: "v1",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-0.config",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/configs/name-mit+engaging_revision-1.config",
+                    changes: [
+                        {
+                            path: "lines 22-26",
+                            left: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 -         cpus=4",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                            right: [
+                                "22   process {",
+                                "23       withName:foo {",
+                                "24 +         cpus=1",
+                                "25       }",
+                                "26   }",
+                            ].join("\n"),
+                        },
+                    ],
+                },
+            ],
+            configPairMap: new Map([
+                [
+                    "v0\x00v1",
+                    {
+                        baseAlias: "v0",
+                        headAlias: "v1",
+                        changes: [
+                            {
+                                path: "lines 22-26",
+                                left: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 -         cpus=4",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                                right: [
+                                    "22   process {",
+                                    "23       withName:foo {",
+                                    "24 +         cpus=1",
+                                    "25       }",
+                                    "26   }",
+                                ].join("\n"),
+                            },
+                        ],
+                    },
+                ],
+            ]),
+        });
+
+        initModal();
+        document.querySelector(".diff-cell-trigger").click();
+
+        expect(document.getElementById("log-modal").hidden).toBe(false);
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Config snippet</th>');
+        expect(document.getElementById("log-modal-body").textContent).toContain("lines 22-26");
+        expect(document.getElementById("log-modal-body").textContent).toContain("cpus=4");
+        expect(document.getElementById("log-modal-body").textContent).toContain("cpus=1");
+        expect(document.getElementById("log-modal-body").querySelectorAll(".diff-config-line-changed")).toHaveLength(2);
+        expect(
+            document
+                .getElementById("log-modal-body")
+                .querySelectorAll(".diff-config-line:not(.diff-config-line-changed)").length
+        ).toBeGreaterThan(0);
     });
 
     it("shows pipeline compare modal details in tables", () => {
