@@ -873,6 +873,29 @@ details.dandiset-group[open] > .dandiset-summary::before {
     text-decoration: underline;
 }
 
+.dandi-view-link {
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 2px 8px;
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition:
+        color 0.15s,
+        border-color 0.15s,
+        background 0.15s;
+}
+.dandi-view-link:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+    text-decoration: none;
+}
+
 .dandiset-body {
     padding: 12px 16px 16px;
     display: flex;
