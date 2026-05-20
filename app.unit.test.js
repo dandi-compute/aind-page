@@ -608,7 +608,10 @@ describe("fetchVisualizationData", () => {
                 })
             )
             .mockResolvedValueOnce(
-                new Response(JSON.stringify(treeData), { status: 200, headers: { "Content-Type": "application/json" } })
+                new Response(JSON.stringify(treeData), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
             );
 
         const result = await fetchVisualizationData(
@@ -623,7 +626,39 @@ describe("fetchVisualizationData", () => {
         expect(result[0].images[1].name).toBe("motion.png");
         // Images should be CDN URLs
         expect(result[0].images[0].url).toContain("raw.githubusercontent.com");
+        expect(result[0].images[0].url).toContain("/derivatives/visualization/");
         expect(result[0].images[0].url).toContain("drift_map.png");
+    });
+
+    it("falls back to legacy top-level visualization directory when derivatives layout is missing", async () => {
+        const vizDirItems = [{ type: "dir", name: "recording1", sha: "dir-sha-1" }];
+        const treeData = { tree: [{ type: "blob", path: "drift_map.png" }] };
+
+        global.fetch = vi
+            .fn()
+            .mockResolvedValueOnce(new Response(null, { status: 404 }))
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(vizDirItems), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
+            )
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(treeData), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                })
+            );
+
+        const result = await fetchVisualizationData(
+            "derivatives/dandiset-000001/sub-A/pipeline-test/version-v1/params-abc_attempt-1"
+        );
+
+        expect(result).not.toBeNull();
+        expect(result[0].images[0].url).toContain("raw.githubusercontent.com");
+        expect(result[0].images[0].url).toContain("/visualization/recording1/drift_map.png");
+        expect(global.fetch.mock.calls[0][0]).toContain("/derivatives/visualization?");
+        expect(global.fetch.mock.calls[1][0]).toContain("/visualization?ref=");
     });
 
     it("returns null when all recordings have no PNG images", async () => {
