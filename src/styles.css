@@ -1678,6 +1678,14 @@ details[open] > .params-summary::before {
     color: var(--color-failed);
 }
 
+.diff-config-snippet {
+    margin: 0;
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.85em;
+    line-height: 1.4;
+    white-space: pre;
+}
+
 .diff-empty-state {
     padding: 0 14px 14px;
     color: var(--color-text-secondary);

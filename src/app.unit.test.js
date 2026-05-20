@@ -963,13 +963,27 @@ describe("diff page helpers", () => {
                 ["line 1", "line 2", "line 3", "line 4 changed", "line 5", "line 6", "line 7", "line 8"].join("\n")
             )
         ).toEqual([
-            { path: "line 1", left: "line 1", right: "line 1" },
-            { path: "line 2", left: "line 2", right: "line 2" },
-            { path: "line 3", left: "line 3", right: "line 3" },
-            { path: "line 4", left: "line 4", right: "line 4 changed" },
-            { path: "line 5", left: "line 5", right: "line 5" },
-            { path: "line 6", left: "line 6", right: "line 6" },
-            { path: "line 7", left: "line 7", right: "line 7" },
+            {
+                path: "lines 1-7",
+                left: [
+                    "1   line 1",
+                    "2   line 2",
+                    "3   line 3",
+                    "4 - line 4",
+                    "5   line 5",
+                    "6   line 6",
+                    "7   line 7",
+                ].join("\n"),
+                right: [
+                    "1   line 1",
+                    "2   line 2",
+                    "3   line 3",
+                    "4 + line 4 changed",
+                    "5   line 5",
+                    "6   line 6",
+                    "7   line 7",
+                ].join("\n"),
+            },
         ]);
     });
 
@@ -980,11 +994,13 @@ describe("diff page helpers", () => {
                 ["line 1 changed", "line 2", "line 3", "line 4", "line 5 changed"].join("\n")
             )
         ).toEqual([
-            { path: "line 1", left: "line 1", right: "line 1 changed" },
-            { path: "line 2", left: "line 2", right: "line 2" },
-            { path: "line 3", left: "line 3", right: "line 3" },
-            { path: "line 4", left: "line 4", right: "line 4" },
-            { path: "line 5", left: "line 5", right: "line 5 changed" },
+            {
+                path: "lines 1-5",
+                left: ["1 - line 1", "2   line 2", "3   line 3", "4   line 4", "5 - line 5"].join("\n"),
+                right: ["1 + line 1 changed", "2   line 2", "3   line 3", "4   line 4", "5 + line 5 changed"].join(
+                    "\n"
+                ),
+            },
         ]);
     });
 
@@ -1304,7 +1320,7 @@ describe("diff modal interactions", () => {
         document.querySelector(".diff-cell-trigger").click();
 
         expect(document.getElementById("log-modal").hidden).toBe(false);
-        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Config line</th>');
+        expect(document.getElementById("log-modal-body").innerHTML).toContain('<th scope="col">Config snippet</th>');
         expect(document.getElementById("log-modal-body").textContent).toContain("line 24");
         expect(document.getElementById("log-modal-body").textContent).toContain("cpus=4");
         expect(document.getElementById("log-modal-body").textContent).toContain("cpus=1");

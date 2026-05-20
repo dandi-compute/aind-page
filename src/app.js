@@ -1443,6 +1443,32 @@ function renderNamedDiffTable(
     </div>`;
 }
 
+function renderConfigDiffTable(leftLabel, rightLabel, changes, leftColumnHtml = null, rightColumnHtml = null) {
+    if (changes.length === 0) {
+        return '<p class="diff-empty-state diff-empty-state-inline">No config differences detected.</p>';
+    }
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">Config snippet</th>
+                    <th scope="col">${leftColumnHtml ?? e(leftLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightLabel)}</th>
+                </tr>
+            </thead>
+            <tbody>${changes
+                .map(
+                    (change) => `<tr>
+                    <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
+                    <td><pre class="diff-config-snippet diff-config-snippet-before">${e(change.left ?? "")}</pre></td>
+                    <td><pre class="diff-config-snippet diff-config-snippet-after">${e(change.right ?? "")}</pre></td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
 function renderPipelineCompareBody(baseVersion, headVersion, summary) {
     if (summary?.kind === "same-ref") {
         return '<p class="diff-empty-state diff-empty-state-inline">No distinct pipeline repository commit comparison is available for this version pair.</p>';
@@ -1591,21 +1617,40 @@ function collectTextDiffs(leftText, rightText) {
             changedLineIndexes.push(index);
         }
     }
-    const contextLineIndexes = new Set();
-    for (const changedLineIndex of changedLineIndexes) {
-        const startIndex = Math.max(0, changedLineIndex - 3);
-        const endIndex = Math.min(maxLength - 1, changedLineIndex + 3);
-        for (let index = startIndex; index <= endIndex; index += 1) {
-            contextLineIndexes.add(index);
+    if (changedLineIndexes.length === 0) return [];
+    const contextWindows = changedLineIndexes
+        .map((changedLineIndex) => ({
+            start: Math.max(0, changedLineIndex - 3),
+            end: Math.min(maxLength - 1, changedLineIndex + 3),
+        }))
+        .sort((a, b) => a.start - b.start);
+    const mergedWindows = [];
+    for (const window of contextWindows) {
+        const previous = mergedWindows[mergedWindows.length - 1];
+        if (!previous || window.start > previous.end + 1) {
+            mergedWindows.push({ ...window });
+            continue;
         }
+        previous.end = Math.max(previous.end, window.end);
     }
-    return [...contextLineIndexes]
-        .sort((a, b) => a - b)
-        .map((index) => ({
-            path: `line ${index + 1}`,
-            left: leftLines[index],
-            right: rightLines[index],
-        }));
+    return mergedWindows.map(({ start, end }) => {
+        const lineNumberWidth = String(end + 1).length;
+        const leftSnippet = [];
+        const rightSnippet = [];
+        for (let index = start; index <= end; index += 1) {
+            const left = leftLines[index] ?? "";
+            const right = rightLines[index] ?? "";
+            const lineNumber = String(index + 1).padStart(lineNumberWidth, " ");
+            const isChanged = leftLines[index] !== rightLines[index];
+            leftSnippet.push(`${lineNumber} ${isChanged ? "-" : " "} ${left}`);
+            rightSnippet.push(`${lineNumber} ${isChanged ? "+" : " "} ${right}`);
+        }
+        return {
+            path: start === end ? `line ${start + 1}` : `lines ${start + 1}-${end + 1}`,
+            left: leftSnippet.join("\n"),
+            right: rightSnippet.join("\n"),
+        };
+    });
 }
 
 async function buildConfigDiffPairs() {
@@ -1722,8 +1767,7 @@ function renderDiffPage(data) {
                       const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
                       const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
                       const bodyHtml = `<div class="diff-pair-card">
-                            ${renderNamedDiffTable(
-                                "Config line",
+                            ${renderConfigDiffTable(
                                 baseEntry.alias,
                                 headEntry.alias,
                                 pairChanges,
