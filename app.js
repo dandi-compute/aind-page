@@ -1459,6 +1459,50 @@ function renderNamedDiffTable(
     </div>`;
 }
 
+function renderConfigDiffTable(leftLabel, rightLabel, changes, leftColumnHtml = null, rightColumnHtml = null) {
+    if (changes.length === 0) {
+        return '<p class="diff-empty-state diff-empty-state-inline">No config differences detected.</p>';
+    }
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">Config snippet</th>
+                    <th scope="col">${leftColumnHtml ?? e(leftLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightLabel)}</th>
+                </tr>
+            </thead>
+            <tbody>${changes
+                .map(
+                    (change) => `<tr>
+                    <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
+                    <td>${renderConfigSnippet(change.left, "before")}</td>
+                    <td>${renderConfigSnippet(change.right, "after")}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderConfigSnippet(snippetText, side) {
+    const lines = (snippetText ?? "").split("\n");
+    return `<code class="diff-config-snippet diff-config-snippet-${e(side)}">${lines
+        .map((line) => {
+            const match = line.match(/^(\s*\d+)\s*([ +-])(.*)$/);
+            const lineNumber = match ? match[1] : "";
+            const marker = match ? match[2] : " ";
+            const content = match ? match[3].replace(/^ /, "") : line;
+            const isChanged = marker === "+" || marker === "-";
+            return `<span class="diff-config-line${isChanged ? " diff-config-line-changed" : ""}">
+                <span class="diff-config-line-number">${e(lineNumber)}</span>
+                <span class="diff-config-line-marker">${e(marker === " " ? "·" : marker)}</span>
+                <span class="diff-config-line-content">${e(content)}</span>
+            </span>`;
+        })
+        .join("")}</code>`;
+}
+
 function renderPipelineCompareBody(baseVersion, headVersion, summary) {
     if (summary?.kind === "same-ref") {
         return '<p class="diff-empty-state diff-empty-state-inline">No distinct pipeline repository commit comparison is available for this version pair.</p>';
@@ -1571,12 +1615,12 @@ function renderDiffValue(value) {
     return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
-async function fetchRegistryJson(path) {
-    const resp = await cachedFetch(codeRepoRawUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${path}`));
+async function fetchRegistryFile(path, subdir, kindLabel) {
+    const resp = await cachedFetch(codeRepoRawUrl(`src/dandi_compute_code/aind_ephys_pipeline/${subdir}/${path}`));
     if (!resp.ok) {
-        throw new Error(`Failed to load registered params file ${path} (HTTP ${resp.status}).`);
+        throw new Error(`Failed to load registered ${kindLabel} file ${path} (HTTP ${resp.status}).`);
     }
-    return resp.json();
+    return resp;
 }
 
 async function buildParamsDiffPairs() {
@@ -1585,7 +1629,7 @@ async function buildParamsDiffPairs() {
         paramsEntries.map(async (entry) => ({
             ...entry,
             sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
-            json: await fetchRegistryJson(entry.path),
+            json: await (await fetchRegistryFile(entry.path, "params", "params")).json(),
         }))
     );
     return buildPairwiseComparisons(paramsWithJson).map(([base, head]) => ({
@@ -1594,6 +1638,70 @@ async function buildParamsDiffPairs() {
         baseSourceUrl: base.sourceUrl,
         headSourceUrl: head.sourceUrl,
         changes: collectJsonDiffs(base.json, head.json),
+    }));
+}
+
+function collectTextDiffs(leftText, rightText) {
+    const leftLines = (leftText ?? "").split("\n");
+    const rightLines = (rightText ?? "").split("\n");
+    const maxLength = Math.max(leftLines.length, rightLines.length);
+    const changedLineIndexes = [];
+    for (let index = 0; index < maxLength; index += 1) {
+        if (leftLines[index] !== rightLines[index]) {
+            changedLineIndexes.push(index);
+        }
+    }
+    if (changedLineIndexes.length === 0) return [];
+    const contextWindows = changedLineIndexes
+        .map((changedLineIndex) => ({
+            start: Math.max(0, changedLineIndex - 3),
+            end: Math.min(maxLength - 1, changedLineIndex + 3),
+        }))
+        .sort((a, b) => a.start - b.start);
+    const mergedWindows = [];
+    for (const window of contextWindows) {
+        const previous = mergedWindows[mergedWindows.length - 1];
+        if (!previous || window.start > previous.end + 1) {
+            mergedWindows.push({ ...window });
+            continue;
+        }
+        previous.end = Math.max(previous.end, window.end);
+    }
+    return mergedWindows.map(({ start, end }) => {
+        const lineNumberWidth = String(end + 1).length;
+        const leftSnippet = [];
+        const rightSnippet = [];
+        for (let index = start; index <= end; index += 1) {
+            const left = leftLines[index] ?? "";
+            const right = rightLines[index] ?? "";
+            const lineNumber = String(index + 1).padStart(lineNumberWidth, " ");
+            const isChanged = leftLines[index] !== rightLines[index];
+            leftSnippet.push(`${lineNumber} ${isChanged ? "-" : " "} ${left}`);
+            rightSnippet.push(`${lineNumber} ${isChanged ? "+" : " "} ${right}`);
+        }
+        return {
+            path: start === end ? `line ${start + 1}` : `lines ${start + 1}-${end + 1}`,
+            left: leftSnippet.join("\n"),
+            right: rightSnippet.join("\n"),
+        };
+    });
+}
+
+async function buildConfigDiffPairs() {
+    const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY);
+    const configWithText = await Promise.all(
+        configEntries.map(async (entry) => ({
+            ...entry,
+            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            text: await (await fetchRegistryFile(entry.path, "configs", "config")).text(),
+        }))
+    );
+    return buildPairwiseComparisons(configWithText).map(([base, head]) => ({
+        baseAlias: base.alias,
+        headAlias: head.alias,
+        baseSourceUrl: base.sourceUrl,
+        headSourceUrl: head.sourceUrl,
+        changes: collectTextDiffs(base.text, head.text),
     }));
 }
 
@@ -1640,6 +1748,8 @@ function renderDiffModalTrigger(label, bodyHtml, title = null) {
 }
 
 function renderDiffPage(data) {
+    const configEntries = data.configEntries ?? [];
+    const configPairMap = data.configPairMap ?? new Map();
     const pipelineHtml =
         data.pipelineEntries.length > 1
             ? renderDiffMatrix(
@@ -1680,6 +1790,33 @@ function renderDiffPage(data) {
                   }
               )
             : '<p class="diff-empty-state">No registered params files were found.</p>';
+    const configHtml =
+        configEntries.length > 1
+            ? renderDiffMatrix(
+                  configEntries,
+                  (entry) => renderDiffInlineLink(entry.sourceUrl, entry.alias),
+                  (baseEntry, headEntry) => {
+                      const pair = configPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      const pairChanges = pair?.changes ?? [];
+                      const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
+                      const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
+                      const bodyHtml = `<div class="diff-pair-card">
+                            ${renderConfigDiffTable(
+                                baseEntry.alias,
+                                headEntry.alias,
+                                pairChanges,
+                                baseLinkHtml,
+                                headLinkHtml
+                            )}
+                        </div>`;
+                      const buttonLabel =
+                          pairChanges.length > 0
+                              ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
+                              : "View diff";
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
+                  }
+              )
+            : '<p class="diff-empty-state">No registered config files were found.</p>';
 
     return `<div class="diff-page">
     <section class="diff-section">
@@ -1693,6 +1830,12 @@ function renderDiffPage(data) {
             Registered params JSON diffs
         </div>
         ${paramsHtml}
+    </section>
+    <section class="diff-section">
+        <div class="diff-section-banner">
+            Registered config diffs
+        </div>
+        ${configHtml}
     </section>
 </div>`;
 }
@@ -2311,6 +2454,12 @@ async function init() {
                 sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
             }));
             const paramsPairs = await buildParamsDiffPairs();
+            const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY).map((entry) => ({
+                key: entry.alias,
+                alias: entry.alias,
+                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            }));
+            const configPairs = await buildConfigDiffPairs();
             const diffData = {
                 pipelineEntries,
                 pipelinePairs,
@@ -2320,6 +2469,9 @@ async function init() {
                 paramsEntries,
                 paramsPairs,
                 paramsPairMap: new Map(paramsPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
+                configEntries,
+                configPairs,
+                configPairMap: new Map(configPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
             };
             document.getElementById("runs").innerHTML = renderDiffPage(diffData);
             showDiffResults();
@@ -2443,6 +2595,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderDandisets,
         buildPipelineDiffPairs,
         collectJsonDiffs,
+        collectTextDiffs,
         renderParamsGroup,
         renderDiffPage,
         renderFilterBanner,
