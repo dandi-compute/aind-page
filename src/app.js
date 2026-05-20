@@ -2115,7 +2115,7 @@ async function init() {
         if (diffsLink) diffsLink.hidden = true;
         setPageCopy(
             "AIND Pipeline Diffs Index",
-            'Assembled compare links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> plus diffs across the registered params JSON files.'
+            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions .'
         );
     }
 
