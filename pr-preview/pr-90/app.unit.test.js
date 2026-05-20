@@ -9,6 +9,9 @@ const {
     initModal,
     initLayoutToggle,
     openHtmlModal,
+    neurosiftBlobUrl,
+    neurosiftDandisetUrl,
+    neurosiftSessionUrl,
     parseQueueEntries,
     parseLayoutMode,
     parseRunPath,
@@ -262,6 +265,75 @@ describe("app unit behavior", () => {
         expect(runs[1].hasLogs).toBe(false);
         // null session should not appear in path
         expect(runs[1].path).not.toContain("ses-");
+    });
+
+    it("parses content_id from JSONL entries into run objects", () => {
+        const entries = [
+            {
+                dandiset_id: "000233",
+                subject: "CGM3",
+                session: "CGM3",
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+                content_id: "abcdef1234567890abcdef1234567890abcdef12",
+            },
+            {
+                dandiset_id: "001469",
+                subject: "Chronic-Implant-2",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "aa073df",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: false,
+            },
+        ];
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].contentHash).toBe("abcdef1234567890abcdef1234567890abcdef12");
+        expect(runs[1].contentHash).toBeNull();
+    });
+});
+
+describe("Neurosift URL helpers", () => {
+    it("neurosiftBlobUrl builds correct S3 blob URL", () => {
+        const hash = "abcdef1234567890abcdef1234567890abcdef12";
+        const url = neurosiftBlobUrl(hash);
+        expect(url).toBe(
+            "https://neurosift.app/nwb?url=" +
+                encodeURIComponent(
+                    "https://dandiarchive.s3.amazonaws.com/blobs/abc/def/abcdef1234567890abcdef1234567890abcdef12"
+                )
+        );
+    });
+
+    it("neurosiftDandisetUrl builds correct dandiset URL", () => {
+        expect(neurosiftDandisetUrl("000233")).toBe("https://neurosift.app/dandiset/000233");
+    });
+
+    it("neurosiftSessionUrl prefers blob URL when contentHash is present", () => {
+        const hash = "abcdef1234567890abcdef1234567890abcdef12";
+        const url = neurosiftSessionUrl("000233", hash, "some-asset-id");
+        expect(url).toContain("neurosift.app/nwb?url=");
+        expect(url).toContain(encodeURIComponent("dandiarchive.s3.amazonaws.com/blobs/abc/def/"));
+    });
+
+    it("neurosiftSessionUrl falls back to DANDI API URL when contentHash is absent", () => {
+        const url = neurosiftSessionUrl("000233", null, "some-asset-id");
+        expect(url).toContain("dandiarchive.org");
+        expect(url).toContain("some-asset-id");
+    });
+
+    it("neurosiftSessionUrl returns null when neither contentHash nor assetId is available", () => {
+        expect(neurosiftSessionUrl("000233", null, null)).toBeNull();
     });
 });
 
@@ -615,6 +687,23 @@ describe("renderFlatList", () => {
         expect(html).toContain(">deterministic<");
         expect(html).toContain(
             'href="https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json"'
+        );
+    });
+
+    it("aliases known config hash to explicit registry name with source link", () => {
+        const run = { ...baseRun, configHash: "0d4bf36" };
+        const html = renderFlatList([run]);
+        const container = document.createElement("div");
+        container.innerHTML = html;
+
+        const configLink = [...container.querySelectorAll(".flat-ctx-text .src-link")].find(
+            (link) => link.textContent === "v1"
+        );
+
+        expect(container.textContent).toContain("Config:");
+        expect(configLink).toBeTruthy();
+        expect(configLink?.href).toMatch(
+            /^https:\/\/github\.com\/dandi-compute\/code\/blob\/main\/src\/dandi_compute_code\/aind_ephys_pipeline\/configs\/.+\.config$/
         );
     });
 
