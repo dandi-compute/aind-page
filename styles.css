@@ -1791,3 +1791,359 @@ details[open] > .params-summary::before {
 .flat-ctx-pipeline .pipeline-version {
     font-size: 1em;
 }
+
+/* ─── Params editor ─────────────────────────────────────────── */
+.site-params-link {
+    margin-left: -4px;
+}
+
+.page-content.params-page {
+    max-width: 1400px;
+}
+
+.params-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.params-editor-split {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.params-editor-left {
+    flex: 1 1 55%;
+    min-width: 0;
+}
+
+.params-editor-right {
+    flex: 1 1 45%;
+    min-width: 0;
+    position: sticky;
+    top: 60px;
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+@media (max-width: 700px) {
+    .params-editor-split {
+        flex-direction: column;
+    }
+
+    .params-editor-right {
+        position: static;
+        max-height: 40vh;
+    }
+}
+
+/* ─── Params toolbar ─────────────────────────────────────────── */
+.params-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.params-toolbar-btn {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85em;
+    padding: 4px 12px;
+    transition:
+        color 0.15s,
+        border-color 0.15s,
+        background 0.15s;
+    white-space: nowrap;
+}
+
+.params-toolbar-btn:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+}
+
+.params-toolbar-file-label {
+    display: inline-flex;
+    align-items: center;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85em;
+    padding: 4px 12px;
+    transition:
+        color 0.15s,
+        border-color 0.15s,
+        background 0.15s;
+    white-space: nowrap;
+}
+
+.params-toolbar-file-label:hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+}
+
+.params-toolbar-file-label input[type="file"] {
+    display: none;
+}
+
+.params-toolbar-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85em;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+/* ─── Params form tree ───────────────────────────────────────── */
+.params-section {
+    margin-bottom: 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+}
+
+.params-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    font-size: 0.95em;
+    background: var(--color-bg);
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.params-section-arrow {
+    font-size: 0.7em;
+    color: var(--color-text-secondary);
+    transition: transform 0.2s;
+}
+
+.params-section.collapsed .params-section-arrow {
+    transform: rotate(-90deg);
+}
+
+.params-section.collapsed .params-section-body {
+    display: none;
+}
+
+.params-section-desc {
+    font-weight: 400;
+    font-size: 0.78em;
+    color: var(--color-text-secondary);
+    margin-left: auto;
+}
+
+.params-section-body {
+    padding: 6px 12px 10px;
+}
+
+/* Nested sections */
+.params-section .params-section {
+    border-color: rgba(var(--color-accent-rgb), 0.15);
+    margin-top: 4px;
+}
+
+.params-section .params-section .params-section-header {
+    background: var(--color-surface);
+    font-size: 0.9em;
+}
+
+/* ─── Params fields ──────────────────────────────────────────── */
+.params-field {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 6px 12px;
+    align-items: start;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.params-field:last-child {
+    border-bottom: none;
+}
+
+.params-field-label {
+    font-size: 0.85em;
+    color: var(--color-text);
+    padding-top: 4px;
+    word-break: break-word;
+}
+
+.params-field-desc {
+    display: block;
+    font-size: 0.78em;
+    color: var(--color-text-secondary);
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+.params-field.changed .params-field-label {
+    color: var(--color-accent);
+    font-weight: 600;
+}
+
+.params-field-input input,
+.params-field-input select,
+.params-field-input textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 0.85em;
+    padding: 5px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-bg);
+    color: var(--color-text);
+}
+
+.params-field-input textarea {
+    min-height: 60px;
+    resize: vertical;
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+}
+
+.params-field-input input:focus,
+.params-field-input select:focus,
+.params-field-input textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgba(var(--color-accent-rgb), 0.2);
+}
+
+.params-null-toggle {
+    font-size: 0.78em;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+@media (max-width: 600px) {
+    .params-field {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ─── Params JSON preview panel ──────────────────────────────── */
+.params-output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+
+.params-output-title {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.params-output-header .params-toolbar {
+    margin: 0;
+}
+
+.params-output-pre {
+    flex: 1;
+    overflow: auto;
+    margin: 0;
+    padding: 10px 12px;
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.82em;
+    line-height: 1.55;
+    white-space: pre;
+    color: var(--color-text);
+    background: var(--color-surface);
+    min-height: 0;
+}
+
+/* ─── Params PR instructions ─────────────────────────────────── */
+.params-instructions {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+}
+
+.params-instructions-title {
+    font-size: 0.85em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    margin-bottom: 12px;
+}
+
+.params-instructions-step {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.88em;
+    color: var(--color-text);
+    line-height: 1.5;
+}
+
+.params-instructions-step:last-child {
+    border-bottom: none;
+}
+
+.params-instructions-num {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--color-accent-subtle);
+    border: 1px solid var(--color-accent);
+    color: var(--color-accent);
+    font-size: 0.78em;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.params-instructions a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+.params-instructions a:hover {
+    text-decoration: underline;
+}
+
+.params-instructions code {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.9em;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 1px 5px;
+}
