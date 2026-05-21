@@ -55,6 +55,30 @@ function makeReadableStream(text) {
     });
 }
 
+const REGISTERED_PARAMS_FIXTURE = {
+    deterministic: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+    default: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+    original: { path: "name-original.json", md5: "98fd947595f60b65812a4b0ea29b7141" },
+};
+const REGISTERED_CONFIGS_FIXTURE = {
+    v1: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+    default: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+    v0: { path: "name-mit+engaging_revision-0.config", md5: "6568ddacdedabc7b855769340ed8874f" },
+};
+
+async function loadFixtureRegistries() {
+    const originalFetch = global.fetch;
+    global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_CONFIGS_FIXTURE), { status: 200 }));
+    try {
+        await loadAindPipelineRegistries();
+    } finally {
+        global.fetch = originalFetch;
+    }
+}
+
 beforeEach(() => {
     document.body.innerHTML = "";
 });
@@ -179,7 +203,8 @@ describe("app unit behavior", () => {
         expect(filtered).toEqual([{ status: "failed", failureStep: "pre-processing" }]);
     });
 
-    it("filters runs by params/config types and dandi codebase hash", () => {
+    it("filters runs by params/config types and dandi codebase hash", async () => {
+        await loadFixtureRegistries();
         const runs = [
             {
                 paramsProfile: "4af6a25",
@@ -606,27 +631,8 @@ describe("pipeline registries", () => {
     it("loads params and config registries from GitHub registry files", async () => {
         global.fetch = vi
             .fn()
-            .mockResolvedValueOnce(
-                new Response(
-                    JSON.stringify({
-                        deterministic: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
-                        default: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
-                    }),
-                    { status: 200 }
-                )
-            )
-            .mockResolvedValueOnce(
-                new Response(
-                    JSON.stringify({
-                        v1: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
-                        default: {
-                            path: "name-mit+engaging_revision-1.config",
-                            md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8",
-                        },
-                    }),
-                    { status: 200 }
-                )
-            );
+            .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_CONFIGS_FIXTURE), { status: 200 }));
 
         const registries = await loadAindPipelineRegistries();
 
@@ -643,7 +649,8 @@ describe("pipeline registries", () => {
         expect(registries.configRegistry).toEqual(expect.arrayContaining([expect.objectContaining({ alias: "v1" })]));
     });
 
-    it("falls back to built-in registries when GitHub fetch fails", async () => {
+    it("keeps the last loaded registries when GitHub fetch fails", async () => {
+        await loadFixtureRegistries();
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
 
@@ -972,7 +979,8 @@ describe("renderFlatList", () => {
         expect(html).toContain("fast");
     });
 
-    it("aliases known params hash to explicit registry name with source link", () => {
+    it("aliases known params hash to explicit registry name with source link", async () => {
+        await loadFixtureRegistries();
         const run = { ...baseRun, paramsProfile: "4af6a25" };
         const html = renderFlatList([run]);
         expect(html).toContain("Params:");
@@ -982,7 +990,8 @@ describe("renderFlatList", () => {
         );
     });
 
-    it("aliases known config hash to explicit registry name with source link", () => {
+    it("aliases known config hash to explicit registry name with source link", async () => {
+        await loadFixtureRegistries();
         const run = { ...baseRun, configHash: "0d4bf36" };
         const html = renderFlatList([run]);
         const container = document.createElement("div");
@@ -1068,7 +1077,8 @@ describe("renderDandisets", () => {
 });
 
 describe("renderParamsGroup", () => {
-    it("aliases params and config hashes to explicit registry names with source links", () => {
+    it("aliases params and config hashes to explicit registry names with source links", async () => {
+        await loadFixtureRegistries();
         const html = renderParamsGroup("4af6a25", "0d4bf36", []);
         expect(html).toContain(">deterministic<");
         expect(html).toContain(">v1<");
