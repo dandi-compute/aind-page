@@ -2680,7 +2680,7 @@ function renderParamsEditorShell() {
     <div class="params-editor-split">
         <div class="params-editor-left">
             <div class="params-toolbar">
-                <button class="params-toolbar-btn" id="params-btn-defaults">Load Defaults</button>
+                <button class="params-toolbar-btn" id="params-btn-defaults">Restore</button>
                 <button class="params-toolbar-btn" id="params-btn-collapse">Collapse All</button>
                 <button class="params-toolbar-btn" id="params-btn-expand">Expand All</button>
                 <label class="params-toolbar-toggle">
