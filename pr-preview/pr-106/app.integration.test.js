@@ -13,54 +13,54 @@ beforeEach(() => {
 
 describe("app integration behavior", () => {
     it("renders filter banner with active filter crumb and available options", () => {
+        const failedRun = {
+            dandisetId: "001697",
+            subject: "a",
+            session: "s1",
+            pipelineVersion: "v1",
+            paramsProfile: "params-a",
+            configHash: "config-a",
+            generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "abc1234" }],
+            status: "failed",
+            failureStep: "pre-processing",
+        };
+        const successfulRun = {
+            dandisetId: "001697",
+            subject: "b",
+            session: "s2",
+            pipelineVersion: "v2",
+            paramsProfile: "params-b",
+            configHash: "config-b",
+            generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "def5678" }],
+            status: "success",
+            failureStep: null,
+        };
         renderFilterBanner(
             {
+                // renderFilterBanner filters use paramsType/configType query keys.
                 dandisetId: "001697",
                 subject: null,
                 session: null,
                 pipelineVersion: null,
-                paramsType: "4af6a25",
-                configType: "0d4bf36",
+                paramsType: failedRun.paramsProfile,
+                configType: failedRun.configHash,
                 dandiCodebaseHash: "abc1234",
                 failureStep: "pre-processing",
             },
-            [
-                {
-                    dandisetId: "001697",
-                    subject: "a",
-                    session: "s1",
-                    pipelineVersion: "v1",
-                    paramsProfile: "4af6a25",
-                    configHash: "0d4bf36",
-                    generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "abc1234" }],
-                    status: "failed",
-                    failureStep: "pre-processing",
-                },
-                {
-                    dandisetId: "001697",
-                    subject: "b",
-                    session: "s2",
-                    pipelineVersion: "v2",
-                    paramsProfile: "98fd947",
-                    configHash: "6568dda",
-                    generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "def5678" }],
-                    status: "success",
-                    failureStep: null,
-                },
-            ]
+            [failedRun, successfulRun]
         );
 
         const banner = document.getElementById("filter-banner");
         expect(banner.style.display).toBe("");
         expect(banner.innerHTML).toContain("Filtered view:");
         expect(banner.innerHTML).toContain("Failed in pre-processing");
-        expect(banner.innerHTML).toContain("Params:&nbsp;4af6a25");
-        expect(banner.innerHTML).toContain("Config:&nbsp;0d4bf36");
+        expect(banner.innerHTML).toContain(`Params:&nbsp;${failedRun.paramsProfile}`);
+        expect(banner.innerHTML).toContain(`Config:&nbsp;${failedRun.configHash}`);
         expect(banner.innerHTML).toContain("Codebase:&nbsp;abc1234");
-        expect(banner.innerHTML).toContain('option value="4af6a25"');
-        expect(banner.innerHTML).toContain('option value="98fd947"');
-        expect(banner.innerHTML).toContain('option value="0d4bf36"');
-        expect(banner.innerHTML).toContain('option value="6568dda"');
+        expect(banner.innerHTML).toContain(`option value="${failedRun.paramsProfile}"`);
+        expect(banner.innerHTML).toContain(`option value="${successfulRun.paramsProfile}"`);
+        expect(banner.innerHTML).toContain(`option value="${failedRun.configHash}"`);
+        expect(banner.innerHTML).toContain(`option value="${successfulRun.configHash}"`);
         expect(banner.innerHTML).toContain('option value="abc1234"');
         expect(banner.innerHTML).toContain('option value="def5678"');
     });
