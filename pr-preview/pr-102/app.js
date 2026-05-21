@@ -2704,12 +2704,12 @@ function renderParamsEditorShell() {
     <div class="params-instructions">
         <div class="params-instructions-title">How to submit your params file</div>
         <div class="params-instructions-step">
-            <span class="params-instructions-num">1</span>
-            <span>Login to GitHub (or <a href="https://github.com/join" target="_blank" rel="noopener">create a free account</a>).</span>
-        </div>
-        <div class="params-instructions-step">
             <span class="params-instructions-num">2</span>
             <span>Customize your parameters using the form above, then click <strong>Download</strong> and rename the file to a short descriptive name (e.g.&nbsp;<code>my-params.json</code>).</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">1</span>
+            <span>Login to GitHub (or <a href="https://github.com/join" target="_blank" rel="noopener">create a free account</a>).</span>
         </div>
         <div class="params-instructions-step">
             <span class="params-instructions-num">3</span>
