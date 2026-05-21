@@ -2395,6 +2395,18 @@ let _paramsSchema = null;
 let _paramsCurrentValues = null;
 let _paramsDefaultValues = null;
 
+/* Desired display order for top-level schema sections.
+   Sections not listed here appear after, in schema order. */
+const PARAMS_SECTION_ORDER = [
+    "job_dispatch",
+    "preprocessing",
+    "spikesorting",
+    "postprocessing",
+    "curation",
+    "visualization",
+    "nwb",
+];
+
 /* Strip trailing commas from JSON-like text so files authored with them
    (e.g. default_params.json from the pipeline repo) can be parsed. */
 function stripTrailingCommas(text) {
@@ -2657,7 +2669,12 @@ function buildParamsForm() {
     if (!formRoot) return;
     formRoot.innerHTML = "";
 
-    for (const [key, propSchema] of Object.entries(_paramsSchema.properties)) {
+    const schemaEntries = Object.entries(_paramsSchema.properties);
+    const ordered = [
+        ...PARAMS_SECTION_ORDER.filter((k) => _paramsSchema.properties[k]).map((k) => [k, _paramsSchema.properties[k]]),
+        ...schemaEntries.filter(([k]) => !PARAMS_SECTION_ORDER.includes(k)),
+    ];
+    for (const [key, propSchema] of ordered) {
         const resolved = paramsResolveRef(propSchema);
         formRoot.appendChild(buildParamsSection(key, resolved, [key]));
     }
