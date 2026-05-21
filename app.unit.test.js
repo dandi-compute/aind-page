@@ -9,6 +9,8 @@ const {
     fetchVisualizationData,
     initModal,
     initLayoutToggle,
+    loadAindPipelineRegistries,
+    normalizeRegistryEntries,
     openHtmlModal,
     neurosiftBlobUrl,
     neurosiftDandisetUrl,
@@ -51,6 +53,30 @@ function makeReadableStream(text) {
             controller.close();
         },
     });
+}
+
+const REGISTERED_PARAMS_FIXTURE = {
+    deterministic: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+    default: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+    original: { path: "name-original.json", md5: "98fd947595f60b65812a4b0ea29b7141" },
+};
+const REGISTERED_CONFIGS_FIXTURE = {
+    v1: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+    default: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+    v0: { path: "name-mit+engaging_revision-0.config", md5: "6568ddacdedabc7b855769340ed8874f" },
+};
+
+async function loadFixtureRegistries() {
+    const originalFetch = global.fetch;
+    global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_CONFIGS_FIXTURE), { status: 200 }));
+    try {
+        await loadAindPipelineRegistries();
+    } finally {
+        global.fetch = originalFetch;
+    }
 }
 
 beforeEach(() => {
@@ -177,7 +203,8 @@ describe("app unit behavior", () => {
         expect(filtered).toEqual([{ status: "failed", failureStep: "pre-processing" }]);
     });
 
-    it("filters runs by params/config types and dandi codebase hash", () => {
+    it("filters runs by params/config types and dandi codebase hash", async () => {
+        await loadFixtureRegistries();
         const runs = [
             {
                 paramsProfile: "4af6a25",
@@ -565,6 +592,79 @@ describe("fetchQueueState ETag caching", () => {
     });
 });
 
+describe("pipeline registries", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        originalFetch = global.fetch;
+        sessionStorage.clear();
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("normalizes registry entries and assigns fallback priority", () => {
+        expect(
+            normalizeRegistryEntries({
+                deterministic: { path: "name-deterministic.json", md5: "ABCDEF0123" },
+                default: { path: "name-deterministic.json", md5: "ABCDEF0123" },
+                broken: { path: "missing-md5" },
+            })
+        ).toEqual([
+            {
+                alias: "deterministic",
+                md5: "abcdef0123",
+                path: "name-deterministic.json",
+                priority: 1,
+            },
+            {
+                alias: "default",
+                md5: "abcdef0123",
+                path: "name-deterministic.json",
+                priority: 0,
+            },
+        ]);
+    });
+
+    it("loads params and config registries from GitHub registry files", async () => {
+        global.fetch = vi
+            .fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_CONFIGS_FIXTURE), { status: 200 }));
+
+        const registries = await loadAindPipelineRegistries();
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(global.fetch.mock.calls[0][0]).toContain(
+            "/src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json"
+        );
+        expect(global.fetch.mock.calls[1][0]).toContain(
+            "/src/dandi_compute_code/aind_ephys_pipeline/registries/registered_configs.json"
+        );
+        expect(registries.paramsRegistry).toEqual(
+            expect.arrayContaining([expect.objectContaining({ alias: "deterministic" })])
+        );
+        expect(registries.configRegistry).toEqual(expect.arrayContaining([expect.objectContaining({ alias: "v1" })]));
+    });
+
+    it("keeps the last loaded registries when GitHub fetch fails", async () => {
+        await loadFixtureRegistries();
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
+
+        const registries = await loadAindPipelineRegistries();
+
+        expect(registries.paramsRegistry).toEqual(
+            expect.arrayContaining([expect.objectContaining({ alias: "deterministic" })])
+        );
+        expect(registries.configRegistry).toEqual(expect.arrayContaining([expect.objectContaining({ alias: "v1" })]));
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+});
+
 describe("renderVisualizationSection", () => {
     it("renders a gallery section with recording and image data", () => {
         const recordings = [
@@ -879,7 +979,8 @@ describe("renderFlatList", () => {
         expect(html).toContain("fast");
     });
 
-    it("aliases known params hash to explicit registry name with source link", () => {
+    it("aliases known params hash to explicit registry name with source link", async () => {
+        await loadFixtureRegistries();
         const run = { ...baseRun, paramsProfile: "4af6a25" };
         const html = renderFlatList([run]);
         expect(html).toContain("Params:");
@@ -889,7 +990,8 @@ describe("renderFlatList", () => {
         );
     });
 
-    it("aliases known config hash to explicit registry name with source link", () => {
+    it("aliases known config hash to explicit registry name with source link", async () => {
+        await loadFixtureRegistries();
         const run = { ...baseRun, configHash: "0d4bf36" };
         const html = renderFlatList([run]);
         const container = document.createElement("div");
@@ -975,7 +1077,8 @@ describe("renderDandisets", () => {
 });
 
 describe("renderParamsGroup", () => {
-    it("aliases params and config hashes to explicit registry names with source links", () => {
+    it("aliases params and config hashes to explicit registry names with source links", async () => {
+        await loadFixtureRegistries();
         const html = renderParamsGroup("4af6a25", "0d4bf36", []);
         expect(html).toContain(">deterministic<");
         expect(html).toContain(">v1<");
