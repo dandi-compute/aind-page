@@ -25,36 +25,8 @@ const ROOT_DIFF_PATH_LABEL = "(root)";
 const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
 const REGISTERED_PARAMS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json";
 const REGISTERED_CONFIGS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_configs.json";
-const DEFAULT_PARAMS_REGISTRY = [
-    { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 2 },
-    { alias: "default", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 0 },
-    { alias: "original", md5: "98fd947595f60b65812a4b0ea29b7141", path: "name-original.json", priority: 1 },
-    { alias: "all+channels", md5: "e6a0e8603a19444c0006a1a4d279047a", path: "name-all+channels.json", priority: 1 },
-    {
-        alias: "no+motion",
-        md5: "0d25c9ddf35d3653a693f63b7418c598",
-        path: "name-no+motion_revision-1.json",
-        priority: 1,
-    },
-    {
-        alias: "no+motion_v0",
-        md5: "aa073df2761666edbf0bb66cab85ca4c",
-        path: "name-no+motion_revision-0.json",
-        priority: 1,
-    },
-];
-const DEFAULT_CONFIG_REGISTRY = [
-    { alias: "v1", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config", priority: 2 },
-    {
-        alias: "default",
-        md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8",
-        path: "name-mit+engaging_revision-1.config",
-        priority: 0,
-    },
-    { alias: "v0", md5: "6568ddacdedabc7b855769340ed8874f", path: "name-mit+engaging_revision-0.config", priority: 1 },
-];
-let PARAMS_REGISTRY = [...DEFAULT_PARAMS_REGISTRY];
-let CONFIG_REGISTRY = [...DEFAULT_CONFIG_REGISTRY];
+let PARAMS_REGISTRY = [];
+let CONFIG_REGISTRY = [];
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(["214527"]);
 /* Dandisets used for internal testing – hidden from the main view and moved to
@@ -590,14 +562,12 @@ async function loadAindPipelineRegistries() {
     if (paramsResult.status === "fulfilled") {
         PARAMS_REGISTRY = paramsResult.value;
     } else {
-        PARAMS_REGISTRY = [...DEFAULT_PARAMS_REGISTRY];
-        console.warn(paramsResult.reason?.message ?? "Falling back to default params registry.");
+        console.warn(paramsResult.reason?.message ?? "Failed to load params registry.");
     }
     if (configResult.status === "fulfilled") {
         CONFIG_REGISTRY = configResult.value;
     } else {
-        CONFIG_REGISTRY = [...DEFAULT_CONFIG_REGISTRY];
-        console.warn(configResult.reason?.message ?? "Falling back to default config registry.");
+        console.warn(configResult.reason?.message ?? "Failed to load config registry.");
     }
     return { paramsRegistry: PARAMS_REGISTRY, configRegistry: CONFIG_REGISTRY };
 }

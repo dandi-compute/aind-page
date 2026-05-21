@@ -1,4 +1,22 @@
-const { renderFilterBanner, showDiffResults, showError, showLoading, showResults } = require("./app");
+const {
+    loadAindPipelineRegistries,
+    renderFilterBanner,
+    showDiffResults,
+    showError,
+    showLoading,
+    showResults,
+} = require("./app");
+
+const REGISTERED_PARAMS_FIXTURE = {
+    deterministic: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+    default: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+    original: { path: "name-original.json", md5: "98fd947595f60b65812a4b0ea29b7141" },
+};
+const REGISTERED_CONFIGS_FIXTURE = {
+    v1: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+    default: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+    v0: { path: "name-mit+engaging_revision-0.config", md5: "6568ddacdedabc7b855769340ed8874f" },
+};
 
 beforeEach(() => {
     document.body.innerHTML = `
@@ -9,6 +27,19 @@ beforeEach(() => {
         <div id="layout-bar"></div>
         <div id="runs"></div>
     `;
+});
+
+beforeEach(async () => {
+    const originalFetch = global.fetch;
+    global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_CONFIGS_FIXTURE), { status: 200 }));
+    try {
+        await loadAindPipelineRegistries();
+    } finally {
+        global.fetch = originalFetch;
+    }
 });
 
 describe("app integration behavior", () => {
