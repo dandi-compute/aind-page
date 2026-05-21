@@ -3006,7 +3006,7 @@ async function init() {
     if (_viewMode === "compare") {
         setPageCopy(
             "AIND Pipeline Diffs Index",
-            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions .'
+            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions.'
         );
     }
     if (_viewMode === "params") {
