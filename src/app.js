@@ -53,9 +53,9 @@ function parseViewMode() {
 
 function syncTopNav(viewMode = parseViewMode()) {
     const navLinks = [
-        { selector: ".site-dashboard-link", mode: null },
-        { selector: ".site-diffs-link", mode: "compare" },
-        { selector: ".site-params-link", mode: "params" },
+        { selector: '.site-view-toggle-link[href="./"]', mode: null },
+        { selector: '.site-view-toggle-link[href="?view=compare"]', mode: "compare" },
+        { selector: '.site-view-toggle-link[href="?view=params"]', mode: "params" },
         { selector: '.site-view-toggle-link[href="?view=tests"]', mode: "tests" },
     ];
     navLinks.forEach(({ selector, mode }) => {
