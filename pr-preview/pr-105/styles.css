@@ -118,14 +118,13 @@ body {
     font-size: 0.82em;
     font-weight: 600;
     letter-spacing: 0.04em;
+    border: 0;
     padding: 3px 9px;
     border-right: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 0;
-    border: 0;
     transition:
         color 0.2s,
         background 0.2s,
-        border-color 0.2s,
         box-shadow 0.2s;
     white-space: nowrap;
 }
