@@ -178,13 +178,10 @@ describe("app unit behavior", () => {
         `;
 
         syncTopNav("tests");
+        const testsLink = document.querySelector('.site-view-toggle-link[href="?view=tests"]');
 
-        expect(document.querySelector('.site-view-toggle-link[href="?view=tests"]').classList.contains("active")).toBe(
-            true
-        );
-        expect(document.querySelector('.site-view-toggle-link[href="?view=tests"]').getAttribute("aria-current")).toBe(
-            "page"
-        );
+        expect(testsLink.classList.contains("active")).toBe(true);
+        expect(testsLink.getAttribute("aria-current")).toBe("page");
         expect(document.querySelector(".site-diffs-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-diffs-link").hasAttribute("aria-current")).toBe(false);
         expect(document.querySelector(".site-params-link").classList.contains("active")).toBe(false);
