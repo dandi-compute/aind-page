@@ -15,6 +15,7 @@ const {
     neurosiftSessionUrl,
     parseQueueEntries,
     parseLayoutMode,
+    parseSortMode,
     parseRunPath,
     parseTrace,
     renderDiffPage,
@@ -24,6 +25,7 @@ const {
     renderFlatList,
     renderVisualizationSection,
     runFailureStep,
+    sortRuns,
     uniquePipelineEntries,
 } = require("./app");
 
@@ -70,6 +72,18 @@ describe("app unit behavior", () => {
         localStorage.setItem("layoutMode", "flat");
         window.history.replaceState(null, "", "/");
         expect(parseLayoutMode()).toBe("flat");
+    });
+
+    it("parses sort mode from URL query when present", () => {
+        localStorage.setItem("sortMode", "attempt");
+        window.history.replaceState(null, "", "/?sort=created_at");
+        expect(parseSortMode()).toBe("created_at");
+    });
+
+    it("falls back to localStorage sort mode when URL query is absent", () => {
+        localStorage.setItem("sortMode", "created_at");
+        window.history.replaceState(null, "", "/");
+        expect(parseSortMode()).toBe("created_at");
     });
 
     it("classifies failure steps from task names", () => {
@@ -316,6 +330,29 @@ describe("app unit behavior", () => {
         const runs = parseQueueEntries(entries);
         expect(runs[0].contentHash).toBe("abcdef1234567890abcdef1234567890abcdef12");
         expect(runs[1].contentHash).toBeNull();
+    });
+
+    it("parses created_at from JSONL entries into run objects", () => {
+        const entries = [
+            {
+                dandiset_id: "000233",
+                subject: "CGM3",
+                session: "CGM3",
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+                created_at: "2026-05-20T09:15:00Z",
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].createdAt).toBe("2026-05-20T09:15:00Z");
+        expect(runs[0].runDate).toBe("2026-05-20T09:15:00Z");
     });
 
     it("parses subject and session from dandi_path when queue entry omits fields", () => {
@@ -720,6 +757,26 @@ describe("renderFlatList", () => {
     it("wraps runs in a flat-list container", () => {
         const html = renderFlatList([baseRun]);
         expect(html).toContain('class="flat-list"');
+    });
+
+    it("sorts runs by created_at when requested", () => {
+        const newerRun = {
+            ...baseRun,
+            path: `${baseRun.path}-newer`,
+            createdAt: "2026-05-20T09:15:00Z",
+            runDate: "2026-05-20T09:15:00Z",
+            subject: "B",
+        };
+        const olderRun = {
+            ...baseRun,
+            path: `${baseRun.path}-older`,
+            createdAt: "2026-05-19T09:15:00Z",
+            runDate: "2026-05-19T09:15:00Z",
+            subject: "A",
+        };
+
+        const sortedRuns = sortRuns([olderRun, newerRun], "created_at");
+        expect(sortedRuns.map((run) => run.subject)).toEqual(["B", "A"]);
     });
 
     it("includes dandiset ID in each flat run entry", () => {
@@ -1505,5 +1562,18 @@ describe("initLayoutToggle", () => {
         expect(params.get("view")).toBe("tests");
         expect(params.get("dandiset")).toBe("001697");
         expect(localStorage.getItem("layoutMode")).toBe("flat");
+    });
+
+    it("updates URL sort query param while preserving other URL state", () => {
+        initLayoutToggle();
+        const select = document.querySelector("[data-sort-mode]");
+        select.value = "created_at";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+
+        const params = new URLSearchParams(window.location.search);
+        expect(params.get("sort")).toBe("created_at");
+        expect(params.get("view")).toBe("tests");
+        expect(params.get("dandiset")).toBe("001697");
+        expect(localStorage.getItem("sortMode")).toBe("created_at");
     });
 });

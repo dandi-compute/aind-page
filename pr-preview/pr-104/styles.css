@@ -1398,6 +1398,7 @@ details[open] > .params-summary::before {
 .layout-bar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
     margin: 0 0 12px;
 }
@@ -1426,6 +1427,23 @@ details[open] > .params-summary::before {
         border-color 0.15s,
         background 0.15s;
     white-space: nowrap;
+}
+
+.layout-sort-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 8px;
+}
+
+.layout-sort-select {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 0.82em;
+    padding: 3px 10px;
 }
 .layout-btn:hover {
     color: var(--color-accent);

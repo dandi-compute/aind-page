@@ -64,6 +64,8 @@ let _viewMode = null;
 
 /* Module-level layout mode ("tree" | "flat"), toggled by the layout bar */
 let _layoutMode = "tree";
+/* Module-level sort mode ("attempt" | "created_at"), toggled by the layout bar */
+let _sortMode = "attempt";
 /* Cached filtered runs for re-rendering on layout toggle */
 let _filteredRuns = [];
 
@@ -77,10 +79,24 @@ function parseLayoutMode() {
     return localStorage.getItem("layoutMode") === "flat" ? "flat" : "tree";
 }
 
+function parseSortMode() {
+    const sort = new URLSearchParams(window.location.search).get("sort");
+    if (sort === "attempt" || sort === "created_at") return sort;
+    return localStorage.getItem("sortMode") === "created_at" ? "created_at" : "attempt";
+}
+
 function updateLayoutModeUrl(mode) {
     if (mode !== "flat" && mode !== "tree") return;
     const params = new URLSearchParams(window.location.search);
     params.set("layout", mode);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+}
+
+function updateSortModeUrl(mode) {
+    if (mode !== "attempt" && mode !== "created_at") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("sort", mode);
     const qs = params.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
 }
@@ -201,6 +217,7 @@ function applyFilter(runs, filter) {
 function narrowUrl(params) {
     const sp = new URLSearchParams();
     sp.set("layout", parseLayoutMode());
+    sp.set("sort", parseSortMode());
     if (_viewMode === "tests") sp.set("view", "tests");
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
@@ -238,6 +255,7 @@ function renderFilterInput(name, label, value, suggestions, clearHref = null) {
 function renderFilterBanner(filter, availableRuns = []) {
     const banner = document.getElementById("filter-banner");
     const layoutMode = parseLayoutMode();
+    const sortMode = parseSortMode();
     const isFiltered = !!(
         filter.dandisetId ||
         filter.subject ||
@@ -337,8 +355,10 @@ function renderFilterBanner(filter, availableRuns = []) {
 
     const viewHiddenInput = _viewMode === "tests" ? `<input type="hidden" name="view" value="tests">` : "";
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
+    const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const clearAllParams = new URLSearchParams();
     clearAllParams.set("layout", layoutMode);
+    clearAllParams.set("sort", sortMode);
     if (_viewMode === "tests") clearAllParams.set("view", "tests");
     const clearAllHref = `?${clearAllParams.toString()}`;
 
@@ -348,6 +368,7 @@ ${testsPageHtml}<div class="filter-banner-main">
     <form class="filter-form" method="get" action="">
         ${viewHiddenInput}
         ${layoutHiddenInput}
+        ${sortHiddenInput}
         ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
         ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
         ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
@@ -678,6 +699,7 @@ function buildRunPath(entry) {
 function parseQueueEntries(entries) {
     return entries.map((entry) => {
         const parsed = parseDandiPath(entry.dandi_path);
+        const createdAt = entry.created_at ?? null;
         return {
             path: buildRunPath(entry),
             dandisetId: entry.dandiset_id,
@@ -692,7 +714,8 @@ function parseQueueEntries(entries) {
             hasOutput: entry.has_output,
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
-            runDate: null,
+            createdAt,
+            runDate: createdAt,
         };
     });
 }
@@ -764,9 +787,22 @@ function parseRunPath(runPath) {
         pipelineVersion,
         paramsProfile,
         configHash,
+        createdAt: null,
         runDate: null,
         attempt,
     };
+}
+
+function sortRuns(runs, sortMode = _sortMode) {
+    return [...runs].sort((a, b) => {
+        if (sortMode === "created_at") {
+            const createdCompare = String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""));
+            if (createdCompare !== 0) return createdCompare;
+        }
+        const attemptCompare = (b.attempt ?? 0) - (a.attempt ?? 0);
+        if (attemptCompare !== 0) return attemptCompare;
+        return String(a.path ?? "").localeCompare(String(b.path ?? ""));
+    });
 }
 
 /* ─── Trace parsing ─────────────────────────────────────────── */
@@ -2089,7 +2125,7 @@ function renderFlatRunEntry(run) {
 }
 
 function renderFlatList(runs) {
-    return `<div class="flat-list">${runs.map(renderFlatRunEntry).join("")}</div>`;
+    return `<div class="flat-list">${sortRuns(runs).map(renderFlatRunEntry).join("")}</div>`;
 }
 
 /* ─── Layout toggle ─────────────────────────────────────────── */
@@ -2099,12 +2135,20 @@ function renderLayoutBar() {
     <span class="layout-bar-label">View:</span>
     <button class="layout-btn${!isFlat ? " layout-btn-active" : ""}" data-layout="tree" aria-pressed="${!isFlat}">Tree</button>
     <button class="layout-btn${isFlat ? " layout-btn-active" : ""}" data-layout="flat" aria-pressed="${isFlat}">Flat</button>
+    <label class="layout-sort-wrap">
+        <span class="layout-bar-label">Sort by:</span>
+        <select class="layout-sort-select" data-sort-mode aria-label="Sort runs">
+            <option value="attempt"${_sortMode === "attempt" ? " selected" : ""}>Attempt</option>
+            <option value="created_at"${_sortMode === "created_at" ? " selected" : ""}>Created</option>
+        </select>
+    </label>
 </div>`;
 }
 
 function rerenderRuns() {
+    const sortedRuns = sortRuns(_filteredRuns);
     document.getElementById("runs").innerHTML =
-        _layoutMode === "flat" ? renderFlatList(_filteredRuns) : renderDandisets(_filteredRuns);
+        _layoutMode === "flat" ? renderFlatList(sortedRuns) : renderDandisets(sortedRuns);
     initInlineHtmlFrames();
 }
 
@@ -2121,6 +2165,16 @@ function initLayoutToggle() {
         localStorage.setItem("layoutMode", mode);
         updateLayoutModeUrl(mode);
         bar.innerHTML = renderLayoutBar();
+        rerenderRuns();
+    });
+    bar.addEventListener("change", (ev) => {
+        const select = ev.target.closest("[data-sort-mode]");
+        if (!select) return;
+        const mode = select.value;
+        if (mode === _sortMode) return;
+        _sortMode = mode;
+        localStorage.setItem("sortMode", mode);
+        updateSortModeUrl(mode);
         rerenderRuns();
     });
 }
@@ -3000,16 +3054,15 @@ async function init() {
             })
         );
 
-        // Sort by attempt (descending); no run date available from JSONL
-        runsWithStatus.sort((a, b) => b.attempt - a.attempt);
+        const sortedRuns = sortRuns(runsWithStatus, parseSortMode());
 
         // Scope runs by view mode:
         //   tests page  → show only TEST_DANDISETS entries
         //   main page   → hide TEST_DANDISETS entries
         const runsInScope =
             _viewMode === "tests"
-                ? runsWithStatus.filter((r) => TEST_DANDISETS.has(r.dandisetId))
-                : runsWithStatus.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
+                ? sortedRuns.filter((r) => TEST_DANDISETS.has(r.dandisetId))
+                : sortedRuns.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
 
         const filter = parseFilter();
         const isFiltered = !!(
@@ -3037,9 +3090,11 @@ async function init() {
         renderFilterBanner(filter, runsInScope);
         _filteredRuns = filteredRuns;
         _layoutMode = parseLayoutMode();
+        _sortMode = parseSortMode();
         updateLayoutModeUrl(_layoutMode);
+        updateSortModeUrl(_sortMode);
         document.getElementById("runs").innerHTML =
-            _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(filteredRuns);
+            _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(sortRuns(filteredRuns));
         initInlineHtmlFrames();
         initLayoutToggle();
         showResults();
@@ -3066,6 +3121,7 @@ if (typeof module !== "undefined" && module.exports) {
         neurosiftSessionUrl,
         parseQueueEntries,
         parseLayoutMode,
+        parseSortMode,
         parseRunPath,
         parseTrace,
         parseViewMode,
@@ -3080,6 +3136,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderRegistryLink,
         renderVisualizationSection,
         runFailureStep,
+        sortRuns,
         uniquePipelineEntries,
         uniqueRegistryEntries,
         showError,
