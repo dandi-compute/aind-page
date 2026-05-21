@@ -2705,7 +2705,7 @@ function renderParamsEditorShell() {
         <div class="params-instructions-title">How to submit your params file</div>
         <div class="params-instructions-step">
             <span class="params-instructions-num">1</span>
-            <span>Create a free GitHub account at <a href="https://github.com/join" target="_blank" rel="noopener">github.com/join</a> if you don't already have one.</span>
+            <span>Login to GitHub (or <a href="https://github.com/join" target="_blank" rel="noopener">create a free account</a>).</span>
         </div>
         <div class="params-instructions-step">
             <span class="params-instructions-num">2</span>
@@ -2713,7 +2713,7 @@ function renderParamsEditorShell() {
         </div>
         <div class="params-instructions-step">
             <span class="params-instructions-num">3</span>
-            <span>Open the <a href="${e(codeRepoUrl)}" target="_blank" rel="noopener">dandi-compute/code</a> repository, click <strong>Fork</strong>, and create your own copy.</span>
+            <span>Open the <a href="${e(codeRepoUrl)}" target="_blank" rel="noopener">dandi-compute/code</a> repository and click <strong>Fork</strong> to create your own copy.</span>
         </div>
         <div class="params-instructions-step">
             <span class="params-instructions-num">4</span>
