@@ -171,8 +171,8 @@ describe("app unit behavior", () => {
         document.body.innerHTML = `
             <nav>
                 <a class="site-dashboard-link site-view-toggle-link" href="./"></a>
-                <a class="site-diffs-link site-tests-link site-view-toggle-link active" href="?view=compare" aria-current="page"></a>
-                <a class="site-params-link site-tests-link site-view-toggle-link" href="?view=params"></a>
+                <a class="site-diffs-link site-view-toggle-link" href="?view=compare"></a>
+                <a class="site-params-link site-view-toggle-link" href="?view=params"></a>
                 <a class="site-tests-link site-view-toggle-link" href="?view=tests"></a>
             </nav>
         `;
