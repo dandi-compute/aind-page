@@ -23,7 +23,9 @@ const FULL_COMMIT_HASH_LENGTH = 40;
 const DANDI_CODE_REPO_PATTERN = /github\.com\/dandi-compute\/code(?:\/|$)/;
 const ROOT_DIFF_PATH_LABEL = "(root)";
 const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
-const PARAMS_REGISTRY = [
+const REGISTERED_PARAMS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json";
+const REGISTERED_CONFIGS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_configs.json";
+const DEFAULT_PARAMS_REGISTRY = [
     { alias: "deterministic", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 2 },
     { alias: "default", md5: "4af6a25e20e376c81895ce9350a9cbd4", path: "name-deterministic.json", priority: 0 },
     { alias: "original", md5: "98fd947595f60b65812a4b0ea29b7141", path: "name-original.json", priority: 1 },
@@ -41,7 +43,7 @@ const PARAMS_REGISTRY = [
         priority: 1,
     },
 ];
-const CONFIG_REGISTRY = [
+const DEFAULT_CONFIG_REGISTRY = [
     { alias: "v1", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8", path: "name-mit+engaging_revision-1.config", priority: 2 },
     {
         alias: "default",
@@ -51,6 +53,8 @@ const CONFIG_REGISTRY = [
     },
     { alias: "v0", md5: "6568ddacdedabc7b855769340ed8874f", path: "name-mit+engaging_revision-0.config", priority: 1 },
 ];
+let PARAMS_REGISTRY = [...DEFAULT_PARAMS_REGISTRY];
+let CONFIG_REGISTRY = [...DEFAULT_CONFIG_REGISTRY];
 /* Dandisets hosted on the sandbox archive instead of the production archive */
 const SANDBOX_DANDISETS = new Set(["214527"]);
 /* Dandisets used for internal testing – hidden from the main view and moved to
@@ -546,6 +550,56 @@ async function cachedFetch(url, init = {}) {
     }
 
     return new Response(body, { status: resp.status, headers: { "Content-Type": contentType } });
+}
+
+function normalizeRegistryEntries(registryEntries) {
+    if (!registryEntries || typeof registryEntries !== "object" || Array.isArray(registryEntries)) return [];
+    return Object.entries(registryEntries).flatMap(([alias, entry]) => {
+        if (typeof alias !== "string" || !alias.trim()) return [];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+        if (typeof entry.path !== "string" || !entry.path.trim()) return [];
+        if (typeof entry.md5 !== "string" || !entry.md5.trim()) return [];
+        return [
+            {
+                alias,
+                md5: entry.md5.toLowerCase(),
+                path: entry.path,
+                priority: alias === "default" ? 0 : REGISTRY_FALLBACK_ALIAS_PRIORITY,
+            },
+        ];
+    });
+}
+
+async function fetchRegistryEntries(path, kindLabel) {
+    const response = await cachedFetch(codeRepoRawUrl(path));
+    if (!response.ok) {
+        throw new Error(`Failed to load ${kindLabel} registry (HTTP ${response.status}).`);
+    }
+    const entries = normalizeRegistryEntries(await response.json());
+    if (entries.length === 0) {
+        throw new Error(`Loaded ${kindLabel} registry is empty or invalid.`);
+    }
+    return entries;
+}
+
+async function loadAindPipelineRegistries() {
+    const [paramsResult, configResult] = await Promise.allSettled([
+        fetchRegistryEntries(REGISTERED_PARAMS_PATH, "params"),
+        fetchRegistryEntries(REGISTERED_CONFIGS_PATH, "config"),
+    ]);
+    if (paramsResult.status === "fulfilled") {
+        PARAMS_REGISTRY = paramsResult.value;
+    } else {
+        PARAMS_REGISTRY = [...DEFAULT_PARAMS_REGISTRY];
+        console.warn(paramsResult.reason?.message ?? "Falling back to default params registry.");
+    }
+    if (configResult.status === "fulfilled") {
+        CONFIG_REGISTRY = configResult.value;
+    } else {
+        CONFIG_REGISTRY = [...DEFAULT_CONFIG_REGISTRY];
+        console.warn(configResult.reason?.message ?? "Falling back to default config registry.");
+    }
+    return { paramsRegistry: PARAMS_REGISTRY, configRegistry: CONFIG_REGISTRY };
 }
 
 /* ─── Data fetching ─────────────────────────────────────────── */
@@ -3017,6 +3071,9 @@ async function init() {
     }
 
     showLoading();
+    if (_viewMode !== "params") {
+        await loadAindPipelineRegistries();
+    }
     if (_viewMode === "compare") {
         try {
             const entries = await fetchQueueState();
@@ -3185,6 +3242,8 @@ if (typeof module !== "undefined" && module.exports) {
         buildPipelineDiffPairs,
         collectJsonDiffs,
         collectTextDiffs,
+        loadAindPipelineRegistries,
+        normalizeRegistryEntries,
         renderParamsGroup,
         renderDiffPage,
         renderFilterBanner,
