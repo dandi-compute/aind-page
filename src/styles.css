@@ -112,7 +112,8 @@ body {
     flex-shrink: 0;
 }
 
-.site-tests-link {
+.site-tests-link,
+.site-dashboard-link {
     color: rgba(255, 255, 255, 0.55);
     text-decoration: none;
     font-size: 0.82em;
@@ -128,14 +129,17 @@ body {
         box-shadow 0.2s;
     white-space: nowrap;
 }
-.site-tests-link:last-child {
+.site-tests-link:last-child,
+.site-dashboard-link:last-child {
     border-right: 0;
 }
-.site-tests-link:hover {
+.site-tests-link:hover,
+.site-dashboard-link:hover {
     color: rgba(255, 255, 255, 0.95);
     background: rgba(255, 255, 255, 0.08);
 }
-.site-tests-link.active {
+.site-tests-link.active,
+.site-dashboard-link.active {
     color: #fff;
     background: rgba(var(--color-accent-rgb), 0.3);
     box-shadow: inset 0 0 0 1px rgba(var(--color-accent-rgb), 0.8);
