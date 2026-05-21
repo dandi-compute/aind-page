@@ -15,7 +15,7 @@ const AIND_EPHYS_PIPELINE_CODE_URL =
     "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
 const PARAMS_SCHEMA_URL =
     "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params_schema.json";
-const PARAMS_DEFAULTS_URL =
+const PARAMS_PLACEHOLDER_URL =
     "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params.json";
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
@@ -2807,7 +2807,7 @@ async function initParamsEditor() {
     _paramsSchema = await schemaResp.json();
 
     try {
-        const defResp = await cachedFetch(PARAMS_DEFAULTS_URL);
+        const defResp = await cachedFetch(PARAMS_PLACEHOLDER_URL);
         if (defResp.ok) {
             const text = stripTrailingCommas(await defResp.text());
             _paramsDefaultValues = JSON.parse(text);
