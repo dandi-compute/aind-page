@@ -1,22 +1,4 @@
-const {
-    loadAindPipelineRegistries,
-    renderFilterBanner,
-    showDiffResults,
-    showError,
-    showLoading,
-    showResults,
-} = require("./app");
-
-const REGISTERED_PARAMS_FIXTURE = {
-    deterministic: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
-    default: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
-    original: { path: "name-original.json", md5: "98fd947595f60b65812a4b0ea29b7141" },
-};
-const REGISTERED_CONFIGS_FIXTURE = {
-    v1: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
-    default: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
-    v0: { path: "name-mit+engaging_revision-0.config", md5: "6568ddacdedabc7b855769340ed8874f" },
-};
+const { renderFilterBanner, showDiffResults, showError, showLoading, showResults } = require("./app");
 
 beforeEach(() => {
     document.body.innerHTML = `
@@ -29,19 +11,6 @@ beforeEach(() => {
     `;
 });
 
-beforeEach(async () => {
-    const originalFetch = global.fetch;
-    global.fetch = vi
-        .fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(REGISTERED_CONFIGS_FIXTURE), { status: 200 }));
-    try {
-        await loadAindPipelineRegistries();
-    } finally {
-        global.fetch = originalFetch;
-    }
-});
-
 describe("app integration behavior", () => {
     it("renders filter banner with active filter crumb and available options", () => {
         renderFilterBanner(
@@ -50,8 +19,8 @@ describe("app integration behavior", () => {
                 subject: null,
                 session: null,
                 pipelineVersion: null,
-                paramsType: "deterministic",
-                configType: "v1",
+                paramsType: "4af6a25",
+                configType: "0d4bf36",
                 dandiCodebaseHash: "abc1234",
                 failureStep: "pre-processing",
             },
@@ -85,13 +54,13 @@ describe("app integration behavior", () => {
         expect(banner.style.display).toBe("");
         expect(banner.innerHTML).toContain("Filtered view:");
         expect(banner.innerHTML).toContain("Failed in pre-processing");
-        expect(banner.innerHTML).toContain("Params:&nbsp;deterministic");
-        expect(banner.innerHTML).toContain("Config:&nbsp;v1");
+        expect(banner.innerHTML).toContain("Params:&nbsp;4af6a25");
+        expect(banner.innerHTML).toContain("Config:&nbsp;0d4bf36");
         expect(banner.innerHTML).toContain("Codebase:&nbsp;abc1234");
-        expect(banner.innerHTML).toContain('option value="v1"');
-        expect(banner.innerHTML).toContain('option value="deterministic"');
-        expect(banner.innerHTML).toContain('option value="original"');
-        expect(banner.innerHTML).toContain('option value="v0"');
+        expect(banner.innerHTML).toContain('option value="4af6a25"');
+        expect(banner.innerHTML).toContain('option value="98fd947"');
+        expect(banner.innerHTML).toContain('option value="0d4bf36"');
+        expect(banner.innerHTML).toContain('option value="6568dda"');
         expect(banner.innerHTML).toContain('option value="abc1234"');
         expect(banner.innerHTML).toContain('option value="def5678"');
     });
