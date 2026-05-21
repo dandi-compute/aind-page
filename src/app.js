@@ -75,6 +75,22 @@ function parseViewMode() {
     return new URLSearchParams(window.location.search).get("view") ?? null;
 }
 
+function syncTopNav(viewMode = parseViewMode()) {
+    const navLinks = [
+        { selector: ".site-tests-link", mode: "tests" },
+        { selector: ".site-diffs-link", mode: "compare" },
+        { selector: ".site-params-link", mode: "params" },
+    ];
+    navLinks.forEach(({ selector, mode }) => {
+        const link = document.querySelector(selector);
+        if (!link) return;
+        const active = viewMode === mode;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+    });
+}
+
 function parseLayoutMode() {
     const layout = new URLSearchParams(window.location.search).get("layout");
     if (layout === "flat" || layout === "tree") return layout;
@@ -2986,23 +3002,14 @@ async function init() {
     _viewMode = parseViewMode();
     initTheme();
     initModal();
-
-    // Hide the "Tests" nav link when already on the tests page
-    if (_viewMode === "tests") {
-        const testsLink = document.querySelector(".site-tests-link");
-        if (testsLink) testsLink.hidden = true;
-    }
+    syncTopNav(_viewMode);
     if (_viewMode === "compare") {
-        const diffsLink = document.querySelector(".site-diffs-link");
-        if (diffsLink) diffsLink.hidden = true;
         setPageCopy(
             "AIND Pipeline Diffs Index",
             'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions .'
         );
     }
     if (_viewMode === "params") {
-        const paramsLink = document.querySelector(".site-params-link");
-        if (paramsLink) paramsLink.hidden = true;
         setPageCopy(
             "Register New Params File",
             'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
@@ -3173,6 +3180,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseRunPath,
         parseTrace,
         parseViewMode,
+        syncTopNav,
         renderDandisets,
         buildPipelineDiffPairs,
         collectJsonDiffs,
