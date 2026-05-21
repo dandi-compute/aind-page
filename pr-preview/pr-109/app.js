@@ -53,7 +53,8 @@ function parseViewMode() {
 
 function syncTopNav(viewMode = parseViewMode()) {
     const navLinks = [
-        { selector: ".site-tests-link", mode: "tests" },
+        { selector: ".site-dashboard-link", mode: null },
+        { selector: ".site-tests-link:not(.site-dashboard-link)", mode: "tests" },
         { selector: ".site-diffs-link", mode: "compare" },
         { selector: ".site-params-link", mode: "params" },
     ];

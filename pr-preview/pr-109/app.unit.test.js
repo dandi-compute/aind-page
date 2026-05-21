@@ -129,6 +129,7 @@ describe("app unit behavior", () => {
     it("marks only the selected top nav link as active", () => {
         document.body.innerHTML = `
             <nav>
+                <a class="site-dashboard-link"></a>
                 <a class="site-tests-link"></a>
                 <a class="site-diffs-link"></a>
                 <a class="site-params-link"></a>
@@ -137,15 +138,17 @@ describe("app unit behavior", () => {
 
         syncTopNav("compare");
 
+        expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-diffs-link").classList.contains("active")).toBe(true);
         expect(document.querySelector(".site-diffs-link").getAttribute("aria-current")).toBe("page");
         expect(document.querySelector(".site-params-link").classList.contains("active")).toBe(false);
     });
 
-    it("clears active state from all top nav links when no view is selected", () => {
+    it("marks dashboard top nav link as active when no view is selected", () => {
         document.body.innerHTML = `
             <nav>
+                <a class="site-dashboard-link"></a>
                 <a class="site-tests-link active" aria-current="page"></a>
                 <a class="site-diffs-link active" aria-current="page"></a>
                 <a class="site-params-link active" aria-current="page"></a>
@@ -154,10 +157,14 @@ describe("app unit behavior", () => {
 
         syncTopNav(null);
 
-        document.querySelectorAll("a").forEach((link) => {
-            expect(link.classList.contains("active")).toBe(false);
-            expect(link.hasAttribute("aria-current")).toBe(false);
-        });
+        expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(true);
+        expect(document.querySelector(".site-dashboard-link").getAttribute("aria-current")).toBe("page");
+        expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-tests-link").hasAttribute("aria-current")).toBe(false);
+        expect(document.querySelector(".site-diffs-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-diffs-link").hasAttribute("aria-current")).toBe(false);
+        expect(document.querySelector(".site-params-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-params-link").hasAttribute("aria-current")).toBe(false);
     });
 
     it("classifies failure steps from task names", () => {
