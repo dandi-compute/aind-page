@@ -88,8 +88,8 @@ describe("app integration behavior", () => {
         expect(document.getElementById("runs").style.display).toBe("");
     });
 
-    it("includes layout and sort mode in filter form and clear links for shareable URLs", () => {
-        window.history.replaceState(null, "", "/?layout=flat&sort=created_at");
+    it("includes layout, sort mode, and sort direction in filter form and clear links for shareable URLs", () => {
+        window.history.replaceState(null, "", "/?layout=flat&sort=created_at&sortDir=asc");
         renderFilterBanner(
             {
                 dandisetId: null,
@@ -107,7 +107,8 @@ describe("app integration behavior", () => {
         const banner = document.getElementById("filter-banner");
         expect(banner.innerHTML).toContain('name="layout" value="flat"');
         expect(banner.innerHTML).toContain('name="sort" value="created_at"');
-        expect(banner.innerHTML).toContain('href="?layout=flat&amp;sort=created_at"');
+        expect(banner.innerHTML).toContain('name="sortDir" value="asc"');
+        expect(banner.innerHTML).toContain('href="?layout=flat&amp;sort=created_at&amp;sortDir=asc"');
     });
 
     it("scopes subject and session options based on selected dandiset and subject", () => {

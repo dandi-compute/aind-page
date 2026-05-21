@@ -1397,10 +1397,22 @@ details[open] > .params-summary::before {
 /* ─── Layout toggle bar (Tree / Flat) ───────────────────────── */
 .layout-bar {
     display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 12px;
+}
+
+.layout-bar-group {
+    display: inline-flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    margin: 0 0 12px;
+}
+
+.layout-bar-group-sort {
+    justify-content: flex-end;
 }
 
 .layout-bar-label {
@@ -1433,7 +1445,6 @@ details[open] > .params-summary::before {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-left: 8px;
 }
 
 .layout-sort-select {
@@ -1445,6 +1456,12 @@ details[open] > .params-summary::before {
     font-size: 0.82em;
     padding: 3px 10px;
 }
+
+.layout-sort-direction-btn {
+    min-width: 38px;
+    padding: 3px 10px;
+}
+
 .layout-btn:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);

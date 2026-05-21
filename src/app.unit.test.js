@@ -15,6 +15,7 @@ const {
     neurosiftSessionUrl,
     parseQueueEntries,
     parseLayoutMode,
+    parseSortDirection,
     parseSortMode,
     parseRunPath,
     parseTrace,
@@ -84,6 +85,18 @@ describe("app unit behavior", () => {
         localStorage.setItem("sortMode", "created_at");
         window.history.replaceState(null, "", "/");
         expect(parseSortMode()).toBe("created_at");
+    });
+
+    it("parses sort direction from URL query when present", () => {
+        localStorage.setItem("sortDirection", "desc");
+        window.history.replaceState(null, "", "/?sortDir=asc");
+        expect(parseSortDirection()).toBe("asc");
+    });
+
+    it("falls back to localStorage sort direction when URL query is absent", () => {
+        localStorage.setItem("sortDirection", "asc");
+        window.history.replaceState(null, "", "/");
+        expect(parseSortDirection()).toBe("asc");
     });
 
     it("classifies failure steps from task names", () => {
@@ -777,6 +790,24 @@ describe("renderFlatList", () => {
 
         const sortedRuns = sortRuns([olderRun, newerRun], "created_at");
         expect(sortedRuns.map((run) => run.subject)).toEqual(["B", "A"]);
+    });
+
+    it("reverses run ordering when ascending sort is requested", () => {
+        const secondAttempt = {
+            ...baseRun,
+            path: `${baseRun.path}-attempt-2`,
+            attempt: 2,
+            subject: "B",
+        };
+        const firstAttempt = {
+            ...baseRun,
+            path: `${baseRun.path}-attempt-1`,
+            attempt: 1,
+            subject: "A",
+        };
+
+        const sortedRuns = sortRuns([secondAttempt, firstAttempt], "attempt", "asc");
+        expect(sortedRuns.map((run) => run.subject)).toEqual(["A", "B"]);
     });
 
     it("includes dandiset ID in each flat run entry", () => {
@@ -1575,5 +1606,16 @@ describe("initLayoutToggle", () => {
         expect(params.get("view")).toBe("tests");
         expect(params.get("dandiset")).toBe("001697");
         expect(localStorage.getItem("sortMode")).toBe("created_at");
+    });
+
+    it("updates URL sort direction query param while preserving other URL state", () => {
+        initLayoutToggle();
+        document.querySelector("[data-sort-direction]").click();
+
+        const params = new URLSearchParams(window.location.search);
+        expect(params.get("sortDir")).toBe("asc");
+        expect(params.get("view")).toBe("tests");
+        expect(params.get("dandiset")).toBe("001697");
+        expect(localStorage.getItem("sortDirection")).toBe("asc");
     });
 });
