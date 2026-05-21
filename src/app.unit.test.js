@@ -9,6 +9,8 @@ const {
     fetchVisualizationData,
     initModal,
     initLayoutToggle,
+    loadAindPipelineRegistries,
+    normalizeRegistryEntries,
     openHtmlModal,
     neurosiftBlobUrl,
     neurosiftDandisetUrl,
@@ -562,6 +564,97 @@ describe("fetchQueueState ETag caching", () => {
         delete global.DecompressionStream;
         global.fetch = vi.fn().mockResolvedValue(new Response(makeReadableStream(JSONL_TEXT), { status: 200 }));
         await expect(fetchQueueState()).rejects.toThrow("DecompressionStream");
+    });
+});
+
+describe("pipeline registries", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        originalFetch = global.fetch;
+        sessionStorage.clear();
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("normalizes registry entries and assigns fallback priority", () => {
+        expect(
+            normalizeRegistryEntries({
+                deterministic: { path: "name-deterministic.json", md5: "ABCDEF0123" },
+                default: { path: "name-deterministic.json", md5: "ABCDEF0123" },
+                broken: { path: "missing-md5" },
+            })
+        ).toEqual([
+            {
+                alias: "deterministic",
+                md5: "abcdef0123",
+                path: "name-deterministic.json",
+                priority: 1,
+            },
+            {
+                alias: "default",
+                md5: "abcdef0123",
+                path: "name-deterministic.json",
+                priority: 0,
+            },
+        ]);
+    });
+
+    it("loads params and config registries from GitHub registry files", async () => {
+        global.fetch = vi
+            .fn()
+            .mockResolvedValueOnce(
+                new Response(
+                    JSON.stringify({
+                        deterministic: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+                        default: { path: "name-deterministic.json", md5: "4af6a25e20e376c81895ce9350a9cbd4" },
+                    }),
+                    { status: 200 }
+                )
+            )
+            .mockResolvedValueOnce(
+                new Response(
+                    JSON.stringify({
+                        v1: { path: "name-mit+engaging_revision-1.config", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" },
+                        default: {
+                            path: "name-mit+engaging_revision-1.config",
+                            md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8",
+                        },
+                    }),
+                    { status: 200 }
+                )
+            );
+
+        const registries = await loadAindPipelineRegistries();
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(global.fetch.mock.calls[0][0]).toContain(
+            "/src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json"
+        );
+        expect(global.fetch.mock.calls[1][0]).toContain(
+            "/src/dandi_compute_code/aind_ephys_pipeline/registries/registered_configs.json"
+        );
+        expect(registries.paramsRegistry).toEqual(
+            expect.arrayContaining([expect.objectContaining({ alias: "deterministic" })])
+        );
+        expect(registries.configRegistry).toEqual(expect.arrayContaining([expect.objectContaining({ alias: "v1" })]));
+    });
+
+    it("falls back to built-in registries when GitHub fetch fails", async () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
+
+        const registries = await loadAindPipelineRegistries();
+
+        expect(registries.paramsRegistry).toEqual(
+            expect.arrayContaining([expect.objectContaining({ alias: "deterministic" })])
+        );
+        expect(registries.configRegistry).toEqual(expect.arrayContaining([expect.objectContaining({ alias: "v1" })]));
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
     });
 });
 
