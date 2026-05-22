@@ -6,6 +6,7 @@ const {
     collectJsonDiffs,
     collectTextDiffs,
     fetchQueueState,
+    fetchSlurmLogs,
     fetchVisualizationData,
     initModal,
     initLayoutToggle,
@@ -1154,6 +1155,122 @@ describe("fetchVisualizationData", () => {
     });
 });
 
+describe("fetchSlurmLogs", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("returns empty array when the logs directory fetch fails", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual([]);
+    });
+
+    it("returns empty array when no slurm log files are present", async () => {
+        const dirItems = [
+            { type: "file", name: "nextflow.log" },
+            { type: "file", name: "trace.txt" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual([]);
+    });
+
+    it("returns slurm log filenames when present in the logs directory", async () => {
+        const dirItems = [
+            { type: "file", name: "nextflow.log" },
+            { type: "file", name: "job-14240507_slurm.log" },
+            { type: "file", name: "trace.txt" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual(["job-14240507_slurm.log"]);
+    });
+
+    it("returns multiple slurm log filenames sorted by name", async () => {
+        const dirItems = [
+            { type: "file", name: "job-99999999_slurm.log" },
+            { type: "file", name: "job-10000000_slurm.log" },
+            { type: "file", name: "nextflow.log" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual(["job-10000000_slurm.log", "job-99999999_slurm.log"]);
+    });
+
+    it("ignores directory entries ending with _slurm.log", async () => {
+        const dirItems = [
+            { type: "dir", name: "job-12345_slurm.log" },
+            { type: "file", name: "job-67890_slurm.log" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual(["job-67890_slurm.log"]);
+    });
+
+    it("returns empty array on network error", async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual([]);
+    });
+
+    it("queries the correct GitHub API URL for the run logs directory", async () => {
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify([]), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(global.fetch.mock.calls[0][0]).toContain(
+            "/contents/derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1/logs"
+        );
+        expect(global.fetch.mock.calls[0][0]).toContain("?ref=");
+    });
+});
+
 describe("renderFlatList", () => {
     const baseRun = {
         status: "success",
@@ -1313,6 +1430,26 @@ describe("renderFlatList", () => {
         const run = { ...baseRun, status: "failed" };
         const html = renderFlatList([run]);
         expect(html).toContain("status-failed");
+    });
+
+    it("includes slurm log button in Logs section when slurmLogs is provided", () => {
+        const run = { ...baseRun, hasLogs: true, slurmLogs: ["job-14240507_slurm.log"] };
+        const html = renderFlatList([run]);
+        expect(html).toContain("SLURM Job Log");
+        expect(html).toContain("job-14240507_slurm.log");
+    });
+
+    it("renders Nextflow log buttons when hasLogs is true and slurmLogs is empty", () => {
+        const run = { ...baseRun, hasLogs: true, slurmLogs: [] };
+        const html = renderFlatList([run]);
+        expect(html).toContain("Nextflow Log");
+        expect(html).not.toContain("SLURM Job Log");
+    });
+
+    it("shows no Logs section when hasLogs is false and slurmLogs is empty", () => {
+        const run = { ...baseRun, hasLogs: false, slurmLogs: [] };
+        const html = renderFlatList([run]);
+        expect(html).not.toContain("run-section-title");
     });
 });
 
