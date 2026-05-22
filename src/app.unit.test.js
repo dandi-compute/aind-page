@@ -305,8 +305,7 @@ describe("app unit behavior", () => {
             pipelineName: "aind+ephys",
             pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
             paramsProfile: "4af6a25",
-            configHash: "0d4bf36",
-            runDate: "2026+05+14",
+            configHash: "0d4bf36_date-2026+05+14",
             attempt: 2,
         });
     });
