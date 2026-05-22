@@ -764,10 +764,21 @@ function parseDandiPath(dandiPath) {
     const subjectIndex = pathParts.findIndex((part) => part.startsWith("sub-"));
     const subjectPart = subjectIndex >= 0 ? pathParts[subjectIndex] : "";
     const searchAfterSubject = subjectIndex >= 0 ? pathParts.slice(subjectIndex + 1) : pathParts;
+
+    // Prefer an explicit ses-{session} directory component...
     const sessionPart = searchAfterSubject.find((part) => part.startsWith("ses-")) ?? "";
+    let session = sessionPart ? sessionPart.replace(/^ses-/, "") : null;
+
+    // ...fall back to extracting session from the NWB filename (sub-{sub}_ses-{ses}_{rest}.nwb)
+    if (!session) {
+        const filename = pathParts[pathParts.length - 1] ?? "";
+        const sesMatch = filename.match(/_ses-([^_]+)/);
+        if (sesMatch) session = sesMatch[1];
+    }
+
     return {
         subject: subjectPart ? subjectPart.replace(/^sub-/, "") : null,
-        session: sessionPart ? sessionPart.replace(/^ses-/, "") : null,
+        session,
     };
 }
 
