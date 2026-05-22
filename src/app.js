@@ -1092,7 +1092,7 @@ function renderRunEntry(run) {
     const bytesHtml =
         bytes === null
             ? ""
-            : `<span class="run-sep">·</span><span class="run-bytes">DATA PROCESSED:&nbsp;${formatByteCount(bytes)}</span>`;
+            : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
 
     return `
 <div class="run-entry ${sc}">
@@ -2209,7 +2209,7 @@ function renderFlatRunEntry(run) {
     const bytesHtml =
         bytes === null
             ? ""
-            : `<span class="run-sep">·</span><span class="run-bytes">DATA PROCESSED:&nbsp;${formatByteCount(bytes)}</span>`;
+            : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
 
     const location = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
     const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
