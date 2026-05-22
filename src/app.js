@@ -203,8 +203,12 @@ function runFailureStep(run) {
     return "other";
 }
 
+function normalizeStatus(status) {
+    return status ? String(status).toLowerCase() : null;
+}
+
 function applyFilter(runs, filter) {
-    const normalizedFilterStatus = filter.status ? String(filter.status).toLowerCase() : null;
+    const normalizedFilterStatus = normalizeStatus(filter.status);
     return runs.filter((r) => {
         if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
         if (filter.subject && r.subject !== filter.subject) return false;
@@ -250,6 +254,12 @@ function narrowUrl(params) {
 const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
 const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
+const STATUS_LABELS = {
+    success: "Successful",
+    failed: "Failed",
+    queued: "Queued",
+    partial: "Partial",
+};
 const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
 const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
@@ -366,14 +376,8 @@ function renderFilterBanner(filter, availableRuns = []) {
         );
     }
     if (filter.status) {
-        const statusLabel = String(filter.status).toLowerCase();
-        const statusLabels = {
-            success: "Successful",
-            failed: "Failed",
-            queued: "Queued",
-            partial: "Partial",
-        };
-        const summaryStatusLabel = statusLabels[statusLabel] ?? `Status: ${filter.status}`;
+        const statusLabel = normalizeStatus(filter.status);
+        const summaryStatusLabel = STATUS_LABELS[statusLabel] ?? `Status: ${filter.status}`;
         crumbs.push(
             `<a class="filter-crumb" href="${e(narrowUrl({ status: filter.status }))}">${e(summaryStatusLabel)}</a>`
         );
