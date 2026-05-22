@@ -7,6 +7,7 @@ const {
     collectTextDiffs,
     fetchQueueState,
     fetchSlurmLogs,
+    fetchAllSlurmLogs,
     fetchVisualizationData,
     initModal,
     initLayoutToggle,
@@ -1299,6 +1300,122 @@ describe("fetchSlurmLogs", () => {
             "/contents/derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1/logs"
         );
         expect(global.fetch.mock.calls[0][0]).toContain("?ref=");
+    });
+});
+
+describe("fetchAllSlurmLogs", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("returns empty Map when the git trees fetch fails", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 403 }));
+        const result = await fetchAllSlurmLogs();
+        expect(result).toBeInstanceOf(Map);
+        expect(result.size).toBe(0);
+    });
+
+    it("returns empty Map when no slurm log files exist in the tree", async () => {
+        const treeData = {
+            tree: [
+                { type: "blob", path: "derivatives/dandiset-001/sub-A/pipeline-x/v1/logs/nextflow.log" },
+                { type: "blob", path: "derivatives/dandiset-001/sub-A/pipeline-x/v1/logs/trace.txt" },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.size).toBe(0);
+    });
+
+    it("returns a map with slurm log filenames grouped by run path", async () => {
+        const runPath = "derivatives/dandiset-001/sub-A/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const treeData = {
+            tree: [
+                { type: "blob", path: `${runPath}/logs/nextflow.log` },
+                { type: "blob", path: `${runPath}/logs/job-12345_slurm.log` },
+                { type: "blob", path: `${runPath}/logs/trace.txt` },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.get(runPath)).toEqual(["job-12345_slurm.log"]);
+    });
+
+    it("groups multiple slurm logs across multiple run paths", async () => {
+        const runA = "derivatives/dandiset-001/sub-A/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const runB = "derivatives/dandiset-002/sub-B/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const treeData = {
+            tree: [
+                { type: "blob", path: `${runA}/logs/job-99_slurm.log` },
+                { type: "blob", path: `${runA}/logs/job-10_slurm.log` },
+                { type: "blob", path: `${runB}/logs/job-77_slurm.log` },
+                { type: "blob", path: `${runA}/logs/nextflow.log` },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.get(runA)).toEqual(["job-10_slurm.log", "job-99_slurm.log"]);
+        expect(result.get(runB)).toEqual(["job-77_slurm.log"]);
+    });
+
+    it("ignores tree entries that are not blobs", async () => {
+        const runPath = "derivatives/dandiset-001/sub-A/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const treeData = {
+            tree: [
+                { type: "tree", path: `${runPath}/logs` },
+                { type: "blob", path: `${runPath}/logs/job-12345_slurm.log` },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.get(runPath)).toEqual(["job-12345_slurm.log"]);
+    });
+
+    it("uses the git trees API with recursive=1", async () => {
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify({ tree: [] }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        await fetchAllSlurmLogs();
+        expect(global.fetch.mock.calls[0][0]).toContain("/git/trees/");
+        expect(global.fetch.mock.calls[0][0]).toContain("recursive=1");
+    });
+
+    it("returns empty Map on network error", async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+        const result = await fetchAllSlurmLogs();
+        expect(result).toBeInstanceOf(Map);
+        expect(result.size).toBe(0);
     });
 });
 

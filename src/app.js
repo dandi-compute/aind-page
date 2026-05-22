@@ -714,6 +714,31 @@ async function fetchSlurmLogs(runPath) {
     }
 }
 
+// Fetch SLURM log filenames for all runs in a single recursive git-trees call.
+// Returns a Map<runPath, sortedFileNames[]>. Falls back to an empty Map on failure.
+async function fetchAllSlurmLogs() {
+    try {
+        const url = `${GITHUB_API_BASE}/git/trees/${BRANCH}?recursive=1`;
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return new Map();
+        const data = await resp.json();
+        const byRunPath = new Map();
+        for (const item of data.tree ?? []) {
+            if (item.type !== "blob") continue;
+            const m = item.path.match(/^(derivatives\/.+)\/logs\/(.+_slurm\.log)$/);
+            if (!m) continue;
+            const runPath = m[1];
+            const fname = m[2];
+            if (!byRunPath.has(runPath)) byRunPath.set(runPath, []);
+            byRunPath.get(runPath).push(fname);
+        }
+        for (const files of byRunPath.values()) files.sort();
+        return byRunPath;
+    } catch {
+        return new Map();
+    }
+}
+
 async function fetchDatasetDescription(runPath) {
     const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
     const url = `${CDN_BASE}/${pathParts}/dataset_description.json`;
@@ -3264,15 +3289,16 @@ async function init() {
 
         // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel.
         // Skip trace/dataset fetching for queued runs (no logs yet).
+        // Fetch all SLURM logs at once (single git-trees API call) to avoid per-run rate limits.
+        const slurmLogsByRun = await fetchAllSlurmLogs();
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, dandiResult, vizData, slurmLogs] = await Promise.all([
+                const [text, datasetDesc, dandiResult, vizData] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run.path)),
                     fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchVisualizationData(run.path) : Promise.resolve(null),
-                    run.hasCode ? fetchSlurmLogs(run.path) : Promise.resolve([]),
                 ]);
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
@@ -3299,7 +3325,7 @@ async function init() {
                     vizData,
                     status,
                     failureStep,
-                    slurmLogs: slurmLogs ?? [],
+                    slurmLogs: slurmLogsByRun.get(run.path) ?? [],
                 };
             })
         );
@@ -3366,6 +3392,7 @@ if (typeof module !== "undefined" && module.exports) {
         classifyFailedTaskStep,
         fetchQueueState,
         fetchSlurmLogs,
+        fetchAllSlurmLogs,
         fetchVisualizationData,
         initModal,
         initLayoutToggle,
