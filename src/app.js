@@ -866,7 +866,7 @@ function parseQueueEntries(entries) {
             pipelineName: entry.pipeline,
             pipelineVersion: entry.version,
             paramsProfile: entry.params,
-            configHash: entry.config,
+            configHash: normalizeConfigHash(entry.config),
             attempt: entry.attempt,
             hasCode: entry.has_code,
             hasOutput: entry.has_output,
@@ -877,6 +877,15 @@ function parseQueueEntries(entries) {
             runDate: createdAt ?? entry.date ?? null,
         };
     });
+}
+
+// Strip _date-{...} suffix from a raw config field value so that the short
+// commit hash can be resolved against the registry independently of whether
+// the date was embedded in the same token (e.g. "0d4bf36_date-2026+05+21" → "0d4bf36").
+function normalizeConfigHash(config) {
+    if (!config) return config;
+    const dateIndex = String(config).indexOf("_date-");
+    return dateIndex !== -1 ? config.slice(0, dateIndex) : config;
 }
 
 /* ─── Path parsing ──────────────────────────────────────────── */
@@ -929,7 +938,7 @@ function parseRunPath(runPath) {
                 const configIndex = beforeAttempt.indexOf(configMarker);
                 if (configIndex !== -1) {
                     paramsProfile = beforeAttempt.slice(0, configIndex);
-                    configHash = beforeAttempt.slice(configIndex + configMarker.length);
+                    configHash = normalizeConfigHash(beforeAttempt.slice(configIndex + configMarker.length));
                 } else {
                     paramsProfile = beforeAttempt;
                 }
@@ -3377,6 +3386,7 @@ if (typeof module !== "undefined" && module.exports) {
         collectJsonDiffs,
         collectTextDiffs,
         loadAindPipelineRegistries,
+        normalizeConfigHash,
         normalizeRegistryEntries,
         renderParamsGroup,
         renderDiffPage,
