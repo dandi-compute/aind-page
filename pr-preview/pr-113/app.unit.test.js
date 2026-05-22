@@ -1053,7 +1053,7 @@ describe("renderFlatList", () => {
 
     it("shows bytes in each flat run entry when available", () => {
         const html = renderFlatList([baseRun]);
-        expect(html).toContain("DATA PROCESSED:");
+        expect(html).toContain("Asset size:");
         expect(html).toContain("1.02 KB");
     });
 
@@ -1116,6 +1116,7 @@ describe("renderDandisets", () => {
         const html = renderDandisets([run1, run2]);
         expect(html).toContain("2&nbsp;jobs");
         expect(html).toContain("DATA PROCESSED:");
+        expect(html).toContain("Asset size:");
         expect(html).toContain("3.07 KB");
         expect(html).not.toContain("pipeline-version-group");
         expect(html).not.toContain("params-group");
