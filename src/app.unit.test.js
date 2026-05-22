@@ -305,7 +305,8 @@ describe("app unit behavior", () => {
             pipelineName: "aind+ephys",
             pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
             paramsProfile: "4af6a25",
-            configHash: "0d4bf36_date-2026+05+14",
+            configHash: "0d4bf36",
+            runDate: "2026+05+14",
             attempt: 2,
         });
     });
@@ -370,6 +371,40 @@ describe("app unit behavior", () => {
         expect(path).toBe(
             "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
         );
+    });
+
+    it("builds run path with date field included", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            subject: "test",
+            session: null,
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+a66c8df",
+            params: "4af6a25",
+            config: "0d4bf36",
+            date: "2026+05+21",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
+        );
+    });
+
+    it("builds run path without date when date field is absent", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            subject: "test",
+            session: null,
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+a66c8df",
+            params: "4af6a25",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+        expect(path).not.toContain("_date-");
     });
 
     it("parses JSONL queue entries into run objects", () => {
@@ -480,6 +515,54 @@ describe("app unit behavior", () => {
         const runs = parseQueueEntries(entries);
         expect(runs[0].createdAt).toBe("2026-05-20T09:15:00Z");
         expect(runs[0].runDate).toBe("2026-05-20T09:15:00Z");
+    });
+
+    it("includes _date- in path and falls back to date for runDate when entry has date field", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: "test",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36",
+                date: "2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
+        );
+        expect(runs[0].runDate).toBe("2026+05+21");
+    });
+
+    it("prefers created_at over date for runDate when both are present", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: "test",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36",
+                date: "2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+                created_at: "2026-05-21T14:30:00Z",
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].runDate).toBe("2026-05-21T14:30:00Z");
     });
 
     it("parses subject and session from dandi_path when queue entry omits fields", () => {

@@ -783,8 +783,8 @@ function parseDandiPath(dandiPath) {
 }
 
 // Build a run directory path from a JSONL queue entry.
-// With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}_attempt-{attempt}
-// Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}_attempt-{attempt}
+// With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
+// Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
 function buildRunPath(entry) {
     const parsed = parseDandiPath(entry.dandi_path);
     const subject = entry.subject ?? parsed.subject;
@@ -794,7 +794,12 @@ function buildRunPath(entry) {
         parts.push(`ses-${session}`);
     }
     parts.push(`pipeline-${entry.pipeline}`);
-    parts.push(`version-${entry.version}_params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`);
+    let capsule = `version-${entry.version}_params-${entry.params}_config-${entry.config}`;
+    if (entry.date) {
+        capsule += `_date-${entry.date}`;
+    }
+    capsule += `_attempt-${entry.attempt}`;
+    parts.push(capsule);
     return parts.join("/");
 }
 
@@ -820,7 +825,7 @@ function parseQueueEntries(entries) {
             contentHash: entry.content_id ?? null,
             assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
-            runDate: createdAt,
+            runDate: createdAt ?? entry.date ?? null,
         };
     });
 }
@@ -861,6 +866,7 @@ function parseRunPath(runPath) {
 
     let paramsProfile = capsulePart;
     let configHash = "";
+    let runDate = null;
     let attempt = 1;
     if (capsulePart.startsWith("params-")) {
         const capsuleBody = capsulePart.slice("params-".length);
@@ -875,7 +881,15 @@ function parseRunPath(runPath) {
                 const configIndex = beforeAttempt.indexOf(configMarker);
                 if (configIndex !== -1) {
                     paramsProfile = beforeAttempt.slice(0, configIndex);
-                    configHash = beforeAttempt.slice(configIndex + configMarker.length);
+                    const configBody = beforeAttempt.slice(configIndex + configMarker.length);
+                    const dateMarker = "_date-";
+                    const dateIndex = configBody.indexOf(dateMarker);
+                    if (dateIndex !== -1) {
+                        configHash = configBody.slice(0, dateIndex);
+                        runDate = configBody.slice(dateIndex + dateMarker.length);
+                    } else {
+                        configHash = configBody;
+                    }
                 } else {
                     paramsProfile = beforeAttempt;
                 }
@@ -893,7 +907,7 @@ function parseRunPath(runPath) {
         paramsProfile,
         configHash,
         createdAt: null,
-        runDate: null,
+        runDate,
         attempt,
     };
 }
