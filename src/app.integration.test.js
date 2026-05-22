@@ -1,4 +1,4 @@
-const { renderFilterBanner, showDiffResults, showError, showLoading, showResults } = require("./app");
+const { renderFilterBanner, renderSummary, showDiffResults, showError, showLoading, showResults } = require("./app");
 
 beforeEach(() => {
     document.body.innerHTML = `
@@ -77,6 +77,31 @@ describe("app integration behavior", () => {
         showResults();
         expect(document.getElementById("summary").style.display).toBe("");
         expect(document.getElementById("runs").style.display).toBe("");
+    });
+
+    it("shows summed bytes in the summary when runs include size metadata", () => {
+        renderSummary([
+            { status: "success", assetSizeBytes: 10 },
+            { status: "failed", assetSizeBytes: 20 },
+            { status: "queued" },
+        ]);
+
+        expect(document.getElementById("summary").innerHTML).toContain("DATA PROCESSED");
+        expect(document.getElementById("summary").innerHTML).toContain("10 B");
+        expect(document.getElementById("summary").innerHTML).not.toContain("30 B");
+    });
+
+    it("hides summary DATA PROCESSED when only failed runs have byte metadata", () => {
+        renderSummary([
+            { status: "failed", assetSizeBytes: 20 },
+            { status: "queued", assetSizeBytes: 30 },
+        ]);
+        expect(document.getElementById("summary").innerHTML).not.toContain("DATA PROCESSED");
+    });
+
+    it("formats large byte counts with appropriate decimal units", () => {
+        renderSummary([{ status: "success", assetSizeBytes: 2_500_000_000_000 }]);
+        expect(document.getElementById("summary").innerHTML).toContain("2.5 TB");
     });
 
     it("shows only the diff content region on the diff page", () => {
