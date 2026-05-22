@@ -306,6 +306,7 @@ describe("app unit behavior", () => {
             pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
             paramsProfile: "4af6a25",
             configHash: "0d4bf36_date-2026+05+14",
+            runDate: null,
             attempt: 2,
         });
     });
