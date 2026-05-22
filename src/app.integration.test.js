@@ -120,7 +120,7 @@ describe("app integration behavior", () => {
             'class="stat-item stat-success" href="?layout=flat&amp;sort=attempt&amp;sortDir=desc&amp;dandiset=001697&amp;status=success"'
         );
         expect(summaryHtml).toContain(
-            'class="stat-item stat-failed" href="?layout=flat&amp;sort=attempt&amp;sortDir=desc&amp;dandiset=001697&amp;status=failed"'
+            'class="stat-item stat-failed" href="?layout=flat&amp;sort=attempt&amp;sortDir=desc&amp;dandiset=001697&amp;failureStep=pre-processing&amp;status=failed"'
         );
     });
 
@@ -170,7 +170,10 @@ describe("app integration behavior", () => {
                 failureStep: null,
                 status: "failed",
             },
-            []
+            [
+                { status: "failed", dandisetId: "001697", subject: "sub-1", session: "ses-1", pipelineVersion: "v1" },
+                { status: "success", dandisetId: "001697", subject: "sub-2", session: "ses-2", pipelineVersion: "v1" },
+            ]
         );
 
         const banner = document.getElementById("filter-banner");

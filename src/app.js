@@ -1001,6 +1001,7 @@ function renderSummary(runs) {
         paramsType: filter.paramsType,
         configType: filter.configType,
         dandiCodebaseHash: filter.dandiCodebaseHash,
+        failureStep: filter.failureStep,
         status: "failed",
     });
 
