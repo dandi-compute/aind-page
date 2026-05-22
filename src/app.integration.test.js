@@ -176,6 +176,7 @@ describe("app integration behavior", () => {
         const banner = document.getElementById("filter-banner");
         expect(banner.innerHTML).toContain('name="status" value="failed"');
         expect(banner.innerHTML).toContain("Filtered view:");
+        expect(banner.innerHTML).toContain("Failed");
     });
 
     it("scopes subject and session options based on selected dandiset and subject", () => {
