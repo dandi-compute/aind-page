@@ -87,7 +87,16 @@ describe("app integration behavior", () => {
         ]);
 
         expect(document.getElementById("summary").innerHTML).toContain("DATA PROCESSED");
-        expect(document.getElementById("summary").innerHTML).toContain("30 B");
+        expect(document.getElementById("summary").innerHTML).toContain("10 B");
+        expect(document.getElementById("summary").innerHTML).not.toContain("30 B");
+    });
+
+    it("hides summary DATA PROCESSED when only failed runs have byte metadata", () => {
+        renderSummary([
+            { status: "failed", assetSizeBytes: 20 },
+            { status: "queued", assetSizeBytes: 30 },
+        ]);
+        expect(document.getElementById("summary").innerHTML).not.toContain("DATA PROCESSED");
     });
 
     it("formats large byte counts with appropriate decimal units", () => {
