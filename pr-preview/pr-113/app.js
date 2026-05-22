@@ -244,7 +244,8 @@ function narrowUrl(params) {
 const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
 const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
-const BYTE_COUNT_FORMATTER = new Intl.NumberFormat();
+const DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
 function normalizeByteCount(value) {
     if (value === null || value === undefined || value === "") return null;
@@ -265,7 +266,14 @@ function sumRunByteCounts(runs) {
 }
 
 function formatByteCount(value) {
-    return `${BYTE_COUNT_FORMATTER.format(value)} bytes`;
+    if (!Number.isFinite(value) || value < 0) return "0 B";
+    let scaledValue = value;
+    let unitIndex = 0;
+    while (scaledValue >= 1000 && unitIndex < DATA_SIZE_UNITS.length - 1) {
+        scaledValue /= 1000;
+        unitIndex += 1;
+    }
+    return `${DATA_SIZE_FORMATTER.format(scaledValue)} ${DATA_SIZE_UNITS[unitIndex]}`;
 }
 
 function renderFilterInput(name, label, value, suggestions, clearHref = null) {
@@ -972,7 +980,7 @@ function renderSummary(runs) {
                 runsWithKnownByteCounts
                     ? `<div class="stat-item stat-bytes">
                <span class="stat-value">${formatByteCount(totalBytes)}</span>
-               <span class="stat-label">Total Bytes</span>
+               <span class="stat-label">DATA PROCESSED</span>
            </div>`
                     : ""
             }
@@ -1082,7 +1090,9 @@ function renderRunEntry(run) {
     const hasViz = run.vizData && run.vizData.length > 0;
     const bytes = runByteCount(run);
     const bytesHtml =
-        bytes === null ? "" : `<span class="run-sep">·</span><span class="run-bytes">${formatByteCount(bytes)}</span>`;
+        bytes === null
+            ? ""
+            : `<span class="run-sep">·</span><span class="run-bytes">DATA PROCESSED:&nbsp;${formatByteCount(bytes)}</span>`;
 
     return `
 <div class="run-entry ${sc}">
@@ -1318,7 +1328,7 @@ function renderGroupBadges(runs) {
     if (runsWithKnownByteCounts) {
         const totalBytesLabel = formatByteCount(totalBytes);
         parts.push(
-            `<span class="gbadge gbadge-bytes" title="Total data size: ${totalBytesLabel}">${totalBytesLabel}</span>`
+            `<span class="gbadge gbadge-bytes" title="DATA PROCESSED: ${totalBytesLabel}">DATA PROCESSED:&nbsp;${totalBytesLabel}</span>`
         );
     }
     return parts.join("");
@@ -2197,7 +2207,9 @@ function renderFlatRunEntry(run) {
     const hasViz = run.vizData && run.vizData.length > 0;
     const bytes = runByteCount(run);
     const bytesHtml =
-        bytes === null ? "" : `<span class="run-sep">·</span><span class="run-bytes">${formatByteCount(bytes)}</span>`;
+        bytes === null
+            ? ""
+            : `<span class="run-sep">·</span><span class="run-bytes">DATA PROCESSED:&nbsp;${formatByteCount(bytes)}</span>`;
 
     const location = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
     const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
