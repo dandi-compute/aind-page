@@ -244,6 +244,29 @@ function narrowUrl(params) {
 const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
 const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
+const BYTE_COUNT_FORMATTER = new Intl.NumberFormat();
+
+function normalizeByteCount(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+    return Math.round(numericValue);
+}
+
+function runByteCount(run) {
+    return normalizeByteCount(run?.assetSizeBytes);
+}
+
+function sumRunByteCounts(runs) {
+    return runs.reduce((sum, run) => {
+        const bytes = runByteCount(run);
+        return bytes === null ? sum : sum + bytes;
+    }, 0);
+}
+
+function formatByteCount(value) {
+    return `${BYTE_COUNT_FORMATTER.format(value)} bytes`;
+}
 
 function renderFilterInput(name, label, value, suggestions, clearHref = null) {
     const listId = `filter-options-${name}`;
@@ -776,6 +799,7 @@ function parseQueueEntries(entries) {
             hasOutput: entry.has_output,
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
+            assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
             runDate: createdAt,
         };
@@ -903,6 +927,8 @@ function renderSummary(runs) {
     const queued = runs.filter((r) => r.status === "queued").length;
     const partial = runs.filter((r) => r.status === "partial").length;
     const unknown = total - success - failed - queued - partial;
+    const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
+    const totalBytes = sumRunByteCounts(runs);
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -940,6 +966,14 @@ function renderSummary(runs) {
                 <span class="stat-value">${unknown}</span>
                 <span class="stat-label">Unknown</span>
             </div>`
+                    : ""
+            }
+            ${
+                runsWithKnownByteCounts
+                    ? `<div class="stat-item stat-bytes">
+               <span class="stat-value">${formatByteCount(totalBytes)}</span>
+               <span class="stat-label">Total Bytes</span>
+           </div>`
                     : ""
             }
         </div>`;
@@ -1046,12 +1080,16 @@ function renderRunEntry(run) {
     const hasTasks = run.tasks && run.tasks.length > 0;
     const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
     const hasViz = run.vizData && run.vizData.length > 0;
+    const bytes = runByteCount(run);
+    const bytesHtml =
+        bytes === null ? "" : `<span class="run-sep">·</span><span class="run-bytes">${formatByteCount(bytes)}</span>`;
 
     return `
 <div class="run-entry ${sc}">
     <div class="run-entry-header">
         <span class="status-badge ${sc}">${slbl}</span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
+        ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
         <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
@@ -1254,6 +1292,8 @@ function renderGroupBadges(runs) {
     const q = runs.filter((r) => r.status === "queued").length;
     const p = runs.filter((r) => r.status === "partial").length;
     const u = runs.length - s - f - q - p;
+    const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
+    const totalBytes = sumRunByteCounts(runs);
     const parts = [];
     if (s)
         parts.push(
@@ -1275,6 +1315,12 @@ function renderGroupBadges(runs) {
         parts.push(
             `<span class="gbadge gbadge-unknown" title="${u} unknown run${u !== 1 ? "s" : ""}">${u}&thinsp;?</span>`
         );
+    if (runsWithKnownByteCounts) {
+        const totalBytesLabel = formatByteCount(totalBytes);
+        parts.push(
+            `<span class="gbadge gbadge-bytes" title="Total data size: ${totalBytesLabel}">${totalBytesLabel}</span>`
+        );
+    }
     return parts.join("");
 }
 
@@ -2149,6 +2195,9 @@ function renderFlatRunEntry(run) {
     const hasTasks = run.tasks && run.tasks.length > 0;
     const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
     const hasViz = run.vizData && run.vizData.length > 0;
+    const bytes = runByteCount(run);
+    const bytesHtml =
+        bytes === null ? "" : `<span class="run-sep">·</span><span class="run-bytes">${formatByteCount(bytes)}</span>`;
 
     const location = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
     const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
@@ -2175,6 +2224,7 @@ function renderFlatRunEntry(run) {
             ${run.configHash ? `<span class="run-sep">·</span><span class="flat-ctx-text">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         </span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
+        ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
         <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
@@ -3218,6 +3268,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderParamsGroup,
         renderDiffPage,
         renderFilterBanner,
+        renderSummary,
         renderFlatList,
         renderRegistryLink,
         renderVisualizationSection,
