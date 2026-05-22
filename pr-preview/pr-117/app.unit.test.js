@@ -31,6 +31,7 @@ const {
     runFailureStep,
     sortRuns,
     TEST_DANDISETS,
+    treeUrl,
     uniquePipelineEntries,
 } = require("./app");
 
@@ -489,6 +490,26 @@ describe("app unit behavior", () => {
             session: "recording049",
             path: "derivatives/dandiset-001747/sub-chip19894/ses-recording049/pipeline-aind+ephys/version-v1.1.1+b268fd2_params-98fd947_config-6568dda_attempt-1",
         });
+    });
+});
+
+describe("treeUrl", () => {
+    it("builds a GitHub tree URL with /tree/ for a run path with session", () => {
+        const path =
+            "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1";
+        const url = treeUrl(path);
+        expect(url).toBe(
+            "https://github.com/dandi-compute/001697/tree/draft/" +
+                "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind%2Bephys/version-v1.1.1%2Bb268fd2%2Ba0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
+    it("builds a GitHub tree URL without session when session is absent", () => {
+        const path =
+            "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0_params-98fd947_config-6568dda_attempt-1";
+        const url = treeUrl(path);
+        expect(url).toContain("https://github.com/dandi-compute/001697/tree/draft/");
+        expect(url).not.toContain("/blob/");
     });
 });
 

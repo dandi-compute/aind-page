@@ -1014,9 +1014,9 @@ function cdnUrl(filePath) {
     return `${CDN_BASE}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/* Build a GitHub blob URL for a repo file path */
-function blobUrl(filePath) {
-    return `https://github.com/${OWNER}/${REPO}/blob/${BRANCH}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
+/* Build a GitHub tree URL for a repo directory path */
+function treeUrl(filePath) {
+    return `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
@@ -1102,7 +1102,7 @@ function renderRunEntry(run) {
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -2239,7 +2239,7 @@ function renderFlatRunEntry(run) {
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(blobUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -3294,5 +3294,6 @@ if (typeof module !== "undefined" && module.exports) {
         showLoading,
         showResults,
         TEST_DANDISETS,
+        treeUrl,
     };
 }
