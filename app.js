@@ -33,7 +33,7 @@ const SANDBOX_DANDISETS = new Set(["214527"]);
    the dedicated Tests page (?view=tests).  Currently all sandbox dandisets are
    also test dandisets, but the two concepts are kept separate so they can
    diverge independently in the future. */
-const TEST_DANDISETS = new Set(["214527"]);
+const TEST_DANDISETS = new Set(["001849", "214527"]);
 
 /* Module-level view mode ("tests" | null), set during init */
 let _viewMode = null;

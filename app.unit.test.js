@@ -30,6 +30,7 @@ const {
     renderVisualizationSection,
     runFailureStep,
     sortRuns,
+    TEST_DANDISETS,
     uniquePipelineEntries,
 } = require("./app");
 
@@ -186,6 +187,11 @@ describe("app unit behavior", () => {
         expect(document.querySelector(".site-diffs-link").hasAttribute("aria-current")).toBe(false);
         expect(document.querySelector(".site-params-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-params-link").hasAttribute("aria-current")).toBe(false);
+    });
+
+    it("includes all test-only dandisets used to scope dashboard and tests views", () => {
+        expect(TEST_DANDISETS.has("214527")).toBe(true);
+        expect(TEST_DANDISETS.has("001849")).toBe(true);
     });
 
     it("classifies failure steps from task names", () => {
