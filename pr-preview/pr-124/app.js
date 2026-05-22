@@ -3263,7 +3263,7 @@ async function init() {
                     fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchVisualizationData(run.path) : Promise.resolve(null),
-                    fetchIfLogs(run.hasLogs, () => fetchSlurmLogs(run.path)),
+                    run.hasCode ? fetchSlurmLogs(run.path) : Promise.resolve([]),
                 ]);
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
