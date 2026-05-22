@@ -86,8 +86,13 @@ describe("app integration behavior", () => {
             { status: "queued" },
         ]);
 
-        expect(document.getElementById("summary").innerHTML).toContain("Total Bytes");
-        expect(document.getElementById("summary").innerHTML).toContain("30 bytes");
+        expect(document.getElementById("summary").innerHTML).toContain("DATA PROCESSED");
+        expect(document.getElementById("summary").innerHTML).toContain("30 B");
+    });
+
+    it("uses decimal-scaled units for large processed data values", () => {
+        renderSummary([{ status: "success", assetSizeBytes: 2_500_000_000_000 }]);
+        expect(document.getElementById("summary").innerHTML).toContain("2.5 TB");
     });
 
     it("shows only the diff content region on the diff page", () => {
