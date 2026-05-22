@@ -256,6 +256,17 @@ describe("app unit behavior", () => {
         expect(filtered).toEqual([{ status: "failed", failureStep: "pre-processing" }]);
     });
 
+    it("filters runs by status", () => {
+        const runs = [
+            { status: "success", id: 1 },
+            { status: "failed", id: 2 },
+            { status: "queued", id: 3 },
+        ];
+
+        expect(applyFilter(runs, { status: "failed" })).toEqual([{ status: "failed", id: 2 }]);
+        expect(applyFilter(runs, { status: "SUCCESS" })).toEqual([{ status: "success", id: 1 }]);
+    });
+
     it("filters runs by params/config types and dandi codebase hash", async () => {
         await loadFixtureRegistries();
         const runs = [

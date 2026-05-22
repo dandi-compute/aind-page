@@ -139,6 +139,7 @@ function parseFilter() {
         configType: params.get("config") ?? null,
         dandiCodebaseHash: params.get("codebaseHash") ?? null,
         failureStep: params.get("failureStep") ?? null,
+        status: params.get("status") ?? null,
     };
 }
 
@@ -202,7 +203,12 @@ function runFailureStep(run) {
     return "other";
 }
 
+function normalizeStatus(status) {
+    return status ? String(status).toLowerCase() : null;
+}
+
 function applyFilter(runs, filter) {
+    const normalizedFilterStatus = normalizeStatus(filter.status);
     return runs.filter((r) => {
         if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
         if (filter.subject && r.subject !== filter.subject) return false;
@@ -211,6 +217,7 @@ function applyFilter(runs, filter) {
         if (!matchesResolvedOrRawValue(filter.paramsType, runParamsType(r), r.paramsProfile)) return false;
         if (!matchesResolvedOrRawValue(filter.configType, runConfigType(r), r.configHash)) return false;
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
+        if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
             const failedStep = r.failureStep;
@@ -239,6 +246,7 @@ function narrowUrl(params) {
     if (params.configType) sp.set("config", params.configType);
     if (params.dandiCodebaseHash) sp.set("codebaseHash", params.dandiCodebaseHash);
     if (params.failureStep) sp.set("failureStep", params.failureStep);
+    if (params.status) sp.set("status", params.status);
     const qs = sp.toString();
     return qs ? `?${qs}` : "./";
 }
@@ -246,6 +254,12 @@ function narrowUrl(params) {
 const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
 const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
+const STATUS_LABELS = {
+    success: "Successful",
+    failed: "Failed",
+    queued: "Queued",
+    partial: "Partial",
+};
 const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
 const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
@@ -308,7 +322,8 @@ function renderFilterBanner(filter, availableRuns = []) {
         filter.paramsType ||
         filter.configType ||
         filter.dandiCodebaseHash ||
-        filter.failureStep
+        filter.failureStep ||
+        filter.status
     );
 
     const crumbs = [];
@@ -360,6 +375,13 @@ function renderFilterBanner(filter, availableRuns = []) {
             `<a class="filter-crumb" href="${e(narrowUrl({ failureStep: filter.failureStep }))}">${e(failureStepLabel)}</a>`
         );
     }
+    if (filter.status) {
+        const statusLabel = normalizeStatus(filter.status);
+        const summaryStatusLabel = STATUS_LABELS[statusLabel] ?? `Status: ${filter.status}`;
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ status: filter.status }))}">${e(summaryStatusLabel)}</a>`
+        );
+    }
 
     const runsMatchingDandiset = filter.dandisetId
         ? availableRuns.filter((run) => run.dandisetId === filter.dandisetId)
@@ -401,6 +423,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
+    const statusHiddenInput = filter.status ? `<input type="hidden" name="status" value="${e(filter.status)}">` : "";
     const clearAllParams = new URLSearchParams();
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
@@ -416,14 +439,15 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${layoutHiddenInput}
         ${sortHiddenInput}
         ${sortDirectionHiddenInput}
-        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
-        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
-        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
-        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
-        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
-        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep }))}
-        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, failureStep: filter.failureStep }))}
-        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash }))}
+        ${statusHiddenInput}
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, failureStep: filter.failureStep, status: filter.status }))}
+        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, status: filter.status }))}
         <button class="filter-apply" type="submit">Apply</button>
         <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
     </form>
@@ -962,6 +986,28 @@ function renderSummary(runs) {
     const successfulRuns = runs.filter((run) => run.status === "success");
     const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(successfulRuns);
+    const filter = parseFilter();
+    const successHref = narrowUrl({
+        dandiset: filter.dandisetId,
+        subject: filter.subject,
+        session: filter.session,
+        pipelineVersion: filter.pipelineVersion,
+        paramsType: filter.paramsType,
+        configType: filter.configType,
+        dandiCodebaseHash: filter.dandiCodebaseHash,
+        status: "success",
+    });
+    const failedHref = narrowUrl({
+        dandiset: filter.dandisetId,
+        subject: filter.subject,
+        session: filter.session,
+        pipelineVersion: filter.pipelineVersion,
+        paramsType: filter.paramsType,
+        configType: filter.configType,
+        dandiCodebaseHash: filter.dandiCodebaseHash,
+        failureStep: filter.failureStep,
+        status: "failed",
+    });
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -969,14 +1015,14 @@ function renderSummary(runs) {
                 <span class="stat-value">${total}</span>
                 <span class="stat-label">Total Runs</span>
             </div>
-            <div class="stat-item stat-success">
+            <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
                 <span class="stat-value">${success}</span>
                 <span class="stat-label">Successful</span>
-            </div>
-            <div class="stat-item stat-failed">
+            </a>
+            <a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
                 <span class="stat-value">${failed}</span>
                 <span class="stat-label">Failed</span>
-            </div>
+            </a>
             ${
                 queued
                     ? `<div class="stat-item stat-queued">
@@ -3240,7 +3286,8 @@ async function init() {
             filter.paramsType ||
             filter.configType ||
             filter.dandiCodebaseHash ||
-            filter.failureStep
+            filter.failureStep ||
+            filter.status
         );
         const filteredRuns = applyFilter(runsInScope, filter);
 
