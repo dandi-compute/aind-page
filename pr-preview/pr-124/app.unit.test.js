@@ -11,6 +11,7 @@ const {
     initModal,
     initLayoutToggle,
     loadAindPipelineRegistries,
+    normalizeConfigHash,
     normalizeRegistryEntries,
     openHtmlModal,
     neurosiftBlobUrl,
@@ -335,10 +336,19 @@ describe("app unit behavior", () => {
             pipelineName: "aind+ephys",
             pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
             paramsProfile: "4af6a25",
-            configHash: "0d4bf36_date-2026+05+14",
+            configHash: "0d4bf36",
             runDate: null,
             attempt: 2,
         });
+    });
+
+    it("normalizeConfigHash strips _date- suffix from config hash", () => {
+        expect(normalizeConfigHash("0d4bf36_date-2026+05+21")).toBe("0d4bf36");
+        expect(normalizeConfigHash("0d4bf36")).toBe("0d4bf36");
+        expect(normalizeConfigHash("0d4bf36_date-2026+05+14")).toBe("0d4bf36");
+        expect(normalizeConfigHash("")).toBe("");
+        expect(normalizeConfigHash(null)).toBeNull();
+        expect(normalizeConfigHash(undefined)).toBeUndefined();
     });
 
     it("builds run path with session from JSONL entry", () => {
@@ -587,6 +597,27 @@ describe("app unit behavior", () => {
             "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
         );
         expect(runs[0].runDate).toBe("2026+05+21");
+    });
+
+    it("strips _date- suffix from configHash when entry.config embeds the date", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: "test",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36_date-2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].configHash).toBe("0d4bf36");
     });
 
     it("prefers created_at over date for runDate when both are present", () => {
