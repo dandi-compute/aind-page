@@ -697,6 +697,48 @@ async function fetchTraceText(runPath) {
     }
 }
 
+async function fetchSlurmLogs(runPath) {
+    try {
+        const encodedPath = `${runPath}/logs`.split("/").map(encodeURIComponent).join("/");
+        const url = `${GITHUB_API_BASE}/contents/${encodedPath}?ref=${BRANCH}`;
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return [];
+        const items = await resp.json();
+        if (!Array.isArray(items)) return [];
+        return items
+            .filter((item) => item.type === "file" && item.name.endsWith("_slurm.log"))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((item) => item.name);
+    } catch {
+        return [];
+    }
+}
+
+// Fetch SLURM log filenames for all runs in a single recursive git-trees call.
+// Returns a Map<runPath, sortedFileNames[]>. Falls back to an empty Map on failure.
+async function fetchAllSlurmLogs() {
+    try {
+        const url = `${GITHUB_API_BASE}/git/trees/${BRANCH}?recursive=1`;
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return new Map();
+        const data = await resp.json();
+        const byRunPath = new Map();
+        for (const item of data.tree ?? []) {
+            if (item.type !== "blob") continue;
+            const m = item.path.match(/^(derivatives\/.+)\/logs\/(.+_slurm\.log)$/);
+            if (!m) continue;
+            const runPath = m[1];
+            const fname = m[2];
+            if (!byRunPath.has(runPath)) byRunPath.set(runPath, []);
+            byRunPath.get(runPath).push(fname);
+        }
+        for (const files of byRunPath.values()) files.sort();
+        return byRunPath;
+    } catch {
+        return new Map();
+    }
+}
+
 async function fetchDatasetDescription(runPath) {
     const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
     const url = `${CDN_BASE}/${pathParts}/dataset_description.json`;
@@ -849,7 +891,7 @@ function parseQueueEntries(entries) {
             pipelineName: entry.pipeline,
             pipelineVersion: entry.version,
             paramsProfile: entry.params,
-            configHash: entry.config,
+            configHash: normalizeConfigHash(entry.config),
             attempt: entry.attempt,
             hasCode: entry.has_code,
             hasOutput: entry.has_output,
@@ -860,6 +902,15 @@ function parseQueueEntries(entries) {
             runDate: createdAt ?? entry.date ?? null,
         };
     });
+}
+
+// Strip _date-{...} suffix from a raw config field value so that the short
+// commit hash can be resolved against the registry independently of whether
+// the date was embedded in the same token (e.g. "0d4bf36_date-2026+05+21" → "0d4bf36").
+function normalizeConfigHash(config) {
+    if (!config) return config;
+    const dateIndex = String(config).indexOf("_date-");
+    return dateIndex !== -1 ? config.slice(0, dateIndex) : config;
 }
 
 /* ─── Path parsing ──────────────────────────────────────────── */
@@ -912,7 +963,7 @@ function parseRunPath(runPath) {
                 const configIndex = beforeAttempt.indexOf(configMarker);
                 if (configIndex !== -1) {
                     paramsProfile = beforeAttempt.slice(0, configIndex);
-                    configHash = beforeAttempt.slice(configIndex + configMarker.length);
+                    configHash = normalizeConfigHash(beforeAttempt.slice(configIndex + configMarker.length));
                 } else {
                     paramsProfile = beforeAttempt;
                 }
@@ -1153,7 +1204,7 @@ function renderRunEntry(run) {
             const bi = INLINE_REPORT_ORDER.indexOf(b);
             return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
         });
-    const buttonLogs = logFiles.filter((f) => !INLINE_REPORT_FILES.has(f));
+    const buttonLogs = [...logFiles.filter((f) => !INLINE_REPORT_FILES.has(f)), ...(run.slurmLogs ?? [])];
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
@@ -2270,7 +2321,7 @@ function renderFlatRunEntry(run) {
             const bi = INLINE_REPORT_ORDER.indexOf(b);
             return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
         });
-    const buttonLogs = logFiles.filter((f) => !INLINE_REPORT_FILES.has(f));
+    const buttonLogs = [...logFiles.filter((f) => !INLINE_REPORT_FILES.has(f)), ...(run.slurmLogs ?? [])];
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
@@ -3238,6 +3289,8 @@ async function init() {
 
         // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel.
         // Skip trace/dataset fetching for queued runs (no logs yet).
+        // Fetch all SLURM logs at once (single git-trees API call) to avoid per-run rate limits.
+        const slurmLogsByRun = await fetchAllSlurmLogs();
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
@@ -3263,7 +3316,17 @@ async function init() {
                       ? "queued"
                       : "failed";
                 const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
-                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, vizData, status, failureStep };
+                return {
+                    ...run,
+                    ...parsed,
+                    assetId,
+                    inSourcedata,
+                    generatedBy,
+                    vizData,
+                    status,
+                    failureStep,
+                    slurmLogs: slurmLogsByRun.get(run.path) ?? [],
+                };
             })
         );
 
@@ -3328,6 +3391,8 @@ if (typeof module !== "undefined" && module.exports) {
         buildRunPath,
         classifyFailedTaskStep,
         fetchQueueState,
+        fetchSlurmLogs,
+        fetchAllSlurmLogs,
         fetchVisualizationData,
         initModal,
         initLayoutToggle,
@@ -3348,6 +3413,7 @@ if (typeof module !== "undefined" && module.exports) {
         collectJsonDiffs,
         collectTextDiffs,
         loadAindPipelineRegistries,
+        normalizeConfigHash,
         normalizeRegistryEntries,
         renderParamsGroup,
         renderDiffPage,

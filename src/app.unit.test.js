@@ -6,10 +6,13 @@ const {
     collectJsonDiffs,
     collectTextDiffs,
     fetchQueueState,
+    fetchSlurmLogs,
+    fetchAllSlurmLogs,
     fetchVisualizationData,
     initModal,
     initLayoutToggle,
     loadAindPipelineRegistries,
+    normalizeConfigHash,
     normalizeRegistryEntries,
     openHtmlModal,
     neurosiftBlobUrl,
@@ -334,10 +337,19 @@ describe("app unit behavior", () => {
             pipelineName: "aind+ephys",
             pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
             paramsProfile: "4af6a25",
-            configHash: "0d4bf36_date-2026+05+14",
+            configHash: "0d4bf36",
             runDate: null,
             attempt: 2,
         });
+    });
+
+    it("normalizeConfigHash strips _date- suffix from config hash", () => {
+        expect(normalizeConfigHash("0d4bf36_date-2026+05+21")).toBe("0d4bf36");
+        expect(normalizeConfigHash("0d4bf36")).toBe("0d4bf36");
+        expect(normalizeConfigHash("0d4bf36_date-2026+05+14")).toBe("0d4bf36");
+        expect(normalizeConfigHash("")).toBe("");
+        expect(normalizeConfigHash(null)).toBeNull();
+        expect(normalizeConfigHash(undefined)).toBeUndefined();
     });
 
     it("builds run path with session from JSONL entry", () => {
@@ -586,6 +598,27 @@ describe("app unit behavior", () => {
             "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
         );
         expect(runs[0].runDate).toBe("2026+05+21");
+    });
+
+    it("strips _date- suffix from configHash when entry.config embeds the date", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: "test",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36_date-2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].configHash).toBe("0d4bf36");
     });
 
     it("prefers created_at over date for runDate when both are present", () => {
@@ -1154,6 +1187,238 @@ describe("fetchVisualizationData", () => {
     });
 });
 
+describe("fetchSlurmLogs", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("returns empty array when the logs directory fetch fails", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual([]);
+    });
+
+    it("returns empty array when no slurm log files are present", async () => {
+        const dirItems = [
+            { type: "file", name: "nextflow.log" },
+            { type: "file", name: "trace.txt" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual([]);
+    });
+
+    it("returns slurm log filenames when present in the logs directory", async () => {
+        const dirItems = [
+            { type: "file", name: "nextflow.log" },
+            { type: "file", name: "job-14240507_slurm.log" },
+            { type: "file", name: "trace.txt" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual(["job-14240507_slurm.log"]);
+    });
+
+    it("returns multiple slurm log filenames sorted by name", async () => {
+        const dirItems = [
+            { type: "file", name: "job-99999999_slurm.log" },
+            { type: "file", name: "job-10000000_slurm.log" },
+            { type: "file", name: "nextflow.log" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual(["job-10000000_slurm.log", "job-99999999_slurm.log"]);
+    });
+
+    it("ignores directory entries ending with _slurm.log", async () => {
+        const dirItems = [
+            { type: "dir", name: "job-12345_slurm.log" },
+            { type: "file", name: "job-67890_slurm.log" },
+        ];
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(dirItems), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual(["job-67890_slurm.log"]);
+    });
+
+    it("returns empty array on network error", async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+        const result = await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(result).toEqual([]);
+    });
+
+    it("queries the correct GitHub API URL for the run logs directory", async () => {
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify([]), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        await fetchSlurmLogs(
+            "derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1"
+        );
+        expect(global.fetch.mock.calls[0][0]).toContain(
+            "/contents/derivatives/dandiset-001697/sub-A/pipeline-ephys/version-v1_params-abc_config-def_attempt-1/logs"
+        );
+        expect(global.fetch.mock.calls[0][0]).toContain("?ref=");
+    });
+});
+
+describe("fetchAllSlurmLogs", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("returns empty Map when the git trees fetch fails", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 403 }));
+        const result = await fetchAllSlurmLogs();
+        expect(result).toBeInstanceOf(Map);
+        expect(result.size).toBe(0);
+    });
+
+    it("returns empty Map when no slurm log files exist in the tree", async () => {
+        const treeData = {
+            tree: [
+                { type: "blob", path: "derivatives/dandiset-001/sub-A/pipeline-x/v1/logs/nextflow.log" },
+                { type: "blob", path: "derivatives/dandiset-001/sub-A/pipeline-x/v1/logs/trace.txt" },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.size).toBe(0);
+    });
+
+    it("returns a map with slurm log filenames grouped by run path", async () => {
+        const runPath = "derivatives/dandiset-001/sub-A/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const treeData = {
+            tree: [
+                { type: "blob", path: `${runPath}/logs/nextflow.log` },
+                { type: "blob", path: `${runPath}/logs/job-12345_slurm.log` },
+                { type: "blob", path: `${runPath}/logs/trace.txt` },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.get(runPath)).toEqual(["job-12345_slurm.log"]);
+    });
+
+    it("groups multiple slurm logs across multiple run paths", async () => {
+        const runA = "derivatives/dandiset-001/sub-A/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const runB = "derivatives/dandiset-002/sub-B/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const treeData = {
+            tree: [
+                { type: "blob", path: `${runA}/logs/job-99_slurm.log` },
+                { type: "blob", path: `${runA}/logs/job-10_slurm.log` },
+                { type: "blob", path: `${runB}/logs/job-77_slurm.log` },
+                { type: "blob", path: `${runA}/logs/nextflow.log` },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.get(runA)).toEqual(["job-10_slurm.log", "job-99_slurm.log"]);
+        expect(result.get(runB)).toEqual(["job-77_slurm.log"]);
+    });
+
+    it("ignores tree entries that are not blobs", async () => {
+        const runPath = "derivatives/dandiset-001/sub-A/pipeline-x/v1_params-abc_config-def_attempt-1";
+        const treeData = {
+            tree: [
+                { type: "tree", path: `${runPath}/logs` },
+                { type: "blob", path: `${runPath}/logs/job-12345_slurm.log` },
+            ],
+        };
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify(treeData), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const result = await fetchAllSlurmLogs();
+        expect(result.get(runPath)).toEqual(["job-12345_slurm.log"]);
+    });
+
+    it("uses the git trees API with recursive=1", async () => {
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify({ tree: [] }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        await fetchAllSlurmLogs();
+        expect(global.fetch.mock.calls[0][0]).toContain("/git/trees/");
+        expect(global.fetch.mock.calls[0][0]).toContain("recursive=1");
+    });
+
+    it("returns empty Map on network error", async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error("network error"));
+        const result = await fetchAllSlurmLogs();
+        expect(result).toBeInstanceOf(Map);
+        expect(result.size).toBe(0);
+    });
+});
+
 describe("renderFlatList", () => {
     const baseRun = {
         status: "success",
@@ -1163,8 +1428,9 @@ describe("renderFlatList", () => {
         generatedBy: [],
         vizData: null,
         hasLogs: false,
-        hasOutput: true,
         hasCode: true,
+        hasOutput: true,
+        slurmLogs: [],
         path: "derivatives/dandiset-001697/sub-A/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
         dandisetId: "001697",
         subject: "A",
@@ -1313,6 +1579,34 @@ describe("renderFlatList", () => {
         const run = { ...baseRun, status: "failed" };
         const html = renderFlatList([run]);
         expect(html).toContain("status-failed");
+    });
+
+    it("includes slurm log button in Logs section when slurmLogs is provided", () => {
+        const run = { ...baseRun, hasLogs: true, slurmLogs: ["job-14240507_slurm.log"] };
+        const html = renderFlatList([run]);
+        expect(html).toContain("SLURM Job Log");
+        expect(html).toContain("job-14240507_slurm.log");
+    });
+
+    it("shows slurm log button even when hasLogs is false (slurm started before nextflow logs written)", () => {
+        const run = { ...baseRun, hasLogs: false, slurmLogs: ["job-14240507_slurm.log"] };
+        const html = renderFlatList([run]);
+        expect(html).toContain("SLURM Job Log");
+        expect(html).toContain("job-14240507_slurm.log");
+        expect(html).not.toContain("Nextflow Log");
+    });
+
+    it("renders Nextflow log buttons when hasLogs is true and slurmLogs is empty", () => {
+        const run = { ...baseRun, hasLogs: true, slurmLogs: [] };
+        const html = renderFlatList([run]);
+        expect(html).toContain("Nextflow Log");
+        expect(html).not.toContain("SLURM Job Log");
+    });
+
+    it("shows no Logs section when hasLogs is false and slurmLogs is empty", () => {
+        const run = { ...baseRun, hasLogs: false, slurmLogs: [] };
+        const html = renderFlatList([run]);
+        expect(html).not.toContain("run-section-title");
     });
 });
 
