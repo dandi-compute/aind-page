@@ -34,6 +34,8 @@ const SANDBOX_DANDISETS = new Set(["214527"]);
    also test dandisets, but the two concepts are kept separate so they can
    diverge independently in the future. */
 const TEST_DANDISETS = new Set(["001849", "214527"]);
+/* Per-dandiset fallback subject used when a queue entry carries a null subject */
+const DANDISET_SUBJECT_DEFAULTS = new Map([["001849", "test"]]);
 
 /* Module-level view mode ("tests" | null), set during init */
 let _viewMode = null;
@@ -757,6 +759,12 @@ async function fetchVisualizationData(runPath) {
 }
 
 /* ─── Path helpers ──────────────────────────────────────────── */
+// Returns subject, falling back to a per-dandiset default when subject is null.
+function resolveSubject(dandisetId, subject) {
+    if (subject != null) return subject;
+    return DANDISET_SUBJECT_DEFAULTS.get(String(dandisetId)) ?? null;
+}
+
 function parseDandiPath(dandiPath) {
     const pathParts = String(dandiPath ?? "")
         .split("/")
@@ -787,7 +795,7 @@ function parseDandiPath(dandiPath) {
 // Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
 function buildRunPath(entry) {
     const parsed = parseDandiPath(entry.dandi_path);
-    const subject = entry.subject ?? parsed.subject;
+    const subject = resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject);
     const session = entry.session ?? parsed.session;
     const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${subject}`];
     if (session !== null && session !== undefined) {
@@ -812,7 +820,7 @@ function parseQueueEntries(entries) {
         return {
             path: buildRunPath(entry),
             dandisetId: entry.dandiset_id,
-            subject: entry.subject ?? parsed.subject,
+            subject: resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject),
             session: entry.session ?? parsed.session,
             pipelineName: entry.pipeline,
             pipelineVersion: entry.version,
@@ -3310,6 +3318,8 @@ if (typeof module !== "undefined" && module.exports) {
         showLoading,
         showResults,
         TEST_DANDISETS,
+        DANDISET_SUBJECT_DEFAULTS,
+        resolveSubject,
         treeUrl,
     };
 }
