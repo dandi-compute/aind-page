@@ -866,7 +866,6 @@ function parseRunPath(runPath) {
 
     let paramsProfile = capsulePart;
     let configHash = "";
-    let runDate = null;
     let attempt = 1;
     if (capsulePart.startsWith("params-")) {
         const capsuleBody = capsulePart.slice("params-".length);
@@ -881,15 +880,7 @@ function parseRunPath(runPath) {
                 const configIndex = beforeAttempt.indexOf(configMarker);
                 if (configIndex !== -1) {
                     paramsProfile = beforeAttempt.slice(0, configIndex);
-                    const configBody = beforeAttempt.slice(configIndex + configMarker.length);
-                    const dateMarker = "_date-";
-                    const dateIndex = configBody.indexOf(dateMarker);
-                    if (dateIndex !== -1) {
-                        configHash = configBody.slice(0, dateIndex);
-                        runDate = configBody.slice(dateIndex + dateMarker.length);
-                    } else {
-                        configHash = configBody;
-                    }
+                    configHash = beforeAttempt.slice(configIndex + configMarker.length);
                 } else {
                     paramsProfile = beforeAttempt;
                 }
@@ -907,7 +898,7 @@ function parseRunPath(runPath) {
         paramsProfile,
         configHash,
         createdAt: null,
-        runDate,
+        runDate: null,
         attempt,
     };
 }
