@@ -935,8 +935,9 @@ function renderSummary(runs) {
     const queued = runs.filter((r) => r.status === "queued").length;
     const partial = runs.filter((r) => r.status === "partial").length;
     const unknown = total - success - failed - queued - partial;
-    const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
-    const totalBytes = sumRunByteCounts(runs);
+    const successfulRuns = runs.filter((run) => run.status === "success");
+    const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
+    const totalBytes = sumRunByteCounts(successfulRuns);
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
