@@ -204,6 +204,7 @@ function runFailureStep(run) {
 }
 
 function applyFilter(runs, filter) {
+    const normalizedFilterStatus = filter.status ? String(filter.status).toLowerCase() : null;
     return runs.filter((r) => {
         if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
         if (filter.subject && r.subject !== filter.subject) return false;
@@ -212,7 +213,7 @@ function applyFilter(runs, filter) {
         if (!matchesResolvedOrRawValue(filter.paramsType, runParamsType(r), r.paramsProfile)) return false;
         if (!matchesResolvedOrRawValue(filter.configType, runConfigType(r), r.configHash)) return false;
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
-        if (filter.status && String(r.status).toLowerCase() !== String(filter.status).toLowerCase()) return false;
+        if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
             const failedStep = r.failureStep;
@@ -366,16 +367,13 @@ function renderFilterBanner(filter, availableRuns = []) {
     }
     if (filter.status) {
         const statusLabel = String(filter.status).toLowerCase();
-        const summaryStatusLabel =
-            statusLabel === "success"
-                ? "Successful"
-                : statusLabel === "failed"
-                  ? "Failed"
-                  : statusLabel === "queued"
-                    ? "Queued"
-                    : statusLabel === "partial"
-                      ? "Partial"
-                      : `Status: ${filter.status}`;
+        const statusLabels = {
+            success: "Successful",
+            failed: "Failed",
+            queued: "Queued",
+            partial: "Partial",
+        };
+        const summaryStatusLabel = statusLabels[statusLabel] ?? `Status: ${filter.status}`;
         crumbs.push(
             `<a class="filter-crumb" href="${e(narrowUrl({ status: filter.status }))}">${e(summaryStatusLabel)}</a>`
         );
