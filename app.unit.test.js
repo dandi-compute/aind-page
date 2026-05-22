@@ -370,6 +370,7 @@ describe("app unit behavior", () => {
                 has_code: true,
                 has_output: false,
                 has_logs: true,
+                asset_size_bytes: 1024,
             },
             {
                 dandiset_id: "001469",
@@ -399,6 +400,7 @@ describe("app unit behavior", () => {
             hasCode: true,
             hasOutput: false,
             hasLogs: true,
+            assetSizeBytes: 1024,
         });
         expect(runs[1].session).toBeNull();
         expect(runs[1].hasLogs).toBe(false);
@@ -934,6 +936,7 @@ describe("renderFlatList", () => {
         assetId: null,
         inSourcedata: false,
         failureStep: null,
+        assetSizeBytes: 1024,
     };
 
     it("wraps runs in a flat-list container", () => {
@@ -1048,6 +1051,12 @@ describe("renderFlatList", () => {
         expect(html).toContain("1");
     });
 
+    it("shows bytes in each flat run entry when available", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("Asset size:");
+        expect(html).toContain("1.02 KB");
+    });
+
     it("renders multiple runs", () => {
         const run2 = { ...baseRun, dandisetId: "000233", subject: "B", attempt: 2 };
         const html = renderFlatList([baseRun, run2]);
@@ -1090,6 +1099,7 @@ describe("renderDandisets", () => {
             assetId: null,
             inSourcedata: false,
             failureStep: null,
+            assetSizeBytes: 1024,
         };
         const run2 = {
             ...run1,
@@ -1100,10 +1110,14 @@ describe("renderDandisets", () => {
             pipelineVersion: "v2",
             paramsProfile: "slow",
             configHash: "def",
+            assetSizeBytes: 2048,
         };
 
         const html = renderDandisets([run1, run2]);
         expect(html).toContain("2&nbsp;jobs");
+        expect(html).toContain("DATA PROCESSED:");
+        expect(html).toContain("Asset size:");
+        expect(html).toContain("3.07 KB");
         expect(html).not.toContain("pipeline-version-group");
         expect(html).not.toContain("params-group");
         expect((html.match(/class="run-entry status-/g) || []).length).toBe(2);
