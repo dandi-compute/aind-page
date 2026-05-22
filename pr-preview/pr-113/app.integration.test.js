@@ -1,4 +1,4 @@
-const { renderFilterBanner, showDiffResults, showError, showLoading, showResults } = require("./app");
+const { renderFilterBanner, renderSummary, showDiffResults, showError, showLoading, showResults } = require("./app");
 
 beforeEach(() => {
     document.body.innerHTML = `
@@ -77,6 +77,17 @@ describe("app integration behavior", () => {
         showResults();
         expect(document.getElementById("summary").style.display).toBe("");
         expect(document.getElementById("runs").style.display).toBe("");
+    });
+
+    it("shows summed bytes in the summary when runs include size metadata", () => {
+        renderSummary([
+            { status: "success", assetSizeBytes: 10 },
+            { status: "failed", assetSizeBytes: 20 },
+            { status: "queued" },
+        ]);
+
+        expect(document.getElementById("summary").innerHTML).toContain("Total Bytes");
+        expect(document.getElementById("summary").innerHTML).toContain("30 bytes");
     });
 
     it("shows only the diff content region on the diff page", () => {
