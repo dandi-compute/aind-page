@@ -31,6 +31,8 @@ const {
     runFailureStep,
     sortRuns,
     TEST_DANDISETS,
+    DANDISET_SUBJECT_DEFAULTS,
+    resolveSubject,
     treeUrl,
     uniquePipelineEntries,
 } = require("./app");
@@ -195,6 +197,22 @@ describe("app unit behavior", () => {
         expect(TEST_DANDISETS.has("001849")).toBe(true);
     });
 
+    it("DANDISET_SUBJECT_DEFAULTS maps null subject to 'test' for dandiset 001849", () => {
+        expect(DANDISET_SUBJECT_DEFAULTS.get("001849")).toBe("test");
+    });
+
+    it("resolveSubject returns subject when non-null", () => {
+        expect(resolveSubject("001849", "my-subject")).toBe("my-subject");
+    });
+
+    it("resolveSubject falls back to dandiset default when subject is null", () => {
+        expect(resolveSubject("001849", null)).toBe("test");
+    });
+
+    it("resolveSubject returns null when no default exists and subject is null", () => {
+        expect(resolveSubject("000001", null)).toBeNull();
+    });
+
     it("classifies failure steps from task names", () => {
         expect(classifyFailedTaskStep("dispatch workflow")).toBe("job-dispatch");
         expect(classifyFailedTaskStep("pre_process data")).toBe("pre-processing");
@@ -306,6 +324,7 @@ describe("app unit behavior", () => {
             pipelineVersion: "v1.1.1+b268fd2+5d20fd2",
             paramsProfile: "4af6a25",
             configHash: "0d4bf36_date-2026+05+14",
+            runDate: null,
             attempt: 2,
         });
     });
@@ -369,6 +388,57 @@ describe("app unit behavior", () => {
         });
         expect(path).toBe(
             "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
+    it("builds run path with date field included", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            subject: "test",
+            session: null,
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+a66c8df",
+            params: "4af6a25",
+            config: "0d4bf36",
+            date: "2026+05+21",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
+        );
+    });
+
+    it("builds run path without date when date field is absent", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            subject: "test",
+            session: null,
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+a66c8df",
+            params: "4af6a25",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+        expect(path).not.toContain("_date-");
+    });
+
+    it("maps null subject to default for dandiset 001849 in path", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            subject: null,
+            session: null,
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+a66c8df",
+            params: "4af6a25",
+            config: "0d4bf36",
+            date: "2026+05+21",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
         );
     });
 
@@ -480,6 +550,79 @@ describe("app unit behavior", () => {
         const runs = parseQueueEntries(entries);
         expect(runs[0].createdAt).toBe("2026-05-20T09:15:00Z");
         expect(runs[0].runDate).toBe("2026-05-20T09:15:00Z");
+    });
+
+    it("includes _date- in path and falls back to date for runDate when entry has date field", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: "test",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36",
+                date: "2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
+        );
+        expect(runs[0].runDate).toBe("2026+05+21");
+    });
+
+    it("prefers created_at over date for runDate when both are present", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: "test",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36",
+                date: "2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+                created_at: "2026-05-21T14:30:00Z",
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].runDate).toBe("2026-05-21T14:30:00Z");
+    });
+
+    it("maps null subject to 'test' for dandiset 001849 in parseQueueEntries", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                subject: null,
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a66c8df",
+                params: "4af6a25",
+                config: "0d4bf36",
+                date: "2026+05+21",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].subject).toBe("test");
+        expect(runs[0].path).toBe(
+            "derivatives/dandiset-001849/sub-test/pipeline-aind+ephys/version-v1.1.1+b268fd2+a66c8df_params-4af6a25_config-0d4bf36_date-2026+05+21_attempt-1"
+        );
     });
 
     it("parses subject and session from dandi_path when queue entry omits fields", () => {
