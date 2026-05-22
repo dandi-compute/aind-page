@@ -697,6 +697,23 @@ async function fetchTraceText(runPath) {
     }
 }
 
+async function fetchSlurmLogs(runPath) {
+    try {
+        const encodedPath = `${runPath}/logs`.split("/").map(encodeURIComponent).join("/");
+        const url = `${GITHUB_API_BASE}/contents/${encodedPath}?ref=${BRANCH}`;
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return [];
+        const items = await resp.json();
+        if (!Array.isArray(items)) return [];
+        return items
+            .filter((item) => item.type === "file" && item.name.endsWith("_slurm.log"))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((item) => item.name);
+    } catch {
+        return [];
+    }
+}
+
 async function fetchDatasetDescription(runPath) {
     const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
     const url = `${CDN_BASE}/${pathParts}/dataset_description.json`;
@@ -1153,7 +1170,7 @@ function renderRunEntry(run) {
             const bi = INLINE_REPORT_ORDER.indexOf(b);
             return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
         });
-    const buttonLogs = logFiles.filter((f) => !INLINE_REPORT_FILES.has(f));
+    const buttonLogs = [...logFiles.filter((f) => !INLINE_REPORT_FILES.has(f)), ...(run.slurmLogs ?? [])];
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
@@ -2270,7 +2287,7 @@ function renderFlatRunEntry(run) {
             const bi = INLINE_REPORT_ORDER.indexOf(b);
             return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
         });
-    const buttonLogs = logFiles.filter((f) => !INLINE_REPORT_FILES.has(f));
+    const buttonLogs = [...logFiles.filter((f) => !INLINE_REPORT_FILES.has(f)), ...(run.slurmLogs ?? [])];
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
@@ -3241,11 +3258,12 @@ async function init() {
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, dandiResult, vizData] = await Promise.all([
+                const [text, datasetDesc, dandiResult, vizData, slurmLogs] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run.path)),
                     fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchVisualizationData(run.path) : Promise.resolve(null),
+                    fetchIfLogs(run.hasLogs, () => fetchSlurmLogs(run.path)),
                 ]);
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
@@ -3263,7 +3281,17 @@ async function init() {
                       ? "queued"
                       : "failed";
                 const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
-                return { ...run, ...parsed, assetId, inSourcedata, generatedBy, vizData, status, failureStep };
+                return {
+                    ...run,
+                    ...parsed,
+                    assetId,
+                    inSourcedata,
+                    generatedBy,
+                    vizData,
+                    status,
+                    failureStep,
+                    slurmLogs: slurmLogs ?? [],
+                };
             })
         );
 
@@ -3328,6 +3356,7 @@ if (typeof module !== "undefined" && module.exports) {
         buildRunPath,
         classifyFailedTaskStep,
         fetchQueueState,
+        fetchSlurmLogs,
         fetchVisualizationData,
         initModal,
         initLayoutToggle,
