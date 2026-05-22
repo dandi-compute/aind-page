@@ -90,7 +90,7 @@ describe("app integration behavior", () => {
         expect(document.getElementById("summary").innerHTML).toContain("30 B");
     });
 
-    it("uses decimal-scaled units for large processed data values", () => {
+    it("formats large byte counts with appropriate decimal units", () => {
         renderSummary([{ status: "success", assetSizeBytes: 2_500_000_000_000 }]);
         expect(document.getElementById("summary").innerHTML).toContain("2.5 TB");
     });
