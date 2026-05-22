@@ -1280,8 +1280,9 @@ describe("renderFlatList", () => {
         generatedBy: [],
         vizData: null,
         hasLogs: false,
-        hasOutput: true,
         hasCode: true,
+        hasOutput: true,
+        slurmLogs: [],
         path: "derivatives/dandiset-001697/sub-A/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
         dandisetId: "001697",
         subject: "A",
@@ -1437,6 +1438,14 @@ describe("renderFlatList", () => {
         const html = renderFlatList([run]);
         expect(html).toContain("SLURM Job Log");
         expect(html).toContain("job-14240507_slurm.log");
+    });
+
+    it("shows slurm log button even when hasLogs is false (slurm started before nextflow logs written)", () => {
+        const run = { ...baseRun, hasLogs: false, slurmLogs: ["job-14240507_slurm.log"] };
+        const html = renderFlatList([run]);
+        expect(html).toContain("SLURM Job Log");
+        expect(html).toContain("job-14240507_slurm.log");
+        expect(html).not.toContain("Nextflow Log");
     });
 
     it("renders Nextflow log buttons when hasLogs is true and slurmLogs is empty", () => {
