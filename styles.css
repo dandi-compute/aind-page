@@ -270,6 +270,10 @@ h1 {
     padding: 14px 28px;
     min-width: 110px;
 }
+.stat-item:is(a) {
+    color: inherit;
+    text-decoration: none;
+}
 
 .stat-value {
     font-size: 2em;
