@@ -104,6 +104,26 @@ describe("app integration behavior", () => {
         expect(document.getElementById("summary").innerHTML).toContain("2.5 TB");
     });
 
+    it("renders clickable success and failed summary counters that apply status filtering", () => {
+        window.history.replaceState(
+            null,
+            "",
+            "/?layout=flat&sort=attempt&sortDir=desc&dandiset=001697&failureStep=pre-processing"
+        );
+        renderSummary([
+            { status: "success", assetSizeBytes: 100 },
+            { status: "failed", assetSizeBytes: 200 },
+        ]);
+
+        const summaryHtml = document.getElementById("summary").innerHTML;
+        expect(summaryHtml).toContain(
+            'class="stat-item stat-success" href="?layout=flat&amp;sort=attempt&amp;sortDir=desc&amp;dandiset=001697&amp;status=success"'
+        );
+        expect(summaryHtml).toContain(
+            'class="stat-item stat-failed" href="?layout=flat&amp;sort=attempt&amp;sortDir=desc&amp;dandiset=001697&amp;status=failed"'
+        );
+    });
+
     it("shows only the diff content region on the diff page", () => {
         showDiffResults();
         expect(document.getElementById("loading").style.display).toBe("none");
@@ -134,6 +154,28 @@ describe("app integration behavior", () => {
         expect(banner.innerHTML).toContain('name="sort" value="created_at"');
         expect(banner.innerHTML).toContain('name="sortDir" value="asc"');
         expect(banner.innerHTML).toContain('href="?layout=flat&amp;sort=created_at&amp;sortDir=asc"');
+    });
+
+    it("preserves status filter in the filter form when active", () => {
+        window.history.replaceState(null, "", "/?layout=flat&sort=created_at&sortDir=asc&status=failed");
+        renderFilterBanner(
+            {
+                dandisetId: null,
+                subject: null,
+                session: null,
+                pipelineVersion: null,
+                paramsType: null,
+                configType: null,
+                dandiCodebaseHash: null,
+                failureStep: null,
+                status: "failed",
+            },
+            []
+        );
+
+        const banner = document.getElementById("filter-banner");
+        expect(banner.innerHTML).toContain('name="status" value="failed"');
+        expect(banner.innerHTML).toContain("Filtered view:");
     });
 
     it("scopes subject and session options based on selected dandiset and subject", () => {
