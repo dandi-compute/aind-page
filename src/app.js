@@ -244,7 +244,7 @@ function narrowUrl(params) {
 const FILTER_VALUE_COLLATOR = new Intl.Collator();
 const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
 const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
-const DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
 const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
 function normalizeByteCount(value) {
@@ -269,11 +269,11 @@ function formatByteCount(value) {
     if (!Number.isFinite(value) || value < 0) return "0 B";
     let scaledValue = value;
     let unitIndex = 0;
-    while (scaledValue >= 1000 && unitIndex < DATA_SIZE_UNITS.length - 1) {
+    while (scaledValue >= 1000 && unitIndex < DECIMAL_DATA_SIZE_UNITS.length - 1) {
         scaledValue /= 1000;
         unitIndex += 1;
     }
-    return `${DATA_SIZE_FORMATTER.format(scaledValue)} ${DATA_SIZE_UNITS[unitIndex]}`;
+    return `${DATA_SIZE_FORMATTER.format(scaledValue)} ${DECIMAL_DATA_SIZE_UNITS[unitIndex]}`;
 }
 
 function renderFilterInput(name, label, value, suggestions, clearHref = null) {
