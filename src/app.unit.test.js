@@ -31,6 +31,7 @@ const {
     runFailureStep,
     sortRuns,
     TEST_DANDISETS,
+    treeUrl,
     uniquePipelineEntries,
 } = require("./app");
 
@@ -356,6 +357,21 @@ describe("app unit behavior", () => {
         );
     });
 
+    it("builds run path from NWB filename dandi_path when subject/session fields are absent", () => {
+        const path = buildRunPath({
+            dandiset_id: "000363",
+            dandi_path: "sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb",
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+a0c5e04",
+            params: "4af6a25",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
     it("parses JSONL queue entries into run objects", () => {
         const entries = [
             {
@@ -489,6 +505,76 @@ describe("app unit behavior", () => {
             session: "recording049",
             path: "derivatives/dandiset-001747/sub-chip19894/ses-recording049/pipeline-aind+ephys/version-v1.1.1+b268fd2_params-98fd947_config-6568dda_attempt-1",
         });
+    });
+
+    it("extracts session from NWB filename in dandi_path", () => {
+        const entries = [
+            {
+                dandiset_id: "000363",
+                dandi_path: "sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb",
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+a0c5e04",
+                params: "4af6a25",
+                config: "0d4bf36",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            subject: "480134",
+            session: "20210107T120825",
+            path: "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1",
+        });
+    });
+
+    it("returns null session from dandi_path when NWB filename has no ses- entity", () => {
+        const entries = [
+            {
+                dandiset_id: "001469",
+                dandi_path: "sub-Chronic-Implant-2/sub-Chronic-Implant-2_obj-nvg8om_ecephys.nwb",
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            subject: "Chronic-Implant-2",
+            session: null,
+            path: "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6_params-98fd947_config-6568dda_attempt-1",
+        });
+    });
+});
+
+describe("treeUrl", () => {
+    it("builds a GitHub tree URL with /tree/ for a run path with session", () => {
+        const path =
+            "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1";
+        const url = treeUrl(path);
+        expect(url).toBe(
+            "https://github.com/dandi-compute/001697/tree/draft/" +
+                "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind%2Bephys/version-v1.1.1%2Bb268fd2%2Ba0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
+    it("builds a GitHub tree URL without session when session is absent", () => {
+        const path =
+            "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0_params-98fd947_config-6568dda_attempt-1";
+        const url = treeUrl(path);
+        expect(url).toContain("https://github.com/dandi-compute/001697/tree/draft/");
+        expect(url).not.toContain("/blob/");
     });
 });
 
