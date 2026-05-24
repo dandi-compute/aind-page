@@ -856,6 +856,17 @@ function parseDandiPath(dandiPath) {
     };
 }
 
+function dandiPathDirectoryParts(dandiPath) {
+    const pathParts = String(dandiPath ?? "")
+        .split("/")
+        .filter(Boolean);
+    if (pathParts.length === 0) return [];
+    const terminalPart = pathParts[pathParts.length - 1] ?? "";
+    const nonFileParts = terminalPart.toLowerCase().endsWith(".nwb") ? pathParts.slice(0, -1) : pathParts;
+    const subjectIndex = nonFileParts.findIndex((part) => part.startsWith("sub-"));
+    return subjectIndex >= 0 ? nonFileParts.slice(subjectIndex) : [];
+}
+
 // Build a run directory path from a JSONL queue entry.
 // With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
 // Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
@@ -863,9 +874,15 @@ function buildRunPath(entry) {
     const parsed = parseDandiPath(entry.dandi_path);
     const subject = resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject);
     const session = entry.session ?? parsed.session;
-    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${subject}`];
-    if (session !== null && session !== undefined) {
-        parts.push(`ses-${session}`);
+    const dandiPathParts = dandiPathDirectoryParts(entry.dandi_path);
+    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`];
+    if (dandiPathParts.length > 0) {
+        parts.push(...dandiPathParts);
+    } else {
+        parts.push(`sub-${subject}`);
+        if (session !== null && session !== undefined) {
+            parts.push(`ses-${session}`);
+        }
     }
     parts.push(`pipeline-${entry.pipeline}`);
     let capsule = `version-${entry.version}_params-${entry.params}_config-${entry.config}`;

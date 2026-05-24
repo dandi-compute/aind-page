@@ -399,7 +399,7 @@ describe("app unit behavior", () => {
         );
     });
 
-    it("builds run path from NWB filename dandi_path when subject/session fields are absent", () => {
+    it("builds run path from NWB filename dandi_path by stripping the terminal .nwb", () => {
         const path = buildRunPath({
             dandiset_id: "000363",
             dandi_path: "sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb",
@@ -410,7 +410,23 @@ describe("app unit behavior", () => {
             attempt: 1,
         });
         expect(path).toBe(
-            "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+            "derivatives/dandiset-000363/sub-480134/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
+    it("builds run path from full dandi_path hierarchy when sourcedata segments are present", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            dandi_path: "sub-test/sourcedata/aind-sample/sub-test_ses-aind+sample_ecephys.nwb",
+            pipeline: "aind+ephys",
+            version: "v1.1.1+b268fd2+938ee17",
+            params: "4af6a25",
+            config: "0d4bf36",
+            date: "2026+05+24",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1"
         );
     });
 
@@ -715,7 +731,33 @@ describe("app unit behavior", () => {
         expect(runs[0]).toMatchObject({
             subject: "480134",
             session: "20210107T120825",
-            path: "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1",
+            path: "derivatives/dandiset-000363/sub-480134/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1",
+        });
+    });
+
+    it("preserves sourcedata hierarchy from dandi_path in run path", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                dandi_path: "sub-test/sourcedata/aind-sample/sub-test_ses-aind+sample_ecephys.nwb",
+                pipeline: "aind+ephys",
+                version: "v1.1.1+b268fd2+938ee17",
+                params: "4af6a25",
+                config: "0d4bf36",
+                date: "2026+05+24",
+                attempt: 1,
+                has_code: true,
+                has_output: true,
+                has_logs: true,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            subject: "test",
+            session: "aind+sample",
+            path: "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1",
         });
     });
 
