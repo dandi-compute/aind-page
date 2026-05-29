@@ -2364,12 +2364,12 @@ function renderFlatRunEntry(run) {
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
             <span class="run-sep">·</span>
-            <a class="flat-ctx-link" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
+            <a class="flat-ctx-link flat-ctx-path" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
+            ${run.runDate ? `<span class="flat-ctx-break"></span><span class="flat-ctx-text flat-ctx-date">${e(run.runDate)}</span>` : ""}
             <span class="run-sep">·</span>
             <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
             ${run.configHash ? `<span class="run-sep">·</span><span class="flat-ctx-text">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         </span>
-        ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
         <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
