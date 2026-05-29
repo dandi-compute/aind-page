@@ -876,6 +876,29 @@ describe("treeUrl", () => {
         });
     });
 
+    it("renderFlatList labels the dandiset root link as Sourcedata", () => {
+        const html = renderFlatList([
+            {
+                status: "success",
+                hasLogs: false,
+                tasks: [],
+                generatedBy: [],
+                vizData: [],
+                dandiPath: "sub-NP06/sub-NP06_ecephys.nwb",
+                inSourcedata: false,
+                subject: "NP06",
+                attempt: 1,
+                path: "derivatives/dandiset-001765/sub-NP06/sub-NP06_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-e6a0e86_config-0d4bf36_attempt-1",
+                dandisetId: "001765",
+                paramsProfile: "e6a0e86",
+                configHash: "0d4bf36",
+                runDate: "2026-05-24",
+            },
+        ]);
+        expect(html).toContain("Sourcedata&nbsp;↖");
+        expect(html).not.toContain("DANDI&nbsp;↖");
+    });
+
     it("builds a GitHub tree URL without session when session is absent", () => {
         const path =
             "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0_params-98fd947_config-6568dda_attempt-1";
