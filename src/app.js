@@ -27,13 +27,9 @@ const REGISTERED_PARAMS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/regis
 const REGISTERED_CONFIGS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_configs.json";
 let PARAMS_REGISTRY = [];
 let CONFIG_REGISTRY = [];
-/* Dandisets hosted on the sandbox archive instead of the production archive */
-const SANDBOX_DANDISETS = new Set(["214527"]);
 /* Dandisets used for internal testing – hidden from the main view and moved to
-   the dedicated Tests page (?view=tests).  Currently all sandbox dandisets are
-   also test dandisets, but the two concepts are kept separate so they can
-   diverge independently in the future. */
-const TEST_DANDISETS = new Set(["001849", "214527"]);
+   the dedicated Tests page (?view=tests). */
+const TEST_DANDISETS = new Set(["001849"]);
 /* Per-dandiset fallback subject used when a queue entry carries a null subject */
 const DANDISET_SUBJECT_DEFAULTS = new Map([["001849", "test"]]);
 
@@ -120,11 +116,11 @@ function codeRepoRawUrl(path) {
     return `https://raw.githubusercontent.com/dandi-compute/code/main/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-function dandiBaseUrl(dandisetId) {
-    return SANDBOX_DANDISETS.has(dandisetId) ? "https://sandbox.dandiarchive.org" : "https://dandiarchive.org";
+function dandiBaseUrl(_dandisetId) {
+    return "https://dandiarchive.org";
 }
-function dandiApiBaseUrl(dandisetId) {
-    return SANDBOX_DANDISETS.has(dandisetId) ? "https://api-staging.dandiarchive.org" : "https://api.dandiarchive.org";
+function dandiApiBaseUrl(_dandisetId) {
+    return "https://api.dandiarchive.org";
 }
 
 /* ─── URL-based filtering ───────────────────────────────────── */
@@ -414,7 +410,7 @@ function renderFilterBanner(filter, availableRuns = []) {
         _viewMode === "tests"
             ? `<div class="tests-page-banner">
     <span class="tests-page-label">🧪 Tests</span>
-    <span class="tests-page-desc">Showing internal test runs only (Dandiset 214527)</span>
+    <span class="tests-page-desc">Showing internal test runs only (Dandiset 001849)</span>
     <a class="tests-back-link" href="./">← Back to main</a>
 </div>`
             : "";
@@ -754,11 +750,6 @@ async function fetchDatasetDescription(runPath) {
 async function fetchDandiAssetId(dandisetId, subject, session) {
     // Asset lookup requires a session path; return null when session is absent
     if (!session) return null;
-    // The staging API (used by sandbox dandisets) does not set Access-Control-Allow-Origin,
-    // so browser fetches from GitHub Pages are blocked by CORS policy.  Skip the lookup
-    // entirely for sandbox dandisets to avoid the console error; Neurosift links will fall
-    // back to the content-hash blob URL when available.
-    if (SANDBOX_DANDISETS.has(dandisetId)) return null;
     const apiBase = dandiApiBaseUrl(dandisetId);
     async function queryPath(assetPath) {
         const url = `${apiBase}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
@@ -1158,10 +1149,8 @@ function treeUrl(filePath) {
 
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
 function neurosiftUrl(dandisetId, assetId) {
-    const isSandbox = SANDBOX_DANDISETS.has(dandisetId);
     const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
-    const url = `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
-    return isSandbox ? `${url}&staging=true` : url;
+    return `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
 }
 
 /* Build a Neurosift NWB URL from a DANDI S3 content hash */
