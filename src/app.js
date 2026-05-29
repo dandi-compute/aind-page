@@ -627,9 +627,13 @@ async function loadAindPipelineRegistries() {
 }
 
 /* ─── Data fetching ─────────────────────────────────────────── */
+function queueStateCacheKey() {
+    return ETAG_CACHE_PREFIX + `${QUEUE_CDN_BASE}/state.jsonl.gz`;
+}
+
 async function fetchQueueState() {
     const url = `${QUEUE_CDN_BASE}/state.jsonl.gz`;
-    const cacheKey = ETAG_CACHE_PREFIX + url;
+    const cacheKey = queueStateCacheKey();
 
     let cached = null;
     try {
@@ -679,6 +683,14 @@ async function fetchQueueState() {
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line));
+}
+
+function clearQueueStateCache() {
+    try {
+        sessionStorage.removeItem(queueStateCacheKey());
+    } catch {
+        /* sessionStorage unavailable; nothing to clear */
+    }
 }
 
 async function fetchTraceText(runPath) {
@@ -2403,6 +2415,13 @@ function renderLayoutBar() {
             title="${isAscending ? "Sort ascending" : "Sort descending"}"
         >${isAscending ? "↑" : "↓"}</button>
     </div>
+    <button
+        class="layout-btn layout-btn-refresh"
+        type="button"
+        data-refresh-queue
+        aria-label="Refresh queue state"
+        title="Clear cache and reload queue state"
+    >↺ Refresh</button>
 </div>`;
 }
 
@@ -2416,7 +2435,11 @@ function rerenderRuns() {
 function initLayoutToggle() {
     const bar = document.getElementById("layout-bar");
     if (!bar) return;
+    // Always sync the bar HTML with the current layout/sort state (e.g. after a data reload).
     bar.innerHTML = renderLayoutBar();
+    // Attach event listeners only once per element; subsequent calls only need the HTML update above.
+    if (bar.dataset.initialized) return;
+    bar.dataset.initialized = "1";
     bar.addEventListener("click", (ev) => {
         const btn = ev.target.closest("[data-layout]");
         if (btn) {
@@ -2430,12 +2453,18 @@ function initLayoutToggle() {
             return;
         }
         const directionBtn = ev.target.closest("[data-sort-direction]");
-        if (!directionBtn) return;
-        _sortDirection = _sortDirection === "desc" ? "asc" : "desc";
-        localStorage.setItem("sortDirection", _sortDirection);
-        updateSortDirectionUrl(_sortDirection);
-        bar.innerHTML = renderLayoutBar();
-        rerenderRuns();
+        if (directionBtn) {
+            _sortDirection = _sortDirection === "desc" ? "asc" : "desc";
+            localStorage.setItem("sortDirection", _sortDirection);
+            updateSortDirectionUrl(_sortDirection);
+            bar.innerHTML = renderLayoutBar();
+            rerenderRuns();
+            return;
+        }
+        const refreshBtn = ev.target.closest("[data-refresh-queue]");
+        if (!refreshBtn) return;
+        clearQueueStateCache();
+        loadQueueData();
     });
     bar.addEventListener("change", (ev) => {
         const select = ev.target.closest("[data-sort-mode]");
@@ -3207,75 +3236,13 @@ function e(str) {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/* ─── Main ──────────────────────────────────────────────────── */
-async function init() {
-    _viewMode = parseViewMode();
-    initTheme();
-    initModal();
-    syncTopNav(_viewMode);
-    if (_viewMode === "compare") {
-        setPageCopy(
-            "AIND Pipeline Diffs Index",
-            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions.'
-        );
-    }
-    if (_viewMode === "params") {
-        setPageCopy(
-            "Register New Params File",
-            'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
-        );
-    }
-
+/* ─── Queue data loader ─────────────────────────────────────── */
+// Fetches, processes, and renders the queue state for the current view.
+// Only applies to the default queue views ("main" and "tests"); the "compare" and
+// "params" views are handled separately in init() and never call this function.
+// Called on initial page load and when the user clicks the Refresh button.
+async function loadQueueData() {
     showLoading();
-    if (_viewMode !== "params") {
-        await loadAindPipelineRegistries();
-    }
-    if (_viewMode === "compare") {
-        try {
-            const entries = await fetchQueueState();
-            const runs = parseQueueEntries(entries);
-            const pipelineEntries = await buildPipelineCompareEntries(runs);
-            const pipelinePairs = await buildPipelineDiffPairs(runs);
-            const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY).map((entry) => ({
-                key: entry.alias,
-                alias: entry.alias,
-                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
-            }));
-            const paramsPairs = await buildParamsDiffPairs();
-            const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY).map((entry) => ({
-                key: entry.alias,
-                alias: entry.alias,
-                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
-            }));
-            const configPairs = await buildConfigDiffPairs();
-            const diffData = {
-                pipelineEntries,
-                pipelinePairs,
-                pipelinePairMap: new Map(
-                    pipelinePairs.map((pair) => [`${pair.baseVersion}\x00${pair.headVersion}`, pair.compareUrl])
-                ),
-                paramsEntries,
-                paramsPairs,
-                paramsPairMap: new Map(paramsPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
-                configEntries,
-                configPairs,
-                configPairMap: new Map(configPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
-            };
-            document.getElementById("runs").innerHTML = renderDiffPage(diffData);
-            showDiffResults();
-        } catch (err) {
-            showError(err.message || "An unexpected error occurred.");
-        }
-        return;
-    }
-    if (_viewMode === "params") {
-        try {
-            await initParamsEditor();
-        } catch (err) {
-            showError(err.message || "Failed to load the parameter schema.");
-        }
-        return;
-    }
     renderFilterBanner(parseFilter(), []);
 
     try {
@@ -3384,6 +3351,78 @@ async function init() {
     }
 }
 
+/* ─── Main ──────────────────────────────────────────────────── */
+async function init() {
+    _viewMode = parseViewMode();
+    initTheme();
+    initModal();
+    syncTopNav(_viewMode);
+    if (_viewMode === "compare") {
+        setPageCopy(
+            "AIND Pipeline Diffs Index",
+            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions.'
+        );
+    }
+    if (_viewMode === "params") {
+        setPageCopy(
+            "Register New Params File",
+            'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
+        );
+    }
+
+    showLoading();
+    if (_viewMode !== "params") {
+        await loadAindPipelineRegistries();
+    }
+    if (_viewMode === "compare") {
+        try {
+            const entries = await fetchQueueState();
+            const runs = parseQueueEntries(entries);
+            const pipelineEntries = await buildPipelineCompareEntries(runs);
+            const pipelinePairs = await buildPipelineDiffPairs(runs);
+            const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY).map((entry) => ({
+                key: entry.alias,
+                alias: entry.alias,
+                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
+            }));
+            const paramsPairs = await buildParamsDiffPairs();
+            const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY).map((entry) => ({
+                key: entry.alias,
+                alias: entry.alias,
+                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            }));
+            const configPairs = await buildConfigDiffPairs();
+            const diffData = {
+                pipelineEntries,
+                pipelinePairs,
+                pipelinePairMap: new Map(
+                    pipelinePairs.map((pair) => [`${pair.baseVersion}\x00${pair.headVersion}`, pair.compareUrl])
+                ),
+                paramsEntries,
+                paramsPairs,
+                paramsPairMap: new Map(paramsPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
+                configEntries,
+                configPairs,
+                configPairMap: new Map(configPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
+            };
+            document.getElementById("runs").innerHTML = renderDiffPage(diffData);
+            showDiffResults();
+        } catch (err) {
+            showError(err.message || "An unexpected error occurred.");
+        }
+        return;
+    }
+    if (_viewMode === "params") {
+        try {
+            await initParamsEditor();
+        } catch (err) {
+            showError(err.message || "Failed to load the parameter schema.");
+        }
+        return;
+    }
+    await loadQueueData();
+}
+
 document.addEventListener("DOMContentLoaded", init);
 
 if (typeof module !== "undefined" && module.exports) {
@@ -3391,12 +3430,14 @@ if (typeof module !== "undefined" && module.exports) {
         applyFilter,
         buildRunPath,
         classifyFailedTaskStep,
+        clearQueueStateCache,
         fetchQueueState,
         fetchSlurmLogs,
         fetchAllSlurmLogs,
         fetchVisualizationData,
         initModal,
         initLayoutToggle,
+        loadQueueData,
         openHtmlModal,
         neurosiftBlobUrl,
         neurosiftDandisetUrl,
@@ -3408,6 +3449,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseRunPath,
         parseTrace,
         parseViewMode,
+        queueStateCacheKey,
         syncTopNav,
         renderDandisets,
         buildPipelineDiffPairs,
