@@ -856,6 +856,15 @@ function parseDandiPath(dandiPath) {
     };
 }
 
+function dandiPathDirectoryParts(dandiPath) {
+    const pathParts = String(dandiPath ?? "")
+        .split("/")
+        .filter(Boolean);
+    if (pathParts.length === 0) return [];
+    const terminalPart = pathParts[pathParts.length - 1] ?? "";
+    return terminalPart.toLowerCase().endsWith(".nwb") ? pathParts.slice(0, -1) : pathParts;
+}
+
 // Build a run directory path from a JSONL queue entry.
 // With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
 // Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
@@ -863,9 +872,15 @@ function buildRunPath(entry) {
     const parsed = parseDandiPath(entry.dandi_path);
     const subject = resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject);
     const session = entry.session ?? parsed.session;
-    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`, `sub-${subject}`];
-    if (session !== null && session !== undefined) {
-        parts.push(`ses-${session}`);
+    const dandiPathParts = dandiPathDirectoryParts(entry.dandi_path);
+    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`];
+    if (dandiPathParts.length > 0) {
+        parts.push(...dandiPathParts);
+    } else {
+        parts.push(`sub-${subject}`);
+        if (session !== null && session !== undefined) {
+            parts.push(`ses-${session}`);
+        }
     }
     parts.push(`pipeline-${entry.pipeline}`);
     let capsule = `version-${entry.version}_params-${entry.params}_config-${entry.config}`;
@@ -886,6 +901,7 @@ function parseQueueEntries(entries) {
         return {
             path: buildRunPath(entry),
             dandisetId: entry.dandiset_id,
+            dandiPath: entry.dandi_path ?? null,
             subject: resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject),
             session: entry.session ?? parsed.session,
             pipelineName: entry.pipeline,
@@ -2333,15 +2349,12 @@ function renderFlatRunEntry(run) {
             ? ""
             : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
 
-    const location = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
-    const subjectUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${e(location)}`;
-    const sessionHref = neurosiftSessionUrl(run.dandisetId, run.contentHash, run.assetId);
-    const sessionContextHtml =
-        run.session !== null
-            ? sessionHref
-                ? `<span class="run-sep">·</span><a class="flat-ctx-link" href="${e(sessionHref)}" target="_blank" rel="noopener">Ses:&nbsp;<strong>${e(run.session)}</strong></a>`
-                : `<span class="run-sep">·</span><span class="flat-ctx-text">Ses:&nbsp;<strong>${e(run.session)}</strong></span>`
-            : "";
+    const dandiPath = String(run.dandiPath ?? "").trim();
+    const dandiDirectory = dandiPathDirectoryParts(dandiPath).join("/");
+    const fallbackLocation = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
+    const location = dandiDirectory || fallbackLocation;
+    const dandiPathLabel = dandiPath || location;
+    const dandiPathUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${encodeURIComponent(location)}`;
 
     return `
 <div class="run-entry flat-run-entry ${sc}">
@@ -2351,13 +2364,12 @@ function renderFlatRunEntry(run) {
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
             <span class="run-sep">·</span>
-            <a class="flat-ctx-link" href="${e(subjectUrl)}" target="_blank" rel="noopener">Sub:&nbsp;<strong>${e(run.subject)}</strong></a>
-            ${sessionContextHtml}
+            <a class="flat-ctx-link flat-ctx-path" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
+            ${run.runDate ? `<span class="flat-ctx-break"></span><span class="flat-ctx-text flat-ctx-date">${e(run.runDate)}</span>` : ""}
             <span class="run-sep">·</span>
             <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
             ${run.configHash ? `<span class="run-sep">·</span><span class="flat-ctx-text">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         </span>
-        ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
         <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
