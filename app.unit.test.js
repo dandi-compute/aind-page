@@ -196,8 +196,8 @@ describe("app unit behavior", () => {
     });
 
     it("includes all test-only dandisets used to scope dashboard and tests views", () => {
-        expect(TEST_DANDISETS.has("214527")).toBe(true);
         expect(TEST_DANDISETS.has("001849")).toBe(true);
+        expect(TEST_DANDISETS.has("214527")).toBe(false);
     });
 
     it("DANDISET_SUBJECT_DEFAULTS maps null subject to 'test' for dandiset 001849", () => {
