@@ -2,6 +2,7 @@
 const OWNER = "dandi-compute";
 const REPO = "001697";
 const BRANCH = "draft";
+const DERIVATIVES_DANDISET_ID = "001697";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
 const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
@@ -1161,12 +1162,13 @@ function treeUrl(filePath) {
 
 /* Build a DANDI derivatives URL for a run capsule path */
 function derivativesUrl(filePath) {
+    const baseUrl = dandiBaseUrl(DERIVATIVES_DANDISET_ID);
     const location = String(filePath ?? "")
         .split("/")
         .filter(Boolean)
         .map(encodeURIComponent)
         .join("/");
-    return `${dandiBaseUrl(REPO)}/dandiset/${REPO}/draft/files?location=${location}&page=1`;
+    return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${location}&page=1`;
 }
 
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
@@ -3486,6 +3488,7 @@ if (typeof module !== "undefined" && module.exports) {
         TEST_DANDISETS,
         DANDISET_SUBJECT_DEFAULTS,
         resolveSubject,
+        derivativesUrl,
         treeUrl,
     };
 }

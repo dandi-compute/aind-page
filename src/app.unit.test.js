@@ -37,6 +37,7 @@ const {
     sortRuns,
     TEST_DANDISETS,
     DANDISET_SUBJECT_DEFAULTS,
+    derivativesUrl,
     resolveSubject,
     treeUrl,
     uniquePipelineEntries,
@@ -837,6 +838,27 @@ describe("treeUrl", () => {
             "https://github.com/dandi-compute/001697/tree/draft/" +
                 "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind%2Bephys/version-v1.1.1%2Bb268fd2%2Ba0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
         );
+    });
+
+    describe("derivativesUrl", () => {
+        it("builds a DANDI Archive files URL for a run path with session", () => {
+            const path =
+                "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+398f3c4_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1";
+            const url = derivativesUrl(path);
+            expect(url).toBe(
+                "https://dandiarchive.org/dandiset/001697/draft/files?location=" +
+                    "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/" +
+                    "version-v1.1.1%2Bb268fd2%2B398f3c4_params-4af6a25_config-0d4bf36_date-2026%2B05%2B24_attempt-1&page=1"
+            );
+        });
+
+        it("omits leading/trailing slashes in encoded location", () => {
+            const url = derivativesUrl(
+                "/derivatives/dandiset-001470/sub-M536/ses-2025+04+13/pipeline-aind+ephys/version-v1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1/"
+            );
+            expect(url).toContain("location=derivatives/dandiset-001470/sub-M536/ses-2025%2B04%2B13/");
+            expect(url).toContain("&page=1");
+        });
     });
 
     it("builds a GitHub tree URL without session when session is absent", () => {
