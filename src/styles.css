@@ -1112,7 +1112,7 @@ details[open] > .params-summary::before {
     flex-wrap: wrap;
 }
 
-.run-entry-github-link {
+.run-entry-derivatives-link {
     margin-left: auto;
     font-size: 0.8em;
     color: var(--color-text-secondary);
@@ -1125,7 +1125,7 @@ details[open] > .params-summary::before {
         border-color 0.15s;
     white-space: nowrap;
 }
-.run-entry-github-link:hover {
+.run-entry-derivatives-link:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
 }
