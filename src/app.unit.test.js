@@ -25,6 +25,7 @@ const {
     parseSortMode,
     parseRunPath,
     parseTrace,
+    queueStateCacheKey,
     syncTopNav,
     renderDiffPage,
     renderDandisets,
@@ -41,8 +42,7 @@ const {
     uniquePipelineEntries,
 } = require("./app");
 
-const QUEUE_STATE_CACHE_KEY =
-    "aind_etag:https://raw.githubusercontent.com/dandi-compute/queue/compressed/state.jsonl.gz";
+const QUEUE_STATE_CACHE_KEY = queueStateCacheKey();
 
 /** A passthrough TransformStream that stands in for DecompressionStream in tests. */
 class MockDecompressionStream {

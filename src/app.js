@@ -3238,7 +3238,9 @@ function e(str) {
 
 /* ─── Queue data loader ─────────────────────────────────────── */
 // Fetches, processes, and renders the queue state for the current view.
-// Called on initial page load and when the refresh button is clicked.
+// Only applies to the default queue views ("main" and "tests"); the "compare" and
+// "params" views are handled separately in init() and never call this function.
+// Called on initial page load and when the user clicks the Refresh button.
 async function loadQueueData() {
     showLoading();
     renderFilterBanner(parseFilter(), []);
@@ -3447,6 +3449,7 @@ if (typeof module !== "undefined" && module.exports) {
         parseRunPath,
         parseTrace,
         parseViewMode,
+        queueStateCacheKey,
         syncTopNav,
         renderDandisets,
         buildPipelineDiffPairs,
