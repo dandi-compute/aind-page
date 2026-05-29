@@ -1594,6 +1594,14 @@ describe("renderFlatList", () => {
         expect(html).toContain("location=sourcedata%2Fsub-A%2Fses-S1");
     });
 
+    it("renders run date on a separate flat context line", () => {
+        const run = { ...baseRun, runDate: "2026-05-29T00:43:50.005026-04:00" };
+        const html = renderFlatList([run]);
+        expect(html).toContain("flat-ctx-date");
+        expect(html).toContain("flat-ctx-break");
+        expect(html).not.toContain('class="run-date"');
+    });
+
     it("omits pipeline/version context from flat run header", () => {
         const html = renderFlatList([baseRun]);
         expect(html).not.toContain("flat-ctx-pipeline");

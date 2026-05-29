@@ -1827,6 +1827,11 @@ details[open] > .params-summary::before {
     font-weight: 700;
 }
 
+.flat-ctx-path {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 .flat-ctx-text {
     color: var(--color-text);
     font-weight: 600;
@@ -1844,6 +1849,15 @@ details[open] > .params-summary::before {
 .flat-ctx-pipeline .pipeline-name,
 .flat-ctx-pipeline .pipeline-version {
     font-size: 1em;
+}
+
+.flat-ctx-break {
+    flex-basis: 100%;
+    height: 0;
+}
+
+.flat-ctx-date {
+    color: var(--color-text-secondary);
 }
 
 /* ─── Params editor ─────────────────────────────────────────── */
