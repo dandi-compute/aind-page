@@ -1159,6 +1159,16 @@ function treeUrl(filePath) {
     return `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/* Build a DANDI derivatives URL for a run capsule path */
+function derivativesUrl(filePath) {
+    const location = String(filePath ?? "")
+        .split("/")
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join("/");
+    return `${dandiBaseUrl(REPO)}/dandiset/${REPO}/draft/files?location=${location}&page=1`;
+}
+
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
 function neurosiftUrl(dandisetId, assetId) {
     const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
@@ -1240,7 +1250,7 @@ function renderRunEntry(run) {
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -2373,7 +2383,7 @@ function renderFlatRunEntry(run) {
         </span>
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
