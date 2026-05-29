@@ -430,6 +430,21 @@ describe("app unit behavior", () => {
         );
     });
 
+    it("builds run path from dandi_path when sourcedata is before subject", () => {
+        const path = buildRunPath({
+            dandiset_id: "001470",
+            dandi_path: "sourcedata/sub-M536/ses-2025+04+13/sub-M536_ses-2025-04-13_ecephys.nwb",
+            pipeline: "aind+ephys",
+            version: "1.2.2+d2b6aef+be2047d",
+            params: "4af6a25",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001470/sourcedata/sub-M536/ses-2025+04+13/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
     it("builds run path with date field included", () => {
         const path = buildRunPath({
             dandiset_id: "001849",
@@ -758,6 +773,31 @@ describe("app unit behavior", () => {
             subject: "test",
             session: "aind+sample",
             path: "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1",
+        });
+    });
+
+    it("preserves full dandi_path hierarchy when sourcedata precedes subject", () => {
+        const entries = [
+            {
+                dandiset_id: "001470",
+                dandi_path: "sourcedata/sub-M536/ses-2025+04+13/sub-M536_ses-2025-04-13_ecephys.nwb",
+                pipeline: "aind+ephys",
+                version: "1.2.2+d2b6aef+be2047d",
+                params: "4af6a25",
+                config: "0d4bf36",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: true,
+            },
+        ];
+        const runs = parseQueueEntries(entries);
+        expect(runs).toHaveLength(1);
+        expect(runs[0]).toMatchObject({
+            subject: "M536",
+            session: "2025+04+13",
+            dandiPath: "sourcedata/sub-M536/ses-2025+04+13/sub-M536_ses-2025-04-13_ecephys.nwb",
+            path: "derivatives/dandiset-001470/sourcedata/sub-M536/ses-2025+04+13/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1",
         });
     });
 
@@ -1474,6 +1514,7 @@ describe("renderFlatList", () => {
         hasOutput: true,
         slurmLogs: [],
         path: "derivatives/dandiset-001697/sub-A/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+        dandiPath: "sourcedata/sub-A/ses-S1/sub-A_ses-S1_ecephys.nwb",
         dandisetId: "001697",
         subject: "A",
         session: "S1",
@@ -1535,22 +1576,22 @@ describe("renderFlatList", () => {
         expect(html).toContain("001697");
     });
 
-    it("includes subject in each flat run entry", () => {
+    it("includes full dandi_path in each flat run entry", () => {
         const html = renderFlatList([baseRun]);
-        expect(html).toContain("Sub:");
-        expect(html).toContain(">A<");
+        expect(html).toContain("Path:");
+        expect(html).toContain("sourcedata/sub-A/ses-S1/sub-A_ses-S1_ecephys.nwb");
     });
 
-    it("includes session in each flat run entry when session is not null", () => {
-        const html = renderFlatList([baseRun]);
-        expect(html).toContain("Ses:");
-        expect(html).toContain(">S1<");
-    });
-
-    it("omits session context when session is null", () => {
-        const run = { ...baseRun, session: null };
+    it("falls back to subject path in flat run entry when dandi_path is absent", () => {
+        const run = { ...baseRun, dandiPath: null };
         const html = renderFlatList([run]);
-        expect(html).not.toContain("Ses:");
+        expect(html).toContain("Path:");
+        expect(html).toContain("sub-A");
+    });
+
+    it("uses dandi_path directory for flat run link location", () => {
+        const html = renderFlatList([baseRun]);
+        expect(html).toContain("location=sourcedata%2Fsub-A%2Fses-S1");
     });
 
     it("omits pipeline/version context from flat run header", () => {
