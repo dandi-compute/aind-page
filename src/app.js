@@ -627,9 +627,13 @@ async function loadAindPipelineRegistries() {
 }
 
 /* ─── Data fetching ─────────────────────────────────────────── */
+function queueStateCacheKey() {
+    return ETAG_CACHE_PREFIX + `${QUEUE_CDN_BASE}/state.jsonl.gz`;
+}
+
 async function fetchQueueState() {
     const url = `${QUEUE_CDN_BASE}/state.jsonl.gz`;
-    const cacheKey = ETAG_CACHE_PREFIX + url;
+    const cacheKey = queueStateCacheKey();
 
     let cached = null;
     try {
@@ -682,10 +686,8 @@ async function fetchQueueState() {
 }
 
 function clearQueueStateCache() {
-    const url = `${QUEUE_CDN_BASE}/state.jsonl.gz`;
-    const cacheKey = ETAG_CACHE_PREFIX + url;
     try {
-        sessionStorage.removeItem(cacheKey);
+        sessionStorage.removeItem(queueStateCacheKey());
     } catch {
         /* sessionStorage unavailable; nothing to clear */
     }
@@ -2433,7 +2435,9 @@ function rerenderRuns() {
 function initLayoutToggle() {
     const bar = document.getElementById("layout-bar");
     if (!bar) return;
+    // Always sync the bar HTML with the current layout/sort state (e.g. after a data reload).
     bar.innerHTML = renderLayoutBar();
+    // Attach event listeners only once per element; subsequent calls only need the HTML update above.
     if (bar.dataset.initialized) return;
     bar.dataset.initialized = "1";
     bar.addEventListener("click", (ev) => {
