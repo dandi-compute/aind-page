@@ -1,6 +1,6 @@
 {
     "name": "aind-page",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Simple webpage rendering the basic aspects of DANDI Compute - AIND.",
     "main": "src/app.js",
     "scripts": {
