@@ -416,6 +416,21 @@ describe("app unit behavior", () => {
         );
     });
 
+    it("builds run path from single-file ecephys dandi_path with filename stem directory", () => {
+        const path = buildRunPath({
+            dandiset_id: "001765",
+            dandi_path: "sub-NP06/sub-NP06_ecephys.nwb",
+            pipeline: "aind+ephys",
+            version: "1.2.2+d2b6aef+be2047d",
+            params: "e6a0e86",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001765/sub-NP06/sub-NP06_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-e6a0e86_config-0d4bf36_attempt-1"
+        );
+    });
+
     it("builds run path from full dandi_path hierarchy when sourcedata segments are present", () => {
         const path = buildRunPath({
             dandiset_id: "001849",

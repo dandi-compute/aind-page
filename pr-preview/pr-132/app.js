@@ -866,7 +866,13 @@ function dandiPathDirectoryParts(dandiPath) {
         .filter(Boolean);
     if (pathParts.length === 0) return [];
     const terminalPart = pathParts[pathParts.length - 1] ?? "";
-    return terminalPart.toLowerCase().endsWith(".nwb") ? pathParts.slice(0, -1) : pathParts;
+    if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
+    const directoryParts = pathParts.slice(0, -1);
+    const nwbStem = terminalPart.slice(0, -4);
+    if (/^sub-[^_]+_ecephys$/i.test(nwbStem)) {
+        directoryParts.push(nwbStem);
+    }
+    return directoryParts;
 }
 
 // Build a run directory path from a JSONL queue entry.
