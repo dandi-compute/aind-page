@@ -899,6 +899,29 @@ describe("treeUrl", () => {
         expect(html).not.toContain("DANDI&nbsp;↖");
     });
 
+    it("renderFlatList links Path to the parent directory of NWB dandi_path", () => {
+        const html = renderFlatList([
+            {
+                status: "success",
+                hasLogs: false,
+                tasks: [],
+                generatedBy: [],
+                vizData: [],
+                dandiPath: "sub-NP06/sub-NP06_ecephys.nwb",
+                inSourcedata: false,
+                subject: "NP06",
+                attempt: 1,
+                path: "derivatives/dandiset-001765/sub-NP06/sub-NP06_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-e6a0e86_config-0d4bf36_attempt-1",
+                dandisetId: "001765",
+                paramsProfile: "e6a0e86",
+                configHash: "0d4bf36",
+                runDate: "2026-05-24",
+            },
+        ]);
+        expect(html).toContain("location=sub-NP06%2F");
+        expect(html).not.toContain("location=sub-NP06%2Fsub-NP06_ecephys");
+    });
+
     it("builds a GitHub tree URL without session when session is absent", () => {
         const path =
             "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0_params-98fd947_config-6568dda_attempt-1";

@@ -2369,9 +2369,14 @@ function renderFlatRunEntry(run) {
             : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
 
     const dandiPath = String(run.dandiPath ?? "").trim();
-    const dandiDirectory = dandiPathDirectoryParts(dandiPath).join("/");
+    const dandiPathParts = String(dandiPath).split("/").filter(Boolean);
+    const terminalPart = dandiPathParts[dandiPathParts.length - 1] ?? "";
+    const dandiDirectoryParts = terminalPart.toLowerCase().endsWith(".nwb")
+        ? dandiPathParts.slice(0, -1)
+        : dandiPathParts;
+    const dandiDirectory = dandiDirectoryParts.join("/");
     const fallbackLocation = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
-    const location = dandiDirectory || fallbackLocation;
+    const location = dandiDirectory ? `${dandiDirectory}/` : fallbackLocation;
     const dandiPathLabel = dandiPath || location;
     const dandiPathUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${encodeURIComponent(location)}`;
 
