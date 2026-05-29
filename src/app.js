@@ -1240,7 +1240,7 @@ function renderRunEntry(run) {
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
