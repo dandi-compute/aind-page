@@ -37,6 +37,7 @@ const {
     sortRuns,
     TEST_DANDISETS,
     DANDISET_SUBJECT_DEFAULTS,
+    derivativesUrl,
     resolveSubject,
     treeUrl,
     uniquePipelineEntries,
@@ -412,6 +413,21 @@ describe("app unit behavior", () => {
         });
         expect(path).toBe(
             "derivatives/dandiset-000363/sub-480134/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+        );
+    });
+
+    it("builds run path from single-file ecephys dandi_path with filename stem directory", () => {
+        const path = buildRunPath({
+            dandiset_id: "001765",
+            dandi_path: "sub-NP06/sub-NP06_ecephys.nwb",
+            pipeline: "aind+ephys",
+            version: "1.2.2+d2b6aef+be2047d",
+            params: "e6a0e86",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001765/sub-NP06/sub-NP06_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-e6a0e86_config-0d4bf36_attempt-1"
         );
     });
 
@@ -837,6 +853,73 @@ describe("treeUrl", () => {
             "https://github.com/dandi-compute/001697/tree/draft/" +
                 "derivatives/dandiset-000363/sub-480134/ses-20210107T120825/pipeline-aind%2Bephys/version-v1.1.1%2Bb268fd2%2Ba0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
         );
+    });
+
+    describe("derivativesUrl", () => {
+        it("builds a DANDI Archive files URL for a run path with session", () => {
+            const path =
+                "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+398f3c4_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1";
+            const url = derivativesUrl(path);
+            expect(url).toBe(
+                "https://dandiarchive.org/dandiset/001697/draft/files?location=" +
+                    "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/" +
+                    "version-v1.1.1%2Bb268fd2%2B398f3c4_params-4af6a25_config-0d4bf36_date-2026%2B05%2B24_attempt-1&page=1"
+            );
+        });
+
+        it("omits leading/trailing slashes in encoded location", () => {
+            const url = derivativesUrl(
+                "/derivatives/dandiset-001470/sub-M536/ses-2025+04+13/pipeline-aind+ephys/version-v1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1/"
+            );
+            expect(url).toContain("location=derivatives/dandiset-001470/sub-M536/ses-2025%2B04%2B13/");
+            expect(url).toContain("&page=1");
+        });
+    });
+
+    it("renderFlatList labels the dandiset root link as Sourcedata", () => {
+        const html = renderFlatList([
+            {
+                status: "success",
+                hasLogs: false,
+                tasks: [],
+                generatedBy: [],
+                vizData: [],
+                dandiPath: "sub-NP06/sub-NP06_ecephys.nwb",
+                inSourcedata: false,
+                subject: "NP06",
+                attempt: 1,
+                path: "derivatives/dandiset-001765/sub-NP06/sub-NP06_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-e6a0e86_config-0d4bf36_attempt-1",
+                dandisetId: "001765",
+                paramsProfile: "e6a0e86",
+                configHash: "0d4bf36",
+                runDate: "2026-05-24",
+            },
+        ]);
+        expect(html).toContain("Sourcedata&nbsp;↖");
+        expect(html).not.toContain("DANDI&nbsp;↖");
+    });
+
+    it("renderFlatList links Path to the parent directory of NWB dandi_path", () => {
+        const html = renderFlatList([
+            {
+                status: "success",
+                hasLogs: false,
+                tasks: [],
+                generatedBy: [],
+                vizData: [],
+                dandiPath: "sub-NP06/sub-NP06_ecephys.nwb",
+                inSourcedata: false,
+                subject: "NP06",
+                attempt: 1,
+                path: "derivatives/dandiset-001765/sub-NP06/sub-NP06_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-e6a0e86_config-0d4bf36_attempt-1",
+                dandisetId: "001765",
+                paramsProfile: "e6a0e86",
+                configHash: "0d4bf36",
+                runDate: "2026-05-24",
+            },
+        ]);
+        expect(html).toContain("location=sub-NP06%2F");
+        expect(html).not.toContain("location=sub-NP06%2Fsub-NP06_ecephys");
     });
 
     it("builds a GitHub tree URL without session when session is absent", () => {

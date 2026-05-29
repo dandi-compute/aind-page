@@ -2,6 +2,7 @@
 const OWNER = "dandi-compute";
 const REPO = "001697";
 const BRANCH = "draft";
+const DERIVATIVES_DANDISET_ID = "001697";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
 const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
@@ -865,7 +866,13 @@ function dandiPathDirectoryParts(dandiPath) {
         .filter(Boolean);
     if (pathParts.length === 0) return [];
     const terminalPart = pathParts[pathParts.length - 1] ?? "";
-    return terminalPart.toLowerCase().endsWith(".nwb") ? pathParts.slice(0, -1) : pathParts;
+    if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
+    const directoryParts = pathParts.slice(0, -1);
+    const nwbStem = terminalPart.slice(0, -4);
+    if (/^sub-[^_]+_ecephys$/.test(nwbStem)) {
+        directoryParts.push(nwbStem);
+    }
+    return directoryParts;
 }
 
 // Build a run directory path from a JSONL queue entry.
@@ -1159,6 +1166,17 @@ function treeUrl(filePath) {
     return `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/* Build a DANDI derivatives URL for a run capsule path */
+function derivativesUrl(filePath) {
+    const baseUrl = dandiBaseUrl(DERIVATIVES_DANDISET_ID);
+    const location = String(filePath ?? "")
+        .split("/")
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join("/");
+    return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${location}&page=1`;
+}
+
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
 function neurosiftUrl(dandisetId, assetId) {
     const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
@@ -1240,7 +1258,7 @@ function renderRunEntry(run) {
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -2166,7 +2184,7 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
                target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
             <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
-               target="_blank" rel="noopener" onclick="event.stopPropagation()">DANDI&nbsp;↖</a>
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">Sourcedata&nbsp;↖</a>
             <span class="group-meta">
                 <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? "s" : ""}</span>
                 <span class="run-sep">·</span>
@@ -2351,16 +2369,21 @@ function renderFlatRunEntry(run) {
             : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
 
     const dandiPath = String(run.dandiPath ?? "").trim();
-    const dandiDirectory = dandiPathDirectoryParts(dandiPath).join("/");
+    const dandiPathParts = String(dandiPath).split("/").filter(Boolean);
+    const terminalPart = dandiPathParts[dandiPathParts.length - 1] ?? "";
+    const dandiDirectoryParts = terminalPart.toLowerCase().endsWith(".nwb")
+        ? dandiPathParts.slice(0, -1)
+        : dandiPathParts;
+    const dandiDirectory = dandiDirectoryParts.join("/");
     const fallbackLocation = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
-    const location = dandiDirectory || fallbackLocation;
+    const location = dandiDirectory ? `${dandiDirectory}/` : fallbackLocation;
     const dandiPathLabel = dandiPath || location;
     const dandiPathUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${encodeURIComponent(location)}`;
 
     return `
 <div class="run-entry flat-run-entry ${sc}">
     <div class="run-entry-header flat-run-header">
-        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">DANDI&nbsp;↖</a>
+        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
         <span class="status-badge ${sc}">${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
@@ -2373,7 +2396,7 @@ function renderFlatRunEntry(run) {
         </span>
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-github-link" href="${e(treeUrl(run.path))}" target="_blank" rel="noopener">↗ GitHub</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -3476,6 +3499,7 @@ if (typeof module !== "undefined" && module.exports) {
         TEST_DANDISETS,
         DANDISET_SUBJECT_DEFAULTS,
         resolveSubject,
+        derivativesUrl,
         treeUrl,
     };
 }
