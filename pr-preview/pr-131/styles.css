@@ -1481,6 +1481,10 @@ details[open] > .params-summary::before {
     padding: 3px 10px;
 }
 
+.layout-btn-refresh {
+    margin-left: 6px;
+}
+
 .layout-btn:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
