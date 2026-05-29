@@ -3,6 +3,7 @@ const {
     buildRunPath,
     buildPipelineDiffPairs,
     classifyFailedTaskStep,
+    clearQueueStateCache,
     collectJsonDiffs,
     collectTextDiffs,
     fetchQueueState,
@@ -2428,5 +2429,51 @@ describe("initLayoutToggle", () => {
         expect(params.get("view")).toBe("tests");
         expect(params.get("dandiset")).toBe("001697");
         expect(localStorage.getItem("sortDirection")).toBe("asc");
+    });
+
+    it("renders a refresh button in the layout bar", () => {
+        initLayoutToggle();
+        const refreshBtn = document.querySelector("[data-refresh-queue]");
+        expect(refreshBtn).not.toBeNull();
+        expect(refreshBtn.textContent).toMatch(/Refresh/);
+    });
+
+    it("does not break when called multiple times", () => {
+        initLayoutToggle();
+        initLayoutToggle();
+        // All controls should still be present after two calls
+        expect(document.querySelector("[data-refresh-queue]")).not.toBeNull();
+        expect(document.querySelector("[data-layout='tree']")).not.toBeNull();
+        expect(document.querySelector("[data-layout='flat']")).not.toBeNull();
+        expect(document.querySelector("[data-sort-direction]")).not.toBeNull();
+        expect(document.querySelector("[data-sort-mode]")).not.toBeNull();
+    });
+});
+
+describe("clearQueueStateCache", () => {
+    beforeEach(() => {
+        sessionStorage.clear();
+    });
+
+    afterEach(() => {
+        sessionStorage.clear();
+    });
+
+    it("removes the queue state ETag cache entry from sessionStorage", () => {
+        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"v1"', body: "test" }));
+        clearQueueStateCache();
+        expect(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY)).toBeNull();
+    });
+
+    it("does not throw when the cache entry is absent", () => {
+        expect(() => clearQueueStateCache()).not.toThrow();
+    });
+
+    it("only removes the queue state entry, leaving other sessionStorage keys intact", () => {
+        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"v1"', body: "test" }));
+        sessionStorage.setItem("other-key", "other-value");
+        clearQueueStateCache();
+        expect(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY)).toBeNull();
+        expect(sessionStorage.getItem("other-key")).toBe("other-value");
     });
 });
