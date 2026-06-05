@@ -1095,14 +1095,6 @@ function renderSummary(runs) {
                 <span class="stat-value">${total}</span>
                 <span class="stat-label">Total Runs</span>
             </div>
-            <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
-                <span class="stat-value">${success}</span>
-                <span class="stat-label">Successful</span>
-            </a>
-            <a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
-                <span class="stat-value">${failed}</span>
-                <span class="stat-label">Failed</span>
-            </a>
             ${
                 running
                     ? `<div class="stat-item stat-running">
@@ -1111,6 +1103,14 @@ function renderSummary(runs) {
             </div>`
                     : ""
             }
+            <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
+                <span class="stat-value">${success}</span>
+                <span class="stat-label">Successful</span>
+            </a>
+            <a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
+                <span class="stat-value">${failed}</span>
+                <span class="stat-label">Failed</span>
+            </a>
             ${
                 queued
                     ? `<div class="stat-item stat-queued">
