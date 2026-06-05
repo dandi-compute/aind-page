@@ -870,8 +870,8 @@ function dandiPathDirectoryParts(dandiPath) {
     if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
     const directoryParts = pathParts.slice(0, -1);
     const nwbStem = terminalPart.slice(0, -4);
-    const shouldAppendStemAsDirectory = !nwbStem.startsWith("sub-") || /^sub-[^_]+_ecephys$/.test(nwbStem);
-    if (shouldAppendStemAsDirectory) {
+    const shouldKeepNwbStemDirectory = !nwbStem.startsWith("sub-") || /^sub-[^_]+_ecephys$/.test(nwbStem);
+    if (shouldKeepNwbStemDirectory) {
         directoryParts.push(nwbStem);
     }
     return directoryParts;
@@ -1186,6 +1186,7 @@ function derivativesUrl(filePath) {
         .filter(Boolean)
         .map(encodeURIComponent)
         .join("/");
+    // Fall back to the derivatives root when no run capsule path is provided.
     const derivativesLocation = location ? `${location}/derivatives` : "derivatives";
     return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${derivativesLocation}&page=1`;
 }
