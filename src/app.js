@@ -2576,6 +2576,53 @@ function initLayoutToggle() {
 /* ─── Log modal ─────────────────────────────────────────────── */
 let _modalGeneration = 0;
 
+/* ─── Inline "Open" object URLs ─────────────────────────────────
+   S3 blob objects are content-addressed and extension-less, so linking the
+   "↗ Open" button directly at the blob URL makes the browser download the file
+   instead of rendering it. Instead we wrap the already-fetched bytes in a Blob
+   with an explicit MIME type and point "Open" at the resulting object URL, which
+   opens inline in a new tab. Tracked URLs are revoked when the next modal opens
+   (an already-opened tab keeps its loaded copy).                              */
+let _modalObjectUrls = [];
+
+function makeObjectUrl(parts, type) {
+    try {
+        const blob = new Blob(parts, type ? { type } : undefined);
+        const objUrl = URL.createObjectURL(blob);
+        _modalObjectUrls.push(objUrl);
+        return objUrl;
+    } catch {
+        return null;
+    }
+}
+
+function revokeModalObjectUrls() {
+    for (const objUrl of _modalObjectUrls) {
+        try {
+            URL.revokeObjectURL(objUrl);
+        } catch {
+            /* already revoked or unsupported */
+        }
+    }
+    _modalObjectUrls = [];
+}
+
+// Fetch binary content (e.g. a PNG) and wrap it in an object URL with a sensible
+// inline MIME type so it renders rather than downloads. Returns null on failure.
+async function fetchAsObjectUrl(url, fallbackType) {
+    if (!url) return null;
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const buffer = await resp.arrayBuffer();
+        const responseType = resp.headers.get("Content-Type") ?? "";
+        const usableType = responseType && !/octet-stream/i.test(responseType) ? responseType : fallbackType;
+        return makeObjectUrl([buffer], usableType);
+    } catch {
+        return null;
+    }
+}
+
 function initModal() {
     document.getElementById("log-modal-close").addEventListener("click", closeLogModal);
     document.getElementById("log-modal").addEventListener("click", (evt) => {
@@ -2588,7 +2635,12 @@ function initModal() {
     document.getElementById("runs").addEventListener("click", (evt) => {
         const btn = evt.target.closest(".log-link");
         if (!btn) return;
-        openLogModal(btn.dataset.logUrl, btn.dataset.logLabel, btn.dataset.logHtml === "true", btn.dataset.logExternal);
+        openLogModal(
+            btn.dataset.logUrl,
+            btn.dataset.logLabel,
+            btn.dataset.logHtml === "true",
+            btn.dataset.logExternal
+        );
     });
 
     const runsEl = document.getElementById("runs");
@@ -2644,9 +2696,12 @@ function openLogModal(fileUrl, label, isHtml, externalHref) {
     const bodyEl = document.getElementById("log-modal-body");
 
     const generation = ++_modalGeneration;
+    revokeModalObjectUrls();
 
     setModalTitle(label);
-    setModalExternalLink(externalHref);
+    // Hide "Open" until the content is loaded; we then point it at an inline
+    // object URL so the browser renders the file instead of downloading it.
+    setModalExternalLink(null);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
@@ -2654,9 +2709,12 @@ function openLogModal(fileUrl, label, isHtml, externalHref) {
     fetchLogText(fileUrl).then((content) => {
         if (_modalGeneration !== generation) return;
         if (content === null) {
+            // Fall back to the raw URL so the user can still try to retrieve it.
+            setModalExternalLink(externalHref);
             bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
             return;
         }
+        setModalExternalLink(makeObjectUrl([content], isHtml ? "text/html" : "text/plain") ?? externalHref);
         bodyEl.innerHTML = "";
         if (isHtml) {
             // Use srcdoc so the report renders inline regardless of the source
@@ -2689,6 +2747,7 @@ function openHtmlModal(title, html, externalHref = null, externalLabel = "↗ Op
     const bodyEl = document.getElementById("log-modal-body");
 
     _modalGeneration++;
+    revokeModalObjectUrls();
 
     setModalTitle(title);
     setModalExternalLink(externalHref, externalLabel);
@@ -2701,19 +2760,35 @@ function openVizModal(url, label) {
     const overlay = document.getElementById("log-modal");
     const bodyEl = document.getElementById("log-modal-body");
 
-    _modalGeneration++;
+    const generation = ++_modalGeneration;
+    revokeModalObjectUrls();
 
     setModalTitle(label);
-    setModalExternalLink(url);
+    setModalExternalLink(null);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
-    bodyEl.innerHTML = "";
-    const img = document.createElement("img");
-    img.className = "viz-modal-img";
-    img.src = url;
-    img.alt = label;
-    bodyEl.appendChild(img);
+    bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
+
+    const renderImage = (src, externalHref) => {
+        if (_modalGeneration !== generation) return;
+        bodyEl.innerHTML = "";
+        const img = document.createElement("img");
+        img.className = "viz-modal-img";
+        img.src = src;
+        img.alt = label;
+        bodyEl.appendChild(img);
+        setModalExternalLink(externalHref);
+    };
+
+    // Prefer an inline object URL (so "Open" renders the PNG in a new tab rather
+    // than downloading it); fall back to the direct URL if the fetch is blocked.
+    fetchAsObjectUrl(url, "image/png").then((objUrl) => {
+        if (_modalGeneration !== generation) {
+            return;
+        }
+        renderImage(objUrl ?? url, objUrl ?? url);
+    });
 }
 
 async function fetchLogText(fileUrl) {
