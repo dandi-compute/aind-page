@@ -434,6 +434,21 @@ describe("app unit behavior", () => {
         );
     });
 
+    it("builds run path from simple NWB filename dandi_path by preserving the filename stem", () => {
+        const path = buildRunPath({
+            dandiset_id: "001849",
+            dandi_path: "sourcedata/aind-sample.nwb",
+            pipeline: "aind+ephys",
+            version: "v1.2.2",
+            params: "1cbdbee",
+            config: "0d4bf36",
+            attempt: 1,
+        });
+        expect(path).toBe(
+            "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.2.2_params-1cbdbee_config-0d4bf36_attempt-1"
+        );
+    });
+
     it("builds run path from full dandi_path hierarchy when sourcedata segments are present", () => {
         const path = buildRunPath({
             dandiset_id: "001849",
@@ -919,7 +934,7 @@ describe("treeUrl", () => {
             expect(url).toBe(
                 "https://dandiarchive.org/dandiset/001697/draft/files?location=" +
                     "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/" +
-                    "version-v1.1.1%2Bb268fd2%2B398f3c4_params-4af6a25_config-0d4bf36_date-2026%2B05%2B24_attempt-1&page=1"
+                    "version-v1.1.1%2Bb268fd2%2B398f3c4_params-4af6a25_config-0d4bf36_date-2026%2B05%2B24_attempt-1/derivatives&page=1"
             );
         });
 
@@ -927,7 +942,10 @@ describe("treeUrl", () => {
             const url = derivativesUrl(
                 "/derivatives/dandiset-001470/sub-M536/ses-2025+04+13/pipeline-aind+ephys/version-v1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1/"
             );
-            expect(url).toContain("location=derivatives/dandiset-001470/sub-M536/ses-2025%2B04%2B13/");
+            expect(url).toContain(
+                "location=derivatives/dandiset-001470/sub-M536/ses-2025%2B04%2B13/pipeline-aind%2Bephys/" +
+                    "version-v1.2.2%2Bd2b6aef%2Bbe2047d_params-4af6a25_config-0d4bf36_attempt-1/derivatives"
+            );
             expect(url).toContain("&page=1");
         });
     });
