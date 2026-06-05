@@ -870,9 +870,7 @@ function dandiPathDirectoryParts(dandiPath) {
     if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
     const directoryParts = pathParts.slice(0, -1);
     const nwbStem = terminalPart.slice(0, -4);
-    if (/^sub-[^_]+_ecephys$/.test(nwbStem)) {
-        directoryParts.push(nwbStem);
-    }
+    directoryParts.push(nwbStem);
     return directoryParts;
 }
 
@@ -894,11 +892,11 @@ function buildRunPath(entry) {
         }
     }
     parts.push(`pipeline-${entry.pipeline}`);
-    let capsule = `version-${entry.version}_params-${entry.params}_config-${entry.config}`;
-    if (entry.date) {
-        capsule += `_date-${entry.date}`;
+    let capsule = `version-${entry.version}`;
+    if (entry.codebase) {
+        capsule += `_codebase-${entry.codebase}`;
     }
-    capsule += `_attempt-${entry.attempt}`;
+    capsule += `_params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`;
     parts.push(capsule);
     return parts.join("/");
 }
