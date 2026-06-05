@@ -2607,20 +2607,21 @@ function revokeModalObjectUrls() {
     _modalObjectUrls = [];
 }
 
-// Fetch binary content (e.g. a PNG) and wrap it in an object URL with a sensible
-// inline MIME type so it renders rather than downloads. Returns null on failure.
-async function fetchAsObjectUrl(url, fallbackType) {
-    if (!url) return null;
-    try {
-        const resp = await fetch(url);
-        if (!resp.ok) return null;
-        const buffer = await resp.arrayBuffer();
-        const responseType = resp.headers.get("Content-Type") ?? "";
-        const usableType = responseType && !/octet-stream/i.test(responseType) ? responseType : fallbackType;
-        return makeObjectUrl([buffer], usableType);
-    } catch {
-        return null;
-    }
+// Build a tiny self-contained HTML document that embeds an image by URL, and
+// return it as an object URL. Opening this in a new tab renders the image inline
+// (an <img> element displays a resource regardless of its content-disposition,
+// unlike a top-level navigation to the raw blob, which S3 serves as a download).
+// No fetch of the image bytes is required, so this works even without CORS.
+function makeImageViewerObjectUrl(url, label) {
+    const safeUrl = e(url);
+    const safeLabel = e(label || "Image");
+    const viewerHtml =
+        `<!doctype html><html><head><meta charset="utf-8">` +
+        `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<title>${safeLabel}</title></head>` +
+        `<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh">` +
+        `<img src="${safeUrl}" alt="${e(label || "")}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`;
+    return makeObjectUrl([viewerHtml], "text/html");
 }
 
 function initModal() {
@@ -2760,35 +2761,25 @@ function openVizModal(url, label) {
     const overlay = document.getElementById("log-modal");
     const bodyEl = document.getElementById("log-modal-body");
 
-    const generation = ++_modalGeneration;
+    _modalGeneration++;
     revokeModalObjectUrls();
 
     setModalTitle(label);
-    setModalExternalLink(null);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
-    bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
+    // The image itself loads from the direct S3 URL: <img> renders a resource
+    // inline regardless of its content-disposition.
+    bodyEl.innerHTML = "";
+    const img = document.createElement("img");
+    img.className = "viz-modal-img";
+    img.src = url;
+    img.alt = label;
+    bodyEl.appendChild(img);
 
-    const renderImage = (src, externalHref) => {
-        if (_modalGeneration !== generation) return;
-        bodyEl.innerHTML = "";
-        const img = document.createElement("img");
-        img.className = "viz-modal-img";
-        img.src = src;
-        img.alt = label;
-        bodyEl.appendChild(img);
-        setModalExternalLink(externalHref);
-    };
-
-    // Prefer an inline object URL (so "Open" renders the PNG in a new tab rather
-    // than downloading it); fall back to the direct URL if the fetch is blocked.
-    fetchAsObjectUrl(url, "image/png").then((objUrl) => {
-        if (_modalGeneration !== generation) {
-            return;
-        }
-        renderImage(objUrl ?? url, objUrl ?? url);
-    });
+    // "Open" points at a self-contained HTML viewer (not the raw blob), so the
+    // new tab renders the image inline instead of downloading it.
+    setModalExternalLink(makeImageViewerObjectUrl(url, label) ?? url);
 }
 
 async function fetchLogText(fileUrl) {
