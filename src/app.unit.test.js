@@ -14,6 +14,7 @@ const {
     initModal,
     initLayoutToggle,
     loadAindPipelineRegistries,
+    loadQueueData,
     normalizeConfigHash,
     normalizeRegistryEntries,
     openHtmlModal,
@@ -2020,6 +2021,68 @@ describe("renderDandisets", () => {
         expect(html).toContain('aria-disabled="true"');
         expect(html).not.toContain(
             "location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/"
+        );
+    });
+
+    it("loads dataset descriptions for successful runs without logs so derivatives links keep codebase metadata", async () => {
+        const originalFetch = global.fetch;
+        const originalDecompressionStream = global.DecompressionStream;
+        document.body.innerHTML = `
+            <div id="loading"></div>
+            <div id="error"></div>
+            <div id="filter-banner"></div>
+            <div id="summary"></div>
+            <div id="layout-bar"></div>
+            <div id="runs"></div>
+        `;
+        global.DecompressionStream = MockDecompressionStream;
+        const fetchMock = vi.fn(async (url) => {
+            const urlText = String(url);
+            if (urlText.includes("raw.githubusercontent.com/dandi-compute/queue/compressed")) {
+                return new Response(
+                    makeReadableStream(
+                        JSON.stringify({
+                            dandiset_id: "001697",
+                            subject: "A",
+                            session: "S1",
+                            pipeline: "aind+ephys",
+                            version: "v1.2.2",
+                            params: "1cbdbee",
+                            config: "0d4bf36",
+                            attempt: 1,
+                            has_code: true,
+                            has_output: true,
+                            has_logs: false,
+                        })
+                    ),
+                    {
+                        status: 200,
+                        headers: { ETag: '"etag-v1"' },
+                    }
+                );
+            }
+            if (urlText.includes("dataset_description.json")) {
+                return new Response(
+                    JSON.stringify({
+                        GeneratedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "v0.3.22" }],
+                    }),
+                    { status: 200 }
+                );
+            }
+            return new Response(null, { status: 404 });
+        });
+        global.fetch = fetchMock;
+
+        try {
+            await loadQueueData();
+        } finally {
+            global.fetch = originalFetch;
+            global.DecompressionStream = originalDecompressionStream;
+        }
+
+        expect(fetchMock.mock.calls.some(([url]) => String(url).includes("dataset_description.json"))).toBe(true);
+        expect(document.getElementById("runs").innerHTML).toContain(
+            "version-v1.2.2_codebase-v0.3.22_params-1cbdbee_config-0d4bf36_attempt-1/derivatives"
         );
     });
 });
