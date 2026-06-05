@@ -3351,7 +3351,8 @@ async function loadQueueData() {
         }
 
         // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel.
-        // Skip trace/dataset fetching for queued runs (no logs yet).
+        // Skip trace fetching for queued runs (no logs yet), but still load dataset metadata for
+        // successful outputs so codebase information stays available for derivatives links.
         // Fetch all SLURM logs at once (single git-trees API call) to avoid per-run rate limits.
         const slurmLogsByRun = await fetchAllSlurmLogs();
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
@@ -3359,7 +3360,7 @@ async function loadQueueData() {
             runs.map(async (run) => {
                 const [text, datasetDesc, dandiResult, vizData] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run.path)),
-                    fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
+                    run.hasLogs || run.hasOutput ? fetchDatasetDescription(run.path) : Promise.resolve(null),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchVisualizationData(run.path) : Promise.resolve(null),
                 ]);
