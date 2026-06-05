@@ -255,6 +255,7 @@ const STATUS_LABELS = {
     success: "Successful",
     failed: "Failed",
     queued: "Queued",
+    running: "Running",
     partial: "Partial",
 };
 const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
@@ -920,6 +921,7 @@ function parseQueueEntries(entries) {
             configHash: normalizeConfigHash(entry.config),
             attempt: entry.attempt,
             hasCode: entry.has_code,
+            hasBeenSubmitted: entry.has_been_submitted ?? false,
             hasOutput: entry.has_output,
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
@@ -1058,8 +1060,9 @@ function renderSummary(runs) {
     const success = runs.filter((r) => r.status === "success").length;
     const failed = runs.filter((r) => r.status === "failed").length;
     const queued = runs.filter((r) => r.status === "queued").length;
+    const running = runs.filter((r) => r.status === "running").length;
     const partial = runs.filter((r) => r.status === "partial").length;
-    const unknown = total - success - failed - queued - partial;
+    const unknown = total - success - failed - queued - running - partial;
     const successfulRuns = runs.filter((run) => run.status === "success");
     const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(successfulRuns);
@@ -1100,6 +1103,14 @@ function renderSummary(runs) {
                 <span class="stat-value">${failed}</span>
                 <span class="stat-label">Failed</span>
             </a>
+            ${
+                running
+                    ? `<div class="stat-item stat-running">
+                <span class="stat-value">${running}</span>
+                <span class="stat-label">Running</span>
+            </div>`
+                    : ""
+            }
             ${
                 queued
                     ? `<div class="stat-item stat-queued">
@@ -1213,21 +1224,25 @@ function renderRunEntry(run) {
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "queued"
-                ? "status-queued"
-                : run.status === "partial"
-                  ? "status-partial"
-                  : "status-unknown";
+              : run.status === "running"
+                ? "status-running"
+                : run.status === "queued"
+                  ? "status-queued"
+                  : run.status === "partial"
+                    ? "status-partial"
+                    : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "queued"
-                ? "⧗ Queued"
-                : run.status === "partial"
-                  ? "⚠ Partial"
-                  : "? Unknown";
+              : run.status === "running"
+                ? "▶ Running"
+                : run.status === "queued"
+                  ? "⧗ Queued"
+                  : run.status === "partial"
+                    ? "⚠ Partial"
+                    : "? Unknown";
 
     // Log files known to be present when has_logs is true (standard Nextflow output).
     const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
@@ -2344,21 +2359,25 @@ function renderFlatRunEntry(run) {
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "queued"
-                ? "status-queued"
-                : run.status === "partial"
-                  ? "status-partial"
-                  : "status-unknown";
+              : run.status === "running"
+                ? "status-running"
+                : run.status === "queued"
+                  ? "status-queued"
+                  : run.status === "partial"
+                    ? "status-partial"
+                    : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "queued"
-                ? "⧗ Queued"
-                : run.status === "partial"
-                  ? "⚠ Partial"
-                  : "? Unknown";
+              : run.status === "running"
+                ? "▶ Running"
+                : run.status === "queued"
+                  ? "⧗ Queued"
+                  : run.status === "partial"
+                    ? "⚠ Partial"
+                    : "? Unknown";
 
     const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
 
@@ -3309,16 +3328,21 @@ async function loadQueueData() {
                 const inSourcedata = dandiResult?.inSourcedata ?? false;
                 const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
                 // Determine status from JSONL flags:
-                //   has_output=true  → success (use trace status for task detail)
+                //   has_output=true            → success (use trace status for task detail)
+                //   has_been_submitted=true &&
+                //     has_output=false &&
+                //     has_logs=false            → running (submitted, awaiting output)
                 //   has_logs=false && has_code=true → queued (not yet started)
-                //   otherwise        → failed
+                //   otherwise                  → failed
                 const status = run.hasOutput
                     ? parsed.status !== "unknown"
                         ? parsed.status
                         : "success"
-                    : !run.hasLogs && run.hasCode
-                      ? "queued"
-                      : "failed";
+                    : run.hasBeenSubmitted && !run.hasLogs
+                      ? "running"
+                      : !run.hasLogs && run.hasCode
+                        ? "queued"
+                        : "failed";
                 const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
                 return {
                     ...run,

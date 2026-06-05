@@ -266,10 +266,12 @@ describe("app unit behavior", () => {
             { status: "success", id: 1 },
             { status: "failed", id: 2 },
             { status: "queued", id: 3 },
+            { status: "running", id: 4 },
         ];
 
         expect(applyFilter(runs, { status: "failed" })).toEqual([{ status: "failed", id: 2 }]);
         expect(applyFilter(runs, { status: "SUCCESS" })).toEqual([{ status: "success", id: 1 }]);
+        expect(applyFilter(runs, { status: "running" })).toEqual([{ status: "running", id: 4 }]);
     });
 
     it("filters runs by params/config types and dandi codebase hash", async () => {
@@ -841,6 +843,59 @@ describe("app unit behavior", () => {
             session: null,
             path: "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6_params-98fd947_config-6568dda_attempt-1",
         });
+    });
+
+    it("parses has_been_submitted from JSONL entries into hasBeenSubmitted field", () => {
+        const entries = [
+            {
+                dandiset_id: "001849",
+                dandi_path: "sourcedata/aind-sample.nwb",
+                pipeline: "aind+ephys",
+                version: "v1.2.2",
+                params: "1cbdbee",
+                config: "0d4bf36",
+                attempt: 1,
+                has_code: true,
+                has_been_submitted: true,
+                has_output: false,
+                has_logs: false,
+                asset_size_bytes: 580204232,
+                content_id: "048d1ee9-83b7-491f-8f02-1ca615b1d455",
+                created_at: "2026-06-05T02:39:15.523551-04:00",
+            },
+            {
+                dandiset_id: "000233",
+                subject: "CGM3",
+                session: "CGM3",
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "98fd947",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_been_submitted: false,
+                has_output: false,
+                has_logs: false,
+            },
+            {
+                dandiset_id: "001469",
+                subject: "Chronic-Implant-2",
+                session: null,
+                pipeline: "aind+ephys",
+                version: "v1.0.0+fixes+20abeb6",
+                params: "aa073df",
+                config: "6568dda",
+                attempt: 1,
+                has_code: true,
+                has_output: false,
+                has_logs: false,
+            },
+        ];
+
+        const runs = parseQueueEntries(entries);
+        expect(runs[0].hasBeenSubmitted).toBe(true);
+        expect(runs[1].hasBeenSubmitted).toBe(false);
+        expect(runs[2].hasBeenSubmitted).toBe(false);
     });
 });
 
@@ -1754,6 +1809,13 @@ describe("renderFlatList", () => {
         const run = { ...baseRun, status: "failed" };
         const html = renderFlatList([run]);
         expect(html).toContain("status-failed");
+    });
+
+    it("applies correct status class and label for running", () => {
+        const run = { ...baseRun, status: "running" };
+        const html = renderFlatList([run]);
+        expect(html).toContain("status-running");
+        expect(html).toContain("▶ Running");
     });
 
     it("includes slurm log button in Logs section when slurmLogs is provided", () => {
