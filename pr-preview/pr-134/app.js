@@ -1766,13 +1766,21 @@ function renderNamedDiffTable(
                 .map(
                     (change) => `<tr>
                     <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
-                    <td><span class="diff-detail-chip diff-change-before">${e(renderDiffValue(change.left))}</span></td>
-                    <td><span class="diff-detail-chip diff-change-after">${e(renderDiffValue(change.right))}</span></td>
+                    <td>${renderDiffCellValue(change.left, "diff-change-before")}</td>
+                    <td>${renderDiffCellValue(change.right, "diff-change-after")}</td>
                 </tr>`
                 )
                 .join("")}</tbody>
         </table>
     </div>`;
+}
+
+function renderDiffCellValue(value, sideClass) {
+    const shouldPrettyPrintObject = isPlainObject(value);
+    const renderedValue = shouldPrettyPrintObject ? JSON.stringify(value, null, 2) : renderDiffValue(value);
+    const tagName = shouldPrettyPrintObject ? "pre" : "span";
+    const prettyClass = shouldPrettyPrintObject ? " diff-detail-chip-pretty" : "";
+    return `<${tagName} class="diff-detail-chip ${sideClass}${prettyClass}">${e(renderedValue)}</${tagName}>`;
 }
 
 function renderConfigDiffTable(leftLabel, rightLabel, changes, leftColumnHtml = null, rightColumnHtml = null) {
