@@ -1192,9 +1192,9 @@ function derivativesUrl(filePath) {
 }
 
 function runDerivativesPath(run) {
-    const runPath = String(run?.path ?? "")
-        .trim()
-        .replace(/^\/+|\/+$/g, "");
+    let runPath = String(run?.path ?? "").trim();
+    while (runPath.startsWith("/")) runPath = runPath.slice(1);
+    while (runPath.endsWith("/")) runPath = runPath.slice(0, -1);
     if (!runPath) return "derivatives";
 
     const codebaseHash = runDandiCodebaseHash(run);
