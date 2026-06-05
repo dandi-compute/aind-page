@@ -117,7 +117,7 @@ describe("app integration behavior", () => {
 
         const summaryHtml = document.getElementById("summary").innerHTML;
         expect(summaryHtml).not.toContain("stat-running");
-        expect(summaryHtml).not.toContain(">Running<");
+        expect(summaryHtml).not.toContain("Running");
     });
 
     it("formats large byte counts with appropriate decimal units", () => {
