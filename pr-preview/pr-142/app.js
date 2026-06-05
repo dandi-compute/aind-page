@@ -2588,12 +2588,7 @@ function initModal() {
     document.getElementById("runs").addEventListener("click", (evt) => {
         const btn = evt.target.closest(".log-link");
         if (!btn) return;
-        openLogModal(
-            btn.dataset.logUrl,
-            btn.dataset.logLabel,
-            btn.dataset.logHtml === "true",
-            btn.dataset.logExternal
-        );
+        openLogModal(btn.dataset.logUrl, btn.dataset.logLabel, btn.dataset.logHtml === "true", btn.dataset.logExternal);
     });
 
     const runsEl = document.getElementById("runs");
