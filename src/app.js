@@ -1776,8 +1776,12 @@ function renderNamedDiffTable(
 }
 
 function renderDiffCellValue(value, sideClass) {
+    if (isPlainObject(value)) {
+        return `<pre class="diff-detail-chip ${sideClass} diff-detail-chip-pretty">${e(JSON.stringify(value, null, 2))}</pre>`;
+    }
+
     const compactRenderedValue = renderDiffValue(value);
-    const shouldPrettyPrintJson = isPlainObject(value) || (Array.isArray(value) && compactRenderedValue.length > 60);
+    const shouldPrettyPrintJson = Array.isArray(value) && compactRenderedValue.length > 60;
     const renderedValue = shouldPrettyPrintJson ? JSON.stringify(value, null, 2) : compactRenderedValue;
     const tagName = shouldPrettyPrintJson ? "pre" : "span";
     const prettyClass = shouldPrettyPrintJson ? " diff-detail-chip-pretty" : "";
