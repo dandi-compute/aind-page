@@ -870,9 +870,7 @@ function dandiPathDirectoryParts(dandiPath) {
     if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
     const directoryParts = pathParts.slice(0, -1);
     const nwbStem = terminalPart.slice(0, -4);
-    if (/^sub-[^_]+_ecephys$/.test(nwbStem)) {
-        directoryParts.push(nwbStem);
-    }
+    directoryParts.push(nwbStem);
     return directoryParts;
 }
 
