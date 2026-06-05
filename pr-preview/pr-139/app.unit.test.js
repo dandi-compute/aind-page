@@ -1960,6 +1960,69 @@ describe("renderDandisets", () => {
         expect(html).not.toContain("params-group");
         expect((html.match(/class="run-entry status-/g) || []).length).toBe(2);
     });
+
+    it("includes the codebase hash in the derivatives link for successful runs", () => {
+        const html = renderDandisets([
+            {
+                status: "success",
+                attempt: 1,
+                runDate: "2026-06-05",
+                tasks: [],
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "v0.3.22" }],
+                vizData: [],
+                hasLogs: false,
+                hasOutput: true,
+                hasCode: true,
+                path: "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.2.2_params-1cbdbee_config-0d4bf36_attempt-1",
+                dandisetId: "001849",
+                subject: "test",
+                session: null,
+                pipelineName: "aind+ephys",
+                pipelineVersion: "v1.2.2",
+                paramsProfile: "1cbdbee",
+                configHash: "0d4bf36",
+                assetId: null,
+                inSourcedata: true,
+                failureStep: null,
+                assetSizeBytes: null,
+            },
+        ]);
+        expect(html).toContain(
+            "location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/" +
+                "version-v1.2.2_codebase-v0.3.22_params-1cbdbee_config-0d4bf36_attempt-1/derivatives&page=1"
+        );
+    });
+
+    it("disables the derivatives button for non-success runs", () => {
+        const html = renderDandisets([
+            {
+                status: "running",
+                attempt: 1,
+                runDate: "2026-06-05",
+                tasks: [],
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "v0.3.22" }],
+                vizData: [],
+                hasLogs: false,
+                hasOutput: false,
+                hasCode: true,
+                path: "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.2.2_params-1cbdbee_config-0d4bf36_attempt-1",
+                dandisetId: "001849",
+                subject: "test",
+                session: null,
+                pipelineName: "aind+ephys",
+                pipelineVersion: "v1.2.2",
+                paramsProfile: "1cbdbee",
+                configHash: "0d4bf36",
+                assetId: null,
+                inSourcedata: true,
+                failureStep: null,
+                assetSizeBytes: null,
+            },
+        ]);
+        expect(html).toContain('class="run-entry-derivatives-link run-entry-derivatives-link-disabled"');
+        expect(html).toContain('aria-disabled="true"');
+        expect(html).not.toContain("location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/");
+    });
 });
 
 describe("renderParamsGroup", () => {

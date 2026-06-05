@@ -1283,6 +1283,12 @@ function renderRunEntry(run) {
         bytes === null
             ? ""
             : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
+    const derivativesPath = runDerivativesPath(run);
+    const derivativesHref = derivativesUrl(derivativesPath);
+    const derivativesHtml =
+        run.status === "success"
+            ? `<a class="run-entry-derivatives-link" href="${e(derivativesHref)}" target="_blank" rel="noopener">↗ Derivatives</a>`
+            : `<span class="run-entry-derivatives-link run-entry-derivatives-link-disabled" aria-disabled="true">↗ Derivatives</span>`;
 
     return `
 <div class="run-entry ${sc}">
@@ -1291,7 +1297,7 @@ function renderRunEntry(run) {
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        ${derivativesHtml}
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
