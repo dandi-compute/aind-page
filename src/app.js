@@ -1551,6 +1551,17 @@ function uniqueRegistryEntries(registry) {
     return [...entriesByHash.values()].sort((a, b) => a.alias.localeCompare(b.alias));
 }
 
+function buildParamsCompareEntries() {
+    return [...PARAMS_REGISTRY]
+        .sort((a, b) => a.alias.localeCompare(b.alias))
+        .map((entry) => ({
+            key: entry.alias,
+            alias: entry.alias,
+            path: entry.path,
+            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
+        }));
+}
+
 function buildPairwiseComparisons(items) {
     const pairs = [];
     for (let i = 0; i < items.length; i++) {
@@ -1968,11 +1979,10 @@ async function fetchRegistryFile(path, subdir, kindLabel) {
 }
 
 async function buildParamsDiffPairs() {
-    const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY);
+    const paramsEntries = buildParamsCompareEntries();
     const paramsWithJson = await Promise.all(
         paramsEntries.map(async (entry) => ({
             ...entry,
-            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
             json: await (await fetchRegistryFile(entry.path, "params", "params")).json(),
         }))
     );
@@ -3440,11 +3450,7 @@ async function init() {
             const runs = parseQueueEntries(entries);
             const pipelineEntries = await buildPipelineCompareEntries(runs);
             const pipelinePairs = await buildPipelineDiffPairs(runs);
-            const paramsEntries = uniqueRegistryEntries(PARAMS_REGISTRY).map((entry) => ({
-                key: entry.alias,
-                alias: entry.alias,
-                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
-            }));
+            const paramsEntries = buildParamsCompareEntries();
             const paramsPairs = await buildParamsDiffPairs();
             const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY).map((entry) => ({
                 key: entry.alias,
@@ -3523,6 +3529,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderFilterBanner,
         renderSummary,
         renderFlatList,
+        buildParamsCompareEntries,
         renderRegistryLink,
         renderVisualizationSection,
         runFailureStep,
