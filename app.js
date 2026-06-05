@@ -1766,13 +1766,26 @@ function renderNamedDiffTable(
                 .map(
                     (change) => `<tr>
                     <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
-                    <td><span class="diff-detail-chip diff-change-before">${e(renderDiffValue(change.left))}</span></td>
-                    <td><span class="diff-detail-chip diff-change-after">${e(renderDiffValue(change.right))}</span></td>
+                    <td>${renderDiffCellValue(change.left, "diff-change-before")}</td>
+                    <td>${renderDiffCellValue(change.right, "diff-change-after")}</td>
                 </tr>`
                 )
                 .join("")}</tbody>
         </table>
     </div>`;
+}
+
+function renderDiffCellValue(value, sideClass) {
+    if (isPlainObject(value)) {
+        return `<pre class="diff-detail-chip ${sideClass} diff-detail-chip-pretty">${e(JSON.stringify(value, null, 2))}</pre>`;
+    }
+
+    const compactRenderedValue = renderDiffValue(value);
+    const shouldPrettyPrintJson = Array.isArray(value) && compactRenderedValue.length > 60;
+    const renderedValue = shouldPrettyPrintJson ? JSON.stringify(value, null, 2) : compactRenderedValue;
+    const tagName = shouldPrettyPrintJson ? "pre" : "span";
+    const prettyClass = shouldPrettyPrintJson ? " diff-detail-chip-pretty" : "";
+    return `<${tagName} class="diff-detail-chip ${sideClass}${prettyClass}">${e(renderedValue)}</${tagName}>`;
 }
 
 function renderConfigDiffTable(leftLabel, rightLabel, changes, leftColumnHtml = null, rightColumnHtml = null) {
