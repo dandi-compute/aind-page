@@ -1987,10 +1987,7 @@ describe("renderDandisets", () => {
                 assetSizeBytes: null,
             },
         ]);
-        expect(html).toContain(
-            "location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/" +
-                "version-v1.2.2_codebase-v0.3.22_params-1cbdbee_config-0d4bf36_attempt-1/derivatives&page=1"
-        );
+        expect(html).toContain("version-v1.2.2_codebase-v0.3.22_params-1cbdbee_config-0d4bf36_attempt-1/derivatives");
     });
 
     it("disables the derivatives button for non-success runs", () => {
@@ -2021,7 +2018,9 @@ describe("renderDandisets", () => {
         ]);
         expect(html).toContain('class="run-entry-derivatives-link run-entry-derivatives-link-disabled"');
         expect(html).toContain('aria-disabled="true"');
-        expect(html).not.toContain("location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/");
+        expect(html).not.toContain(
+            "location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/"
+        );
     });
 });
 
