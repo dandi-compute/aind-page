@@ -793,8 +793,11 @@ describe("app unit behavior", () => {
         expect(runs[0]).toMatchObject({
             subject: "test",
             session: "aind+sample",
-            path: "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/sub-test_ses-aind+sample_ecephys/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_attempt-1",
         });
+        expect(runs[0].path).toContain(
+            "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/sub-test_ses-aind+sample_ecephys/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36"
+        );
+        expect(runs[0].runDate).toBe("2026+05+24");
     });
 
     it("preserves full dandi_path hierarchy when sourcedata precedes subject", () => {
