@@ -2489,6 +2489,73 @@ describe("diff modal interactions", () => {
         expect(prettyValues[1].textContent).toBe('{\n  "window_ms": 100,\n  "bin_ms": 5\n}');
     });
 
+    it("pretty-prints long JSON array values in params diff modal cells", () => {
+        document.getElementById("runs").innerHTML = renderDiffPage({
+            pipelineEntries: [],
+            pipelinePairs: [],
+            pipelinePairMap: new Map(),
+            paramsEntries: [
+                {
+                    key: "all+channels",
+                    alias: "all+channels",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-all+channels.json",
+                },
+                {
+                    key: "deterministic",
+                    alias: "deterministic",
+                    sourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                },
+            ],
+            paramsPairs: [
+                {
+                    baseAlias: "all+channels",
+                    headAlias: "deterministic",
+                    baseSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-all+channels.json",
+                    headSourceUrl:
+                        "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+                    changes: [
+                        {
+                            path: "preprocessing.filters",
+                            left: ["highpass", "car", "phase_shift", "artifact_removal", "qc_metrics"],
+                            right: ["highpass", "phase_shift", "artifact_removal", "qc_metrics", "spike_sort"],
+                        },
+                    ],
+                },
+            ],
+            paramsPairMap: new Map([
+                [
+                    "all+channels\x00deterministic",
+                    {
+                        baseAlias: "all+channels",
+                        headAlias: "deterministic",
+                        changes: [
+                            {
+                                path: "preprocessing.filters",
+                                left: ["highpass", "car", "phase_shift", "artifact_removal", "qc_metrics"],
+                                right: ["highpass", "phase_shift", "artifact_removal", "qc_metrics", "spike_sort"],
+                            },
+                        ],
+                    },
+                ],
+            ]),
+            configEntries: [],
+            configPairs: [],
+            configPairMap: new Map(),
+        });
+
+        initModal();
+        document.querySelector(".diff-cell-trigger").click();
+
+        const prettyValues = document.getElementById("log-modal-body").querySelectorAll(".diff-detail-chip-pretty");
+        expect(prettyValues).toHaveLength(2);
+        expect(prettyValues[0].tagName).toBe("PRE");
+        expect(prettyValues[0].textContent).toContain('[\n  "highpass"');
+        expect(prettyValues[1].textContent).toContain('[\n  "highpass"');
+    });
+
     it("shows pipeline compare modal details in tables", () => {
         document.getElementById("runs").innerHTML = renderDiffPage({
             pipelineEntries: [

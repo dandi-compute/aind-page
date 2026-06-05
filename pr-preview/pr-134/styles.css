@@ -1741,6 +1741,7 @@ details[open] > .params-summary::before {
     margin: 0;
     padding: 6px 8px;
     border-radius: 8px;
+    max-width: 60ch;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
