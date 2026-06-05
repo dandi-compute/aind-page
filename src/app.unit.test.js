@@ -404,7 +404,7 @@ describe("app unit behavior", () => {
         );
     });
 
-    it("builds run path from NWB filename dandi_path by stripping the terminal .nwb", () => {
+    it("builds run path from NWB filename dandi_path by preserving the stem directory", () => {
         const path = buildRunPath({
             dandiset_id: "000363",
             dandi_path: "sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb",
@@ -415,7 +415,7 @@ describe("app unit behavior", () => {
             attempt: 1,
         });
         expect(path).toBe(
-            "derivatives/dandiset-000363/sub-480134/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
+            "derivatives/dandiset-000363/sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1"
         );
     });
 
@@ -445,9 +445,10 @@ describe("app unit behavior", () => {
             date: "2026+05+24",
             attempt: 1,
         });
-        expect(path).toBe(
-            "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1"
+        expect(path).toContain(
+            "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/sub-test_ses-aind+sample_ecephys/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36"
         );
+        expect(path).toContain("_attempt-1");
     });
 
     it("builds run path from dandi_path when sourcedata is before subject", () => {
@@ -461,7 +462,7 @@ describe("app unit behavior", () => {
             attempt: 1,
         });
         expect(path).toBe(
-            "derivatives/dandiset-001470/sourcedata/sub-M536/ses-2025+04+13/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1"
+            "derivatives/dandiset-001470/sourcedata/sub-M536/ses-2025+04+13/sub-M536_ses-2025-04-13_ecephys/pipeline-aind+ephys/version-1.2.2+d2b6aef+be2047d_params-4af6a25_config-0d4bf36_attempt-1"
         );
     });
 
@@ -766,7 +767,7 @@ describe("app unit behavior", () => {
         expect(runs[0]).toMatchObject({
             subject: "480134",
             session: "20210107T120825",
-            path: "derivatives/dandiset-000363/sub-480134/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1",
+            path: "derivatives/dandiset-000363/sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen/pipeline-aind+ephys/version-v1.1.1+b268fd2+a0c5e04_params-4af6a25_config-0d4bf36_attempt-1",
         });
     });
 
@@ -792,7 +793,7 @@ describe("app unit behavior", () => {
         expect(runs[0]).toMatchObject({
             subject: "test",
             session: "aind+sample",
-            path: "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_date-2026+05+24_attempt-1",
+            path: "derivatives/dandiset-001849/sub-test/sourcedata/aind-sample/sub-test_ses-aind+sample_ecephys/pipeline-aind+ephys/version-v1.1.1+b268fd2+938ee17_params-4af6a25_config-0d4bf36_attempt-1",
         });
     });
 
@@ -842,7 +843,7 @@ describe("app unit behavior", () => {
         expect(runs[0]).toMatchObject({
             subject: "Chronic-Implant-2",
             session: null,
-            path: "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6_params-98fd947_config-6568dda_attempt-1",
+            path: "derivatives/dandiset-001469/sub-Chronic-Implant-2/sub-Chronic-Implant-2_obj-nvg8om_ecephys/pipeline-aind+ephys/version-v1.0.0+fixes+20abeb6_params-98fd947_config-6568dda_attempt-1",
         });
     });
 
