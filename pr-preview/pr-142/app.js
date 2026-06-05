@@ -1152,20 +1152,30 @@ const LOG_LABELS = {
     "timeline.html": "Execution Timeline",
     "trace.txt": "Task Trace",
 };
+// Matches rotated Nextflow logs such as "nextflow.log.1", "nextflow.log.2".
+const ROTATED_NEXTFLOW_LOG_PATTERN = /^nextflow\.log\.\d+$/;
+
 function logLabel(fileName) {
     if (LOG_LABELS[fileName]) return LOG_LABELS[fileName];
+    if (ROTATED_NEXTFLOW_LOG_PATTERN.test(fileName)) {
+        return `Nextflow Log (${fileName.slice("nextflow.log.".length)})`;
+    }
     if (fileName.includes("_slurm.log")) return "SLURM Job Log";
     return fileName;
 }
 
 // Split a run's discovered log files (run.logFiles, sourced from the S3 blob
 // map) into inline reports (rendered as iframes) and button logs (opened in the
-// modal). Standard Nextflow logs are ordered first, with remaining files (e.g.
-// SLURM job logs) following alphabetically.
+// modal). Standard Nextflow logs are ordered first (rotated nextflow.log.N files
+// cluster with nextflow.log), with remaining files (e.g. SLURM job logs)
+// following alphabetically.
 function splitRunLogFiles(run) {
     const logFiles = run.logFiles ?? [];
     const orderIndex = (f) => {
-        const i = STANDARD_LOG_FILES.indexOf(f);
+        // Treat rotated nextflow.log.N like nextflow.log for primary ordering so
+        // the rotations sit next to the base log rather than at the end.
+        const key = ROTATED_NEXTFLOW_LOG_PATTERN.test(f) ? "nextflow.log" : f;
+        const i = STANDARD_LOG_FILES.indexOf(key);
         return i === -1 ? STANDARD_LOG_FILES.length : i;
     };
     const sorted = [...logFiles].sort((a, b) => orderIndex(a) - orderIndex(b) || a.localeCompare(b));
