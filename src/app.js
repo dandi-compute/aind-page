@@ -870,7 +870,7 @@ function dandiPathDirectoryParts(dandiPath) {
     if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
     const directoryParts = pathParts.slice(0, -1);
     const nwbStem = terminalPart.slice(0, -4);
-    if (/^sub-[^_]+_ecephys$/.test(nwbStem)) {
+    if (!nwbStem.startsWith("sub-") || /^sub-[^_]+_ecephys$/.test(nwbStem)) {
         directoryParts.push(nwbStem);
     }
     return directoryParts;
@@ -1185,7 +1185,8 @@ function derivativesUrl(filePath) {
         .filter(Boolean)
         .map(encodeURIComponent)
         .join("/");
-    return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${location}&page=1`;
+    const derivativesLocation = location ? `${location}/derivatives` : "derivatives";
+    return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${derivativesLocation}&page=1`;
 }
 
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
