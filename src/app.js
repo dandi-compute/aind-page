@@ -1191,6 +1191,21 @@ function derivativesUrl(filePath) {
     return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${derivativesLocation}&page=1`;
 }
 
+function runDerivativesPath(run) {
+    const runPath = String(run?.path ?? "")
+        .trim()
+        .replace(/^\/+|\/+$/g, "");
+    if (!runPath) return "derivatives";
+
+    const codebaseHash = runDandiCodebaseHash(run);
+    if (!codebaseHash || runPath.includes("_codebase-")) {
+        return runPath;
+    }
+
+    const pathWithCodebase = runPath.replace(/(\/version-[^/]+?)_params-/, `$1_codebase-${codebaseHash}_params-`);
+    return pathWithCodebase === runPath ? runPath : pathWithCodebase;
+}
+
 /* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
 function neurosiftUrl(dandisetId, assetId) {
     const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
@@ -2412,6 +2427,12 @@ function renderFlatRunEntry(run) {
         bytes === null
             ? ""
             : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
+    const derivativesPath = runDerivativesPath(run);
+    const derivativesHref = derivativesUrl(derivativesPath);
+    const derivativesHtml =
+        run.status === "success"
+            ? `<a class="run-entry-derivatives-link" href="${e(derivativesHref)}" target="_blank" rel="noopener">↗ Derivatives</a>`
+            : `<span class="run-entry-derivatives-link run-entry-derivatives-link-disabled" aria-disabled="true">↗ Derivatives</span>`;
 
     const dandiPath = String(run.dandiPath ?? "").trim();
     const dandiPathParts = String(dandiPath).split("/").filter(Boolean);
@@ -2441,7 +2462,7 @@ function renderFlatRunEntry(run) {
         </span>
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        ${derivativesHtml}
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}

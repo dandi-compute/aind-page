@@ -996,6 +996,54 @@ describe("treeUrl", () => {
         expect(html).not.toContain("location=sub-NP06%2Fsub-NP06_ecephys");
     });
 
+    it("renderFlatList includes the codebase hash in the derivatives link for successful runs", () => {
+        const html = renderFlatList([
+            {
+                status: "success",
+                hasLogs: false,
+                tasks: [],
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "v0.3.22" }],
+                vizData: [],
+                dandiPath: "sourcedata/aind-sample.nwb",
+                inSourcedata: true,
+                subject: "test",
+                attempt: 1,
+                path: "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.2.2_params-1cbdbee_config-0d4bf36_attempt-1",
+                dandisetId: "001849",
+                paramsProfile: "1cbdbee",
+                configHash: "0d4bf36",
+                runDate: "2026-06-05",
+            },
+        ]);
+        expect(html).toContain(
+            "location=derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind%2Bephys/" +
+                "version-v1.2.2_codebase-v0.3.22_params-1cbdbee_config-0d4bf36_attempt-1/derivatives&amp;page=1"
+        );
+    });
+
+    it("renderFlatList disables the derivatives button until a run succeeds", () => {
+        const html = renderFlatList([
+            {
+                status: "running",
+                hasLogs: false,
+                tasks: [],
+                generatedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "v0.3.22" }],
+                vizData: [],
+                dandiPath: "sourcedata/aind-sample.nwb",
+                inSourcedata: true,
+                subject: "test",
+                attempt: 1,
+                path: "derivatives/dandiset-001849/sourcedata/aind-sample/pipeline-aind+ephys/version-v1.2.2_params-1cbdbee_config-0d4bf36_attempt-1",
+                dandisetId: "001849",
+                paramsProfile: "1cbdbee",
+                configHash: "0d4bf36",
+                runDate: "2026-06-05",
+            },
+        ]);
+        expect(html).toContain('class="run-entry-derivatives-link run-entry-derivatives-link-disabled"');
+        expect(html).toContain('aria-disabled="true"');
+    });
+
     it("builds a GitHub tree URL without session when session is absent", () => {
         const path =
             "derivatives/dandiset-001469/sub-Chronic-Implant-2/pipeline-aind+ephys/version-v1.0.0_params-98fd947_config-6568dda_attempt-1";

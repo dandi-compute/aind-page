@@ -1142,6 +1142,11 @@ details[open] > .params-summary::before {
     color: var(--color-accent);
     border-color: var(--color-accent);
 }
+.run-entry-derivatives-link-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
 
 /* ─── Source versions ───────────────────────────────────────── */
 .source-versions {
