@@ -18,6 +18,8 @@
     --color-partial-bg: rgba(224, 168, 58, 0.1);
     --color-queued: #53a8b6;
     --color-queued-bg: rgba(83, 168, 182, 0.1);
+    --color-running: #9b7fde;
+    --color-running-bg: rgba(155, 127, 222, 0.1);
     --font-main: "Source Sans 3", -apple-system, sans-serif;
     --radius: 6px;
 }
@@ -37,6 +39,7 @@
     --color-failed-bg: rgba(224, 92, 92, 0.08);
     --color-partial-bg: rgba(224, 168, 58, 0.08);
     --color-queued-bg: rgba(83, 168, 182, 0.08);
+    --color-running-bg: rgba(155, 127, 222, 0.08);
 }
 
 *,
@@ -298,6 +301,9 @@ h1 {
 .stat-queued .stat-value {
     color: var(--color-queued);
 }
+.stat-running .stat-value {
+    color: var(--color-running);
+}
 .stat-partial .stat-value {
     color: var(--color-partial);
 }
@@ -355,6 +361,10 @@ h1 {
 .status-badge.status-queued {
     background: var(--color-queued-bg);
     color: var(--color-queued);
+}
+.status-badge.status-running {
+    background: var(--color-running-bg);
+    color: var(--color-running);
 }
 .status-badge.status-partial {
     background: var(--color-partial-bg);
@@ -1099,6 +1109,9 @@ details[open] > .params-summary::before {
 }
 .run-entry.status-queued {
     border-left-color: var(--color-queued);
+}
+.run-entry.status-running {
+    border-left-color: var(--color-running);
 }
 .run-entry.status-partial {
     border-left-color: var(--color-partial);
