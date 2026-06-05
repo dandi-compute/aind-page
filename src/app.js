@@ -2576,6 +2576,54 @@ function initLayoutToggle() {
 /* ─── Log modal ─────────────────────────────────────────────── */
 let _modalGeneration = 0;
 
+/* ─── Inline "Open" object URLs ─────────────────────────────────
+   S3 blob objects are content-addressed and extension-less, so linking the
+   "↗ Open" button directly at the blob URL makes the browser download the file
+   instead of rendering it. Instead we wrap the already-fetched bytes in a Blob
+   with an explicit MIME type and point "Open" at the resulting object URL, which
+   opens inline in a new tab. Tracked URLs are revoked when the next modal opens
+   (an already-opened tab keeps its loaded copy).                              */
+let _modalObjectUrls = [];
+
+function makeObjectUrl(parts, type) {
+    try {
+        const blob = new Blob(parts, type ? { type } : undefined);
+        const objUrl = URL.createObjectURL(blob);
+        _modalObjectUrls.push(objUrl);
+        return objUrl;
+    } catch {
+        return null;
+    }
+}
+
+function revokeModalObjectUrls() {
+    for (const objUrl of _modalObjectUrls) {
+        try {
+            URL.revokeObjectURL(objUrl);
+        } catch {
+            /* already revoked or unsupported */
+        }
+    }
+    _modalObjectUrls = [];
+}
+
+// Build a tiny self-contained HTML document that embeds an image by URL, and
+// return it as an object URL. Opening this in a new tab renders the image inline
+// (an <img> element displays a resource regardless of its content-disposition,
+// unlike a top-level navigation to the raw blob, which S3 serves as a download).
+// No fetch of the image bytes is required, so this works even without CORS.
+function makeImageViewerObjectUrl(url, label) {
+    const safeUrl = e(url);
+    const safeLabel = e(label || "Image");
+    const viewerHtml =
+        `<!doctype html><html><head><meta charset="utf-8">` +
+        `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<title>${safeLabel}</title></head>` +
+        `<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh">` +
+        `<img src="${safeUrl}" alt="${e(label || "")}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`;
+    return makeObjectUrl([viewerHtml], "text/html");
+}
+
 function initModal() {
     document.getElementById("log-modal-close").addEventListener("click", closeLogModal);
     document.getElementById("log-modal").addEventListener("click", (evt) => {
@@ -2588,7 +2636,12 @@ function initModal() {
     document.getElementById("runs").addEventListener("click", (evt) => {
         const btn = evt.target.closest(".log-link");
         if (!btn) return;
-        openLogModal(btn.dataset.logUrl, btn.dataset.logLabel, btn.dataset.logHtml === "true", btn.dataset.logExternal);
+        openLogModal(
+            btn.dataset.logUrl,
+            btn.dataset.logLabel,
+            btn.dataset.logHtml === "true",
+            btn.dataset.logExternal
+        );
     });
 
     const runsEl = document.getElementById("runs");
@@ -2644,9 +2697,12 @@ function openLogModal(fileUrl, label, isHtml, externalHref) {
     const bodyEl = document.getElementById("log-modal-body");
 
     const generation = ++_modalGeneration;
+    revokeModalObjectUrls();
 
     setModalTitle(label);
-    setModalExternalLink(externalHref);
+    // Hide "Open" until the content is loaded; we then point it at an inline
+    // object URL so the browser renders the file instead of downloading it.
+    setModalExternalLink(null);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
@@ -2654,9 +2710,12 @@ function openLogModal(fileUrl, label, isHtml, externalHref) {
     fetchLogText(fileUrl).then((content) => {
         if (_modalGeneration !== generation) return;
         if (content === null) {
+            // Fall back to the raw URL so the user can still try to retrieve it.
+            setModalExternalLink(externalHref);
             bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
             return;
         }
+        setModalExternalLink(makeObjectUrl([content], isHtml ? "text/html" : "text/plain") ?? externalHref);
         bodyEl.innerHTML = "";
         if (isHtml) {
             // Use srcdoc so the report renders inline regardless of the source
@@ -2689,6 +2748,7 @@ function openHtmlModal(title, html, externalHref = null, externalLabel = "↗ Op
     const bodyEl = document.getElementById("log-modal-body");
 
     _modalGeneration++;
+    revokeModalObjectUrls();
 
     setModalTitle(title);
     setModalExternalLink(externalHref, externalLabel);
@@ -2702,18 +2762,24 @@ function openVizModal(url, label) {
     const bodyEl = document.getElementById("log-modal-body");
 
     _modalGeneration++;
+    revokeModalObjectUrls();
 
     setModalTitle(label);
-    setModalExternalLink(url);
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
 
+    // The image itself loads from the direct S3 URL: <img> renders a resource
+    // inline regardless of its content-disposition.
     bodyEl.innerHTML = "";
     const img = document.createElement("img");
     img.className = "viz-modal-img";
     img.src = url;
     img.alt = label;
     bodyEl.appendChild(img);
+
+    // "Open" points at a self-contained HTML viewer (not the raw blob), so the
+    // new tab renders the image inline instead of downloading it.
+    setModalExternalLink(makeImageViewerObjectUrl(url, label) ?? url);
 }
 
 async function fetchLogText(fileUrl) {
