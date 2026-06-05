@@ -99,6 +99,27 @@ describe("app integration behavior", () => {
         expect(document.getElementById("summary").innerHTML).not.toContain("DATA PROCESSED");
     });
 
+    it("shows running counter in summary when running runs are present", () => {
+        renderSummary([
+            { status: "success", assetSizeBytes: 10 },
+            { status: "running" },
+            { status: "running" },
+            { status: "queued" },
+        ]);
+
+        const summaryHtml = document.getElementById("summary").innerHTML;
+        expect(summaryHtml).toContain("stat-running");
+        expect(summaryHtml).toContain("Running");
+    });
+
+    it("omits running counter from summary when no running runs are present", () => {
+        renderSummary([{ status: "success", assetSizeBytes: 10 }, { status: "queued" }]);
+
+        const summaryHtml = document.getElementById("summary").innerHTML;
+        expect(summaryHtml).not.toContain("stat-running");
+        expect(summaryHtml).not.toContain("Running");
+    });
+
     it("formats large byte counts with appropriate decimal units", () => {
         renderSummary([{ status: "success", assetSizeBytes: 2_500_000_000_000 }]);
         expect(document.getElementById("summary").innerHTML).toContain("2.5 TB");
