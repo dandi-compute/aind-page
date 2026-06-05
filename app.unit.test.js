@@ -2,6 +2,7 @@ const {
     applyFilter,
     buildRunPath,
     buildPipelineDiffPairs,
+    buildParamsCompareEntries,
     classifyFailedTaskStep,
     clearQueueStateCache,
     collectJsonDiffs,
@@ -2280,6 +2281,54 @@ describe("diff page helpers", () => {
         expect(html).toContain("Registered config diffs");
         expect(html).toContain("View 1 change");
         expect(html).toContain("No registered params files were found.");
+    });
+
+    it("renders every registered params key in the comparison grid", async () => {
+        await loadFixtureRegistries();
+
+        const paramsEntries = buildParamsCompareEntries();
+
+        expect(paramsEntries).toEqual([
+            {
+                key: "default",
+                alias: "default",
+                path: "name-deterministic.json",
+                sourceUrl:
+                    "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+            },
+            {
+                key: "deterministic",
+                alias: "deterministic",
+                path: "name-deterministic.json",
+                sourceUrl:
+                    "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-deterministic.json",
+            },
+            {
+                key: "original",
+                alias: "original",
+                path: "name-original.json",
+                sourceUrl:
+                    "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline/params/name-original.json",
+            },
+        ]);
+
+        document.body.innerHTML = renderDiffPage({
+            pipelineEntries: [],
+            pipelinePairs: [],
+            pipelinePairMap: new Map(),
+            paramsEntries,
+            paramsPairs: [],
+            paramsPairMap: new Map(),
+            configEntries: [],
+            configPairs: [],
+            configPairMap: new Map(),
+        });
+
+        expect(document.querySelectorAll(".diff-matrix-col-header")).toHaveLength(2);
+        expect(document.querySelectorAll(".diff-matrix-row-header")).toHaveLength(3);
+        expect(document.body.textContent).toContain("default");
+        expect(document.body.textContent).toContain("deterministic");
+        expect(document.body.textContent).toContain("original");
     });
 });
 
