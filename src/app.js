@@ -695,9 +695,9 @@ function clearQueueStateCache() {
     }
 }
 
-async function fetchTraceText(runPath) {
-    const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
-    const url = `${CDN_BASE}/${pathParts}/logs/trace.txt`;
+async function fetchTraceText(run) {
+    const url = resolveBlobUrl(run, `${run.path}/logs/trace.txt`);
+    if (!url) return null;
     try {
         const resp = await cachedFetch(url);
         if (!resp.ok) return null;
@@ -707,51 +707,33 @@ async function fetchTraceText(runPath) {
     }
 }
 
-async function fetchSlurmLogs(runPath) {
-    try {
-        const encodedPath = `${runPath}/logs`.split("/").map(encodeURIComponent).join("/");
-        const url = `${GITHUB_API_BASE}/contents/${encodedPath}?ref=${BRANCH}`;
-        const resp = await cachedFetch(url);
-        if (!resp.ok) return [];
-        const items = await resp.json();
-        if (!Array.isArray(items)) return [];
-        return items
-            .filter((item) => item.type === "file" && item.name.endsWith("_slurm.log"))
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((item) => item.name);
-    } catch {
-        return [];
+// List the log file basenames present for a run, sourced from its S3 blob map.
+// Only direct children of "{run.path}/logs/" are returned (e.g. trace.txt,
+// report.html, timeline.html, dag.html, nextflow.log, *_slurm.log).
+function runLogFiles(run) {
+    const outputPaths = run?.outputPaths;
+    if (!outputPaths) return [];
+    const prefix = `${run.path}/logs/`;
+    const names = new Set();
+    for (const repoPath of Object.keys(outputPaths)) {
+        if (!repoPath.startsWith(prefix)) continue;
+        const relative = repoPath.slice(prefix.length);
+        if (!relative || relative.includes("/")) continue; // direct children only
+        names.add(relative);
     }
+    return Array.from(names);
 }
 
-// Fetch SLURM log filenames for all runs in a single recursive git-trees call.
-// Returns a Map<runPath, sortedFileNames[]>. Falls back to an empty Map on failure.
-async function fetchAllSlurmLogs() {
-    try {
-        const url = `${GITHUB_API_BASE}/git/trees/${BRANCH}?recursive=1`;
-        const resp = await cachedFetch(url);
-        if (!resp.ok) return new Map();
-        const data = await resp.json();
-        const byRunPath = new Map();
-        for (const item of data.tree ?? []) {
-            if (item.type !== "blob") continue;
-            const m = item.path.match(/^(derivatives\/.+)\/logs\/(.+_slurm\.log)$/);
-            if (!m) continue;
-            const runPath = m[1];
-            const fname = m[2];
-            if (!byRunPath.has(runPath)) byRunPath.set(runPath, []);
-            byRunPath.get(runPath).push(fname);
-        }
-        for (const files of byRunPath.values()) files.sort();
-        return byRunPath;
-    } catch {
-        return new Map();
-    }
+// SLURM job log basenames for a run, sourced from its S3 blob map.
+async function fetchSlurmLogs(run) {
+    return runLogFiles(run)
+        .filter((name) => name.endsWith("_slurm.log"))
+        .sort((a, b) => a.localeCompare(b));
 }
 
-async function fetchDatasetDescription(runPath) {
-    const pathParts = runPath.split("/").map(encodeURIComponent).join("/");
-    const url = `${CDN_BASE}/${pathParts}/dataset_description.json`;
+async function fetchDatasetDescription(run) {
+    const url = resolveBlobUrl(run, `${run.path}/dataset_description.json`);
+    if (!url) return null;
     try {
         const resp = await cachedFetch(url);
         if (!resp.ok) return null;
@@ -784,49 +766,44 @@ async function fetchDandiAssetId(dandisetId, subject, session) {
     }
 }
 
-async function fetchVisualizationData(runPath) {
-    try {
-        const candidatePaths = [`${runPath}/derivatives/visualization`, `${runPath}/visualization`];
-        let resolvedVizPath = null;
-        let vizDirItems = null;
-        for (const candidatePath of candidatePaths) {
-            const encodedPath = candidatePath.split("/").map(encodeURIComponent).join("/");
-            const vizDirUrl = `${GITHUB_API_BASE}/contents/${encodedPath}?ref=${BRANCH}`;
-            const vizDirResp = await cachedFetch(vizDirUrl);
-            if (!vizDirResp.ok) continue;
-            const items = await vizDirResp.json();
-            if (!items || !Array.isArray(items)) continue;
-            resolvedVizPath = candidatePath;
-            vizDirItems = items;
-            break;
-        }
-        if (!resolvedVizPath || !vizDirItems) return null;
+// Build the visualization recording groups for a run from its S3 blob map.
+// PNGs live under "{run.path}/derivatives/visualization/..." (or the legacy
+// "{run.path}/visualization/..."). Images inside a recording subdirectory are
+// grouped under that subdirectory's name; images directly under visualization/
+// are grouped under a synthetic "summary" recording. Sourced entirely from the
+// per-entry output_paths map — no directory listing required.
+function fetchVisualizationData(run) {
+    const outputPaths = run?.outputPaths;
+    if (!outputPaths) return null;
+    const prefixes = [`${run.path}/derivatives/visualization/`, `${run.path}/visualization/`];
 
-        const recordingDirs = vizDirItems.filter((item) => item.type === "dir");
-        if (recordingDirs.length === 0) return null;
-
-        const recordings = await Promise.all(
-            recordingDirs.map(async (dir) => {
-                const treeUrl = `${GITHUB_API_BASE}/git/trees/${dir.sha}`;
-                const treeResp = await cachedFetch(treeUrl);
-                if (!treeResp.ok) return null;
-                const treeData = await treeResp.json();
-                const images = (treeData.tree ?? [])
-                    .filter((f) => f.type === "blob" && /\.png$/i.test(f.path))
-                    .sort((a, b) => a.path.localeCompare(b.path))
-                    .map((f) => ({
-                        name: f.path,
-                        url: cdnUrl(`${resolvedVizPath}/${dir.name}/${f.path}`),
-                    }));
-                return { name: dir.name, images };
-            })
-        );
-
-        const validRecordings = recordings.filter(Boolean).filter((r) => r.images.length > 0);
-        return validRecordings.length > 0 ? validRecordings : null;
-    } catch {
-        return null;
+    const groups = new Map();
+    for (const [repoPath, blobId] of Object.entries(outputPaths)) {
+        if (!/\.png$/i.test(repoPath)) continue;
+        const prefix = prefixes.find((p) => repoPath.startsWith(p));
+        if (!prefix) continue;
+        const relative = repoPath.slice(prefix.length); // e.g. "rec1/drift_map.png" or "psd.png"
+        const slashIndex = relative.indexOf("/");
+        const groupName = slashIndex === -1 ? "summary" : relative.slice(0, slashIndex);
+        const baseName = relative.slice(relative.lastIndexOf("/") + 1);
+        const url = blobUrl(blobId);
+        if (!url) continue;
+        if (!groups.has(groupName)) groups.set(groupName, []);
+        groups.get(groupName).push({ name: baseName, url });
     }
+    if (groups.size === 0) return null;
+
+    // Order: the top-level "summary" group first, then recordings alphabetically.
+    const orderedNames = Array.from(groups.keys()).sort((a, b) => {
+        if (a === "summary") return -1;
+        if (b === "summary") return 1;
+        return a.localeCompare(b);
+    });
+    const recordings = orderedNames.map((name) => ({
+        name,
+        images: groups.get(name).sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+    return recordings.length > 0 ? recordings : null;
 }
 
 /* ─── Path helpers ──────────────────────────────────────────── */
@@ -902,6 +879,21 @@ function buildRunPath(entry) {
 }
 
 /* ─── Queue entry parsing ───────────────────────────────────── */
+// Merge the per-entry output/log path → blob-id maps into a single lookup.
+// Keys are repo-relative paths within the 001697 derivatives dandiset; values
+// are DANDI S3 content blob IDs. Both `output_paths` and an optional separate
+// `log_paths` map are supported and merged into one object.
+function normalizeOutputPaths(entry) {
+    const merged = {};
+    for (const key of ["output_paths", "log_paths"]) {
+        const map = entry?.[key];
+        if (map && typeof map === "object" && !Array.isArray(map)) {
+            Object.assign(merged, map);
+        }
+    }
+    return merged;
+}
+
 // Convert raw JSONL entries from the queue state file into run objects.
 function parseQueueEntries(entries) {
     return entries.map((entry) => {
@@ -923,6 +915,7 @@ function parseQueueEntries(entries) {
             hasOutput: entry.has_output,
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
+            outputPaths: normalizeOutputPaths(entry),
             assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
             runDate: createdAt ?? entry.date ?? null,
@@ -1159,15 +1152,69 @@ const LOG_LABELS = {
     "timeline.html": "Execution Timeline",
     "trace.txt": "Task Trace",
 };
+// Matches rotated Nextflow logs such as "nextflow.log.1", "nextflow.log.2".
+const ROTATED_NEXTFLOW_LOG_PATTERN = /^nextflow\.log\.\d+$/;
+
 function logLabel(fileName) {
     if (LOG_LABELS[fileName]) return LOG_LABELS[fileName];
+    if (ROTATED_NEXTFLOW_LOG_PATTERN.test(fileName)) {
+        return `Nextflow Log (${fileName.slice("nextflow.log.".length)})`;
+    }
     if (fileName.includes("_slurm.log")) return "SLURM Job Log";
     return fileName;
 }
 
-/* Build a raw CDN URL for a repo file path */
+// Split a run's discovered log files (run.logFiles, sourced from the S3 blob
+// map) into inline reports (rendered as iframes) and button logs (opened in the
+// modal). Standard Nextflow logs are ordered first (rotated nextflow.log.N files
+// cluster with nextflow.log), with remaining files (e.g. SLURM job logs)
+// following alphabetically.
+function splitRunLogFiles(run) {
+    const logFiles = run.logFiles ?? [];
+    const orderIndex = (f) => {
+        // Treat rotated nextflow.log.N like nextflow.log for primary ordering so
+        // the rotations sit next to the base log rather than at the end.
+        const key = ROTATED_NEXTFLOW_LOG_PATTERN.test(f) ? "nextflow.log" : f;
+        const i = STANDARD_LOG_FILES.indexOf(key);
+        return i === -1 ? STANDARD_LOG_FILES.length : i;
+    };
+    const sorted = [...logFiles].sort((a, b) => orderIndex(a) - orderIndex(b) || a.localeCompare(b));
+    const inlineLogs = sorted
+        .filter((f) => INLINE_REPORT_FILES.has(f))
+        .sort((a, b) => {
+            const ai = INLINE_REPORT_ORDER.indexOf(a);
+            const bi = INLINE_REPORT_ORDER.indexOf(b);
+            return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
+        });
+    const buttonLogs = sorted.filter((f) => !INLINE_REPORT_FILES.has(f));
+    return { inlineLogs, buttonLogs };
+}
+
+/* Build a raw CDN URL for a repo file path (legacy; retained for non-001697 repos) */
 function cdnUrl(filePath) {
     return `${CDN_BASE}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/* ─── DANDI S3 blob helpers ─────────────────────────────────────
+   The retired dandi-compute/001697 GitHub mirror has been replaced by direct
+   reads from the DANDI S3 bucket. Each successful queue entry carries an
+   output_paths map whose keys are repo-relative paths within the 001697
+   derivatives dandiset and whose values are the content blob IDs used to locate
+   the object in S3. Blobs are nested under the first two length-3 segments of
+   the hash: blobs/abc/def/abcdef123...                                       */
+const S3_BLOB_BASE = "https://dandiarchive.s3.amazonaws.com/blobs";
+
+function blobUrl(blobId) {
+    const id = String(blobId ?? "");
+    if (id.length < 6) return null;
+    return `${S3_BLOB_BASE}/${id.slice(0, 3)}/${id.slice(3, 6)}/${id}`;
+}
+
+/* Resolve a repo-relative file path within a run to its S3 blob URL using the
+   run's output_paths → blob-id map. Returns null when the path is unknown. */
+function resolveBlobUrl(run, repoPath) {
+    const id = run?.outputPaths?.[repoPath];
+    return id ? blobUrl(id) : null;
 }
 
 /* Build a GitHub tree URL for a repo directory path */
@@ -1194,9 +1241,8 @@ function neurosiftUrl(dandisetId, assetId) {
 
 /* Build a Neurosift NWB URL from a DANDI S3 content hash */
 function neurosiftBlobUrl(contentHash) {
-    const blobFileUrl = `https://dandiarchive.s3.amazonaws.com/blobs/${contentHash.slice(0, 3)}/${contentHash.slice(3, 6)}/${contentHash}`;
-    const neurosiftUrl_ = `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
-    return neurosiftUrl_;
+    const blobFileUrl = blobUrl(contentHash);
+    return `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
 }
 
 /* Build the best available Neurosift NWB URL: prefer blob URL (no API call), fall back to asset download URL */
@@ -1242,17 +1288,8 @@ function renderRunEntry(run) {
                     ? "⚠ Partial"
                     : "? Unknown";
 
-    // Log files known to be present when has_logs is true (standard Nextflow output).
-    const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
-
-    const inlineLogs = logFiles
-        .filter((f) => INLINE_REPORT_FILES.has(f))
-        .sort((a, b) => {
-            const ai = INLINE_REPORT_ORDER.indexOf(a);
-            const bi = INLINE_REPORT_ORDER.indexOf(b);
-            return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
-        });
-    const buttonLogs = [...logFiles.filter((f) => !INLINE_REPORT_FILES.has(f)), ...(run.slurmLogs ?? [])];
+    // Log files present for this run, sourced from the S3 blob map (run.logFiles).
+    const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
@@ -1277,8 +1314,8 @@ function renderRunEntry(run) {
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
-    ${hasLogs ? renderLogSection(run.path, buttonLogs) : ""}
-    ${hasInline ? renderReportSection(run.path, inlineLogs) : ""}
+    ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
+    ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
 }
 
@@ -1370,19 +1407,20 @@ function renderTraceSection(tasks) {
 </details>`;
 }
 
-function renderLogSection(runPath, logFiles) {
+function renderLogSection(run, logFiles) {
     const buttons = logFiles
         .map((fname) => {
-            const filePath = `${runPath}/logs/${fname}`;
+            const url = resolveBlobUrl(run, `${run.path}/logs/${fname}`);
+            if (!url) return "";
             const isHtml = fname.endsWith(".html");
             const label = logLabel(fname);
-            const href = cdnUrl(filePath);
             return `<button class="log-link"
-            data-log-path="${e(filePath)}"
+            data-log-url="${e(url)}"
             data-log-label="${e(label)}"
             data-log-html="${isHtml}"
-            data-log-external="${e(href)}">${e(label)}</button>`;
+            data-log-external="${e(url)}">${e(label)}</button>`;
         })
+        .filter(Boolean)
         .join("");
 
     return `
@@ -1395,21 +1433,24 @@ function renderLogSection(runPath, logFiles) {
 </details>`;
 }
 
-function renderReportSection(runPath, reportFiles) {
+function renderReportSection(run, reportFiles) {
     const frames = reportFiles
         .map((fname) => {
-            const filePath = `${runPath}/logs/${fname}`;
+            const url = resolveBlobUrl(run, `${run.path}/logs/${fname}`);
+            if (!url) return "";
             const label = logLabel(fname);
             return `<div class="inline-report-wrap">
             <div class="inline-report-header">
                 <span class="inline-report-label">${e(label)}</span>
             </div>
             <iframe class="inline-report-iframe"
-                data-srcdoc-path="${e(filePath)}"
+                data-srcdoc-url="${e(url)}"
+                data-srcdoc-name="${e(fname)}"
                 sandbox="allow-scripts"
                 title="${e(label)}"></iframe>
         </div>`;
         })
+        .filter(Boolean)
         .join("");
 
     return `
@@ -2387,16 +2428,7 @@ function renderFlatRunEntry(run) {
                     ? "⚠ Partial"
                     : "? Unknown";
 
-    const logFiles = run.hasLogs ? STANDARD_LOG_FILES : [];
-
-    const inlineLogs = logFiles
-        .filter((f) => INLINE_REPORT_FILES.has(f))
-        .sort((a, b) => {
-            const ai = INLINE_REPORT_ORDER.indexOf(a);
-            const bi = INLINE_REPORT_ORDER.indexOf(b);
-            return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
-        });
-    const buttonLogs = [...logFiles.filter((f) => !INLINE_REPORT_FILES.has(f)), ...(run.slurmLogs ?? [])];
+    const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
     const hasLogs = buttonLogs.length > 0;
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
@@ -2442,8 +2474,8 @@ function renderFlatRunEntry(run) {
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
-    ${hasLogs ? renderLogSection(run.path, buttonLogs) : ""}
-    ${hasInline ? renderReportSection(run.path, inlineLogs) : ""}
+    ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
+    ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
 }
 
@@ -2556,12 +2588,7 @@ function initModal() {
     document.getElementById("runs").addEventListener("click", (evt) => {
         const btn = evt.target.closest(".log-link");
         if (!btn) return;
-        openLogModal(
-            btn.dataset.logPath,
-            btn.dataset.logLabel,
-            btn.dataset.logHtml === "true",
-            btn.dataset.logExternal
-        );
+        openLogModal(btn.dataset.logUrl, btn.dataset.logLabel, btn.dataset.logHtml === "true", btn.dataset.logExternal);
     });
 
     const runsEl = document.getElementById("runs");
@@ -2612,7 +2639,7 @@ function setModalTitle(title) {
     }
 }
 
-function openLogModal(filePath, label, isHtml, externalHref) {
+function openLogModal(fileUrl, label, isHtml, externalHref) {
     const overlay = document.getElementById("log-modal");
     const bodyEl = document.getElementById("log-modal-body");
 
@@ -2624,7 +2651,7 @@ function openLogModal(filePath, label, isHtml, externalHref) {
     document.body.style.overflow = "hidden";
 
     bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
-    fetchLogText(filePath).then((content) => {
+    fetchLogText(fileUrl).then((content) => {
         if (_modalGeneration !== generation) return;
         if (content === null) {
             bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
@@ -2632,7 +2659,8 @@ function openLogModal(filePath, label, isHtml, externalHref) {
         }
         bodyEl.innerHTML = "";
         if (isHtml) {
-            // Use srcdoc to bypass X-Frame-Options restrictions on raw.githubusercontent.com
+            // Use srcdoc so the report renders inline regardless of the source
+            // host's framing headers.
             const iframe = document.createElement("iframe");
             iframe.className = "log-modal-iframe";
             iframe.setAttribute("sandbox", "allow-scripts");
@@ -2688,9 +2716,10 @@ function openVizModal(url, label) {
     bodyEl.appendChild(img);
 }
 
-async function fetchLogText(filePath) {
+async function fetchLogText(fileUrl) {
+    if (!fileUrl) return null;
     try {
-        const resp = await cachedFetch(cdnUrl(filePath));
+        const resp = await cachedFetch(fileUrl);
         if (!resp.ok) return null;
         return resp.text();
     } catch {
@@ -2700,7 +2729,7 @@ async function fetchLogText(filePath) {
 
 /* Fetch and inject srcdoc for all inline report iframes in the page */
 function initInlineHtmlFrames() {
-    const frames = Array.from(document.querySelectorAll("iframe[data-srcdoc-path]"));
+    const frames = Array.from(document.querySelectorAll("iframe[data-srcdoc-url]"));
     const frameSet = new Set(frames);
 
     // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
@@ -2746,11 +2775,11 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
     // whose content is already available, and request a fresh height measurement from
     // frames that are already loaded.
     document.querySelectorAll("details").forEach((details) => {
-        if (!details.querySelector("iframe[data-srcdoc-path]")) return;
+        if (!details.querySelector("iframe[data-srcdoc-url]")) return;
         details.addEventListener("toggle", () => {
             if (!details.open) return;
             requestAnimationFrame(() => {
-                details.querySelectorAll("iframe[data-srcdoc-path]").forEach((iframe) => {
+                details.querySelectorAll("iframe[data-srcdoc-url]").forEach((iframe) => {
                     if (injectedFrames.has(iframe)) {
                         if (iframe.contentWindow) {
                             // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
@@ -2777,14 +2806,14 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
 
     Promise.all(
         frames.map(async (iframe) => {
-            const content = await fetchLogText(iframe.dataset.srcdocPath);
+            const content = await fetchLogText(iframe.dataset.srcdocUrl);
             const html =
                 content !== null
                     ? content
                     : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
             // Insert light-mode override and height-reporter into the document.
             // Prefer inserting the style in <head> and the script before </body>.
-            const isTimeline = iframe.dataset.srcdocPath.endsWith("timeline.html");
+            const isTimeline = iframe.dataset.srcdocName === "timeline.html";
             const styleToInject = isTimeline ? timelineLightStyle : lightStyle;
             const lcHtml = html.toLowerCase();
             const headClose = lcHtml.indexOf("</head>");
@@ -3318,19 +3347,19 @@ async function loadQueueData() {
             return;
         }
 
-        // Fetch trace.txt, dataset_description.json and DANDI asset IDs for all runs in parallel.
-        // Skip trace/dataset fetching for queued runs (no logs yet).
-        // Fetch all SLURM logs at once (single git-trees API call) to avoid per-run rate limits.
-        const slurmLogsByRun = await fetchAllSlurmLogs();
+        // Fetch trace.txt and dataset_description.json content (from S3 blobs) and
+        // DANDI asset IDs for all runs in parallel. Skip trace/dataset fetching for
+        // queued runs (no logs yet). Visualization images and the log-file listing
+        // are derived synchronously from each entry's output_paths map.
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, dandiResult, vizData] = await Promise.all([
-                    fetchIfLogs(run.hasLogs, () => fetchTraceText(run.path)),
-                    fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run.path)),
+                const [text, datasetDesc, dandiResult] = await Promise.all([
+                    fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
+                    fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run)),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
-                    run.hasOutput ? fetchVisualizationData(run.path) : Promise.resolve(null),
                 ]);
+                const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
                 const inSourcedata = dandiResult?.inSourcedata ?? false;
@@ -3361,7 +3390,7 @@ async function loadQueueData() {
                     vizData,
                     status,
                     failureStep,
-                    slurmLogs: slurmLogsByRun.get(run.path) ?? [],
+                    logFiles: runLogFiles(run),
                 };
             })
         );
@@ -3497,7 +3526,6 @@ if (typeof module !== "undefined" && module.exports) {
         clearQueueStateCache,
         fetchQueueState,
         fetchSlurmLogs,
-        fetchAllSlurmLogs,
         fetchVisualizationData,
         initModal,
         initLayoutToggle,
