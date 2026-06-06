@@ -843,6 +843,34 @@ details[open] > .run-section-title::before {
     text-overflow: ellipsis;
 }
 
+/* Interactive Kachery/Figurl view links (visualization_output.json) */
+.viz-kachery-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+.viz-kachery-link {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.82em;
+    padding: 4px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-bg);
+    color: var(--color-accent);
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+.viz-kachery-link:hover {
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+}
+/* When a recording has only interactive links (no image grid above them) */
+.viz-grid + .viz-kachery-links {
+    margin-top: 12px;
+}
+
 .viz-modal-img {
     display: block;
     max-width: 100%;
