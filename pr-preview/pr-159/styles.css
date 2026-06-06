@@ -1509,7 +1509,7 @@ a.prov-hash-link:hover {
 }
 
 .filter-input {
-    min-width: 132px;
+    min-width: 144px;
     border: 1px solid var(--color-border);
     background: var(--color-surface);
     color: var(--color-text);
