@@ -503,29 +503,70 @@ a.qp-asset-link:hover {
     font-style: italic;
 }
 .qp-info {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 13px;
-    height: 13px;
-    margin-left: 4px;
+    width: 14px;
+    height: 14px;
+    margin-left: 5px;
     border-radius: 50%;
     border: 1px solid var(--color-border);
     color: var(--color-text-secondary);
-    font-size: 9px;
-    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 10px;
+    font-style: normal;
     font-weight: 700;
     line-height: 1;
+    text-transform: none;
+    letter-spacing: normal;
     cursor: help;
     vertical-align: middle;
     user-select: none;
     flex-shrink: 0;
 }
 .qp-info:hover,
-.qp-info:focus {
+.qp-info:focus,
+.qp-info:focus-visible {
     color: var(--color-accent);
     border-color: var(--color-accent);
     outline: none;
+}
+.qp-info::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 7px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    width: max-content;
+    max-width: 280px;
+    white-space: normal;
+    text-align: left;
+    text-transform: none;
+    letter-spacing: normal;
+    font-family: var(--font-main);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--color-bg);
+    background: var(--color-text);
+    padding: 6px 9px;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+        opacity 0.12s ease,
+        visibility 0.12s ease;
+}
+.qp-info:hover::after,
+.qp-info:focus::after,
+.qp-info:focus-visible::after {
+    opacity: 1;
+    visibility: visible;
 }
 
 /* ─── Summary stats ─────────────────────────────────────────── */
