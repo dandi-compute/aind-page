@@ -1328,6 +1328,96 @@ details[open] > .params-summary::before {
     color: var(--color-failed);
 }
 
+/* ─── Provenance (dataset_description.json) ─────────────────── */
+.prov-body {
+    padding: 6px 20px 16px;
+}
+
+.prov-meta {
+    margin: 0;
+    display: grid;
+    gap: 5px;
+}
+.prov-row {
+    display: flex;
+    gap: 12px;
+    font-size: 0.85em;
+}
+.prov-row dt {
+    flex-shrink: 0;
+    min-width: 140px;
+    color: var(--color-text-secondary);
+}
+.prov-row dd {
+    margin: 0;
+    color: var(--color-text);
+    word-break: break-word;
+}
+
+.prov-group {
+    margin-top: 14px;
+}
+.prov-group-title {
+    font-size: 0.8em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    margin-bottom: 8px;
+}
+
+.prov-cards {
+    display: grid;
+    gap: 8px;
+}
+.prov-card {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+}
+.prov-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.prov-name {
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--color-text);
+}
+a.prov-name {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+a.prov-name:hover {
+    text-decoration: underline;
+}
+.prov-hash {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.78em;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--color-text-secondary);
+    word-break: break-all;
+}
+.prov-card-desc {
+    font-size: 0.82em;
+    line-height: 1.45;
+    color: var(--color-text-secondary);
+    margin: 6px 0 0;
+}
+.prov-card-meta {
+    font-size: 0.78em;
+    color: var(--color-text-secondary);
+    margin: 5px 0 0;
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    word-break: break-word;
+}
+
 .filter-banner {
     display: flex;
     flex-direction: column;
