@@ -1518,6 +1518,9 @@ a.prov-hash-link:hover {
     font: inherit;
     line-height: 1.2;
 }
+.filter-input[name="assetSize"] {
+    min-width: 190px;
+}
 
 .filter-input:focus {
     outline: 1px solid var(--color-accent);
