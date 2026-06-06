@@ -502,42 +502,24 @@ a.qp-asset-link:hover {
     color: var(--color-text-secondary);
     font-style: italic;
 }
-.qp-info {
+/* Hover tooltips on terms (driven by data-tip) */
+.queue-priorities [data-tip] {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    margin-left: 5px;
-    border-radius: 50%;
-    border: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 10px;
-    font-style: normal;
-    font-weight: 700;
-    line-height: 1;
-    text-transform: none;
-    letter-spacing: normal;
     cursor: help;
-    vertical-align: middle;
-    user-select: none;
-    flex-shrink: 0;
+    text-decoration: underline dotted var(--color-border);
+    text-underline-offset: 3px;
 }
-.qp-info:hover,
-.qp-info:focus,
-.qp-info:focus-visible {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
+.queue-priorities [data-tip]:hover,
+.queue-priorities [data-tip]:focus,
+.queue-priorities [data-tip]:focus-visible {
     outline: none;
+    text-decoration-color: var(--color-accent);
 }
-.qp-info::after {
+.queue-priorities [data-tip]::after {
     content: attr(data-tip);
     position: absolute;
-    top: calc(100% + 7px);
-    left: 50%;
-    transform: translateX(-50%);
+    bottom: calc(100% + 7px);
+    left: 0;
     z-index: 60;
     width: max-content;
     max-width: 280px;
@@ -562,9 +544,9 @@ a.qp-asset-link:hover {
         opacity 0.12s ease,
         visibility 0.12s ease;
 }
-.qp-info:hover::after,
-.qp-info:focus::after,
-.qp-info:focus-visible::after {
+.queue-priorities [data-tip]:hover::after,
+.queue-priorities [data-tip]:focus::after,
+.queue-priorities [data-tip]:focus-visible::after {
     opacity: 1;
     visibility: visible;
 }
