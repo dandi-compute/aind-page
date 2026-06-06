@@ -1133,14 +1133,10 @@ function renderSummary(runs) {
                 <span class="stat-value">${total}</span>
                 <span class="stat-label">Total Runs</span>
             </div>
-            ${
-                running
-                    ? `<div class="stat-item stat-running">
+            <div class="stat-item stat-running">
                 <span class="stat-value">${running}</span>
                 <span class="stat-label">Running</span>
-            </div>`
-                    : ""
-            }
+            </div>
             <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
                 <span class="stat-value">${success}</span>
                 <span class="stat-label">Successful</span>
