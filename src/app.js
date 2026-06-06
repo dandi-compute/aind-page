@@ -1330,7 +1330,7 @@ function renderQueueSettingsStrip(settings) {
     const chips = settings
         .map(
             (s) =>
-                `<span class="qp-setting"><span class="qp-setting-key">${e(prettyKey(s.key))}</span><span class="qp-setting-val">${e(String(s.value))}</span></span>`
+                `<span class="qp-setting"><span class="qp-setting-key">${e(prettyKey(s.key))}${queueFieldInfo(s.key)}</span><span class="qp-setting-val">${e(String(s.value))}</span></span>`
         )
         .join("");
     return `<div class="qp-settings">${chips}</div>`;
@@ -1357,6 +1357,28 @@ function renderQueueConfigGeneric(config) {
     return `<div class="qp-generic">${rows}</div>`;
 }
 
+// Field descriptions from the queue_config LinkML schema (dandi-compute/code),
+// surfaced as hover tooltips via small info icons.
+const QUEUE_CONFIG_DESCRIPTION =
+    "A configuration structure for DANDI Compute pipelines, including version priorities, parameter priorities, attempt limits, and asset overrides.";
+const QUEUE_FIELD_DESCRIPTIONS = {
+    version_priority: "An ordered list of pipeline versions, in priority order (highest priority first).",
+    params_priority: "An ordered list of parameter set names, in priority order (highest priority first).",
+    max_attempts_per_asset: "The maximum number of times the pipeline should be retried on a single asset.",
+    asset_overrides:
+        "A mapping of asset identifiers (e.g. UUIDs) to an override value. A null value means there is no limit on the number of failures for that asset.",
+    max_fail_per_dandiset: "The maximum number of failures permitted per dandiset before the pipeline is considered failed.",
+};
+const QUEUE_OVERRIDE_NULL_DESCRIPTION = "No limit on the number of failures for this asset.";
+
+function infoIcon(description) {
+    if (!description) return "";
+    return ` <span class="qp-info" tabindex="0" role="img" aria-label="${e(description)}" title="${e(description)}">i</span>`;
+}
+function queueFieldInfo(field) {
+    return infoIcon(QUEUE_FIELD_DESCRIPTIONS[field]);
+}
+
 // Ordered priority chips (rank + value), optionally linking each value into the
 // dashboard filter named by linkKey (e.g. "pipelineVersion" → ?version=…).
 function renderQueuePriorityChips(values, linkKey) {
@@ -1374,8 +1396,8 @@ function renderQueuePriorityChips(values, linkKey) {
     return `<ol class="qp-chips">${chips}</ol>`;
 }
 
-function renderQueuePriorityRow(label, values, linkKey) {
-    return `<div class="qp-row"><span class="qp-row-label">${e(label)}</span>${renderQueuePriorityChips(values, linkKey)}</div>`;
+function renderQueuePriorityRow(label, values, linkKey, fieldKey) {
+    return `<div class="qp-row"><span class="qp-row-label">${e(label)}${queueFieldInfo(fieldKey)}</span>${renderQueuePriorityChips(values, linkKey)}</div>`;
 }
 
 const QUEUE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1393,13 +1415,13 @@ function renderQueueAssetOverrides(overrides) {
                 : `<code class="qp-asset" title="${e(assetId)}">${e(idShort)}</code>`;
             const valHtml =
                 val === null || val === undefined
-                    ? `<span class="qp-override-val qp-override-null">null</span>`
+                    ? `<span class="qp-override-val qp-override-unlimited" title="${e(QUEUE_OVERRIDE_NULL_DESCRIPTION)}">no failure limit</span>`
                     : `<span class="qp-override-val">${e(typeof val === "object" ? JSON.stringify(val) : String(val))}</span>`;
             return `<div class="qp-override-row">${idHtml}<span class="qp-override-arrow">→</span>${valHtml}</div>`;
         })
         .join("");
     return `<details class="qp-overrides">
-        <summary class="qp-overrides-summary">Asset overrides <span class="count-badge">${entries.length}</span></summary>
+        <summary class="qp-overrides-summary">Asset overrides${queueFieldInfo("asset_overrides")} <span class="count-badge">${entries.length}</span></summary>
         <div class="qp-overrides-body">${rows}</div>
     </details>`;
 }
@@ -1416,8 +1438,8 @@ function renderQueuePipelines(pipelines) {
                 return `<div class="qp-pipeline"><div class="qp-pipeline-name">${e(name)}</div>${renderQueueConfigGeneric(p)}</div>`;
             }
             const rows = [];
-            if ("version_priority" in p) rows.push(renderQueuePriorityRow("Version priority", p.version_priority, "pipelineVersion"));
-            if ("params_priority" in p) rows.push(renderQueuePriorityRow("Params priority", p.params_priority, "paramsType"));
+            if ("version_priority" in p) rows.push(renderQueuePriorityRow("Version priority", p.version_priority, "pipelineVersion", "version_priority"));
+            if ("params_priority" in p) rows.push(renderQueuePriorityRow("Params priority", p.params_priority, "paramsType", "params_priority"));
             const settings = Object.entries(p)
                 .filter(([k, v]) => !known.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
                 .map(([key, value]) => ({ key, value }));
@@ -1471,7 +1493,7 @@ function renderQueuePriorities(config) {
 
     return `
 <div class="queue-priorities-header">
-    <span class="queue-priorities-title">Queue priorities</span>
+    <span class="queue-priorities-title">Queue priorities${infoIcon(QUEUE_CONFIG_DESCRIPTION)}</span>
     ${source}
 </div>
 ${body}`;
