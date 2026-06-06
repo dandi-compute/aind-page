@@ -1392,9 +1392,17 @@ function canonicalizeCodeUrl(url) {
 
 function resolveCodeUrl(codeUrl, version) {
     codeUrl = canonicalizeCodeUrl(codeUrl);
-    if (!codeUrl || !version) return codeUrl ?? null;
+    if (!codeUrl) return null;
+
+    // For the AIND ephys pipeline, a /tree/v<semver> CodeURL should link to the
+    // matching GitHub release page; the upstream release tags omit the leading "v"
+    // (e.g. /tree/v1.2.2 → /releases/tag/1.2.2).
+    const releaseMatch = codeUrl.match(/^(https?:\/\/github\.com\/[^/]+\/aind-ephys-pipeline)\/tree\/v(.+)$/i);
+    if (releaseMatch) return `${releaseMatch[1]}/releases/tag/${releaseMatch[2]}`;
+
+    if (!version) return codeUrl;
     // If the version looks like a bare commit hash and the CodeURL doesn't already
-    // point to a specific commit/tree/tag, append /commit/<hash> so the link goes
+    // point to a specific commit/tree/tag, append /tree/<hash> so the link goes
     // directly to the commit rather than the repository root.
     const isCommitHash = /^[0-9a-f]{6,40}$/i.test(version);
     const alreadySpecific = /\/(commit|tree|blob|releases\/tag)\//i.test(codeUrl);
