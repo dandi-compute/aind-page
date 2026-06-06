@@ -112,12 +112,12 @@ describe("app integration behavior", () => {
         expect(summaryHtml).toContain("Running");
     });
 
-    it("omits running counter from summary when no running runs are present", () => {
+    it("shows running counter at 0 when no running runs are present", () => {
         renderSummary([{ status: "success", assetSizeBytes: 10 }, { status: "queued" }]);
 
         const summaryHtml = document.getElementById("summary").innerHTML;
-        expect(summaryHtml).not.toContain("stat-running");
-        expect(summaryHtml).not.toContain("Running");
+        expect(summaryHtml).toContain('class="stat-item stat-running"');
+        expect(summaryHtml).toContain('<span class="stat-value">0</span>');
     });
 
     it("formats large byte counts with appropriate decimal units", () => {
