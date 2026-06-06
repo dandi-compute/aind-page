@@ -254,6 +254,255 @@ h1 {
     margin: 0 0 8px;
 }
 
+/* ─── Queue priorities (top display) ────────────────────────── */
+.queue-priorities {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 12px 16px 14px;
+    margin-bottom: 16px;
+}
+.queue-priorities-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.queue-priorities-title {
+    font-size: 0.82em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+}
+.qp-source {
+    font-size: 0.78em;
+    color: var(--color-accent);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.qp-source:hover {
+    text-decoration: underline;
+}
+.qp-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.qp-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 5px 10px 5px 5px;
+}
+.qp-rank {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 10px;
+    background: var(--color-accent-subtle);
+    color: var(--color-accent);
+    font-size: 0.72em;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+.qp-item-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.25;
+}
+.qp-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.qp-label {
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--color-text);
+}
+a.qp-label-link {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+a.qp-label-link:hover {
+    text-decoration: underline;
+}
+.qp-priority {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.72em;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 0 5px;
+}
+.qp-item-meta {
+    font-size: 0.74em;
+    color: var(--color-text-secondary);
+}
+.qp-settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border);
+}
+.qp-setting {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 0.8em;
+}
+.qp-setting-key {
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 0.88em;
+}
+.qp-setting-val {
+    color: var(--color-text);
+    font-weight: 600;
+}
+.qp-mono {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-weight: 400;
+    word-break: break-all;
+}
+.qp-generic {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.qp-generic-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+/* Pipelines schema */
+.qp-pipeline + .qp-pipeline {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border);
+}
+.qp-pipeline-name {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 8px;
+}
+.qp-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.qp-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.qp-row-label {
+    font-size: 0.74em;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-text-secondary);
+    min-width: 110px;
+}
+.qp-chips {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.qp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 3px 9px 3px 4px;
+    font-size: 0.85em;
+}
+.qp-chip-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-weight: 600;
+}
+.qp-chip-link:hover {
+    text-decoration: underline;
+}
+.qp-chip-label {
+    color: var(--color-text);
+    font-weight: 600;
+}
+.qp-empty {
+    color: var(--color-text-secondary);
+}
+.qp-overrides {
+    margin-top: 10px;
+}
+.qp-overrides-summary {
+    cursor: pointer;
+    font-size: 0.78em;
+    color: var(--color-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.qp-overrides-summary:hover {
+    color: var(--color-text);
+}
+.qp-overrides-body {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.qp-override-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82em;
+}
+.qp-asset {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.92em;
+}
+a.qp-asset-link {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+a.qp-asset-link:hover {
+    text-decoration: underline;
+}
+.qp-override-arrow {
+    color: var(--color-text-secondary);
+}
+.qp-override-val {
+    color: var(--color-text);
+}
+.qp-override-null {
+    color: var(--color-text-secondary);
+    font-style: italic;
+}
+
 /* ─── Summary stats ─────────────────────────────────────────── */
 .summary-stats {
     display: flex;
