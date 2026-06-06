@@ -498,9 +498,34 @@ a.qp-asset-link:hover {
 .qp-override-val {
     color: var(--color-text);
 }
-.qp-override-null {
+.qp-override-unlimited {
     color: var(--color-text-secondary);
     font-style: italic;
+}
+.qp-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    margin-left: 4px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+    font-size: 9px;
+    font-style: italic;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    vertical-align: middle;
+    user-select: none;
+    flex-shrink: 0;
+}
+.qp-info:hover,
+.qp-info:focus {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    outline: none;
 }
 
 /* ─── Summary stats ─────────────────────────────────────────── */
