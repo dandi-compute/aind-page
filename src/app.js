@@ -1439,7 +1439,7 @@ function renderQueuePipelines(pipelines) {
             }
             const rows = [];
             if ("version_priority" in p) rows.push(renderQueuePriorityRow("Version priority", p.version_priority, "pipelineVersion", "version_priority"));
-            if ("params_priority" in p) rows.push(renderQueuePriorityRow("Params priority", p.params_priority, "paramsType", "params_priority"));
+            if ("params_priority" in p) rows.push(renderQueuePriorityRow("Params priority", p.params_priority, null, "params_priority"));
             const settings = Object.entries(p)
                 .filter(([k, v]) => !known.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
                 .map(([key, value]) => ({ key, value }));
