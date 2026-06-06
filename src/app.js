@@ -1599,20 +1599,22 @@ function qcResolveReference(reference, vizData) {
 
 // Partition QC plots out of the visualization set: resolve each metric's
 // referenced image against the full viz data, attach it to the metric as
-// `.plot`, and return a filtered vizData with those images removed (so each plot
-// lives in exactly one place — the QC card). Empty recording groups are dropped;
-// returns null if nothing remains for the visualization section.
+// `.plot`, and return a filtered vizData with those plots removed. Removal is by
+// file name, so a duplicate copy of a QC plot living elsewhere in the gallery
+// (e.g. a top-level "summary" drift_map alongside the per-probe one) is dropped
+// too — each plot then appears only in its QC card. Empty recording groups are
+// dropped; returns null if nothing remains for the visualization section.
 function partitionQcPlots(qc, vizData) {
     const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
-    const claimed = new Set();
+    const claimedNames = new Set();
     for (const metric of metrics) {
         const img = qcResolveReference(metric?.reference, vizData);
         metric.plot = img ? { name: img.name, url: img.url } : null;
-        if (img) claimed.add(img.url);
+        if (img) claimedNames.add(img.name);
     }
-    if (!Array.isArray(vizData) || claimed.size === 0) return vizData;
+    if (!Array.isArray(vizData) || claimedNames.size === 0) return vizData;
     const filtered = vizData
-        .map((rec) => ({ name: rec.name, images: rec.images.filter((img) => !claimed.has(img.url)) }))
+        .map((rec) => ({ name: rec.name, images: rec.images.filter((img) => !claimedNames.has(img.name)) }))
         .filter((rec) => rec.images.length > 0);
     return filtered.length > 0 ? filtered : null;
 }
