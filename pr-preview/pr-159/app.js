@@ -214,7 +214,7 @@ function applyFilter(runs, filter) {
         if (!matchesResolvedOrRawValue(filter.configType, runConfigType(r), r.configHash)) return false;
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
         if (filter.dandiCodebaseVersion && r.codebase !== filter.dandiCodebaseVersion) return false;
-        if (filter.assetSize && runAssetSizeBucket(r) !== filter.assetSize) return false;
+        if (filter.assetSize && !matchesAssetSizeExpr(r, filter.assetSize)) return false;
         if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
@@ -275,21 +275,58 @@ function runByteCount(run) {
     return normalizeByteCount(run?.assetSizeBytes);
 }
 
-// Asset-size filter buckets (decimal/SI sizes, matching formatByteCount). The
-// label is used both as the displayed option and the stored filter value.
-const ASSET_SIZE_BUCKETS = [
-    { label: "< 100 MB", test: (b) => b < 1e8 },
-    { label: "100 MB – 1 GB", test: (b) => b >= 1e8 && b < 1e9 },
-    { label: "1 – 10 GB", test: (b) => b >= 1e9 && b < 1e10 },
-    { label: "10 – 100 GB", test: (b) => b >= 1e10 && b < 1e11 },
-    { label: "≥ 100 GB", test: (b) => b >= 1e11 },
-];
+// Asset-size filter expression. The user types one or more comparison clauses
+// (combined with AND), comma-separated, with values in GB (decimal, 1 GB = 1e9
+// bytes). The "GB" unit and surrounding whitespace are optional, so all of
+// "> 10", ">10 GB", and ">50 GB, <100 GB" are accepted. Operators: > >= < <= =.
+const ASSET_SIZE_GB = 1e9;
+const ASSET_SIZE_SUGGESTIONS = ["> 10 GB", "> 50 GB", "< 10 GB", "> 50 GB, < 100 GB", ">= 100 GB"];
+const ASSET_SIZE_CLAUSE_PATTERN = /^(>=|<=|==|=|>|<)\s*([0-9]*\.?[0-9]+)\s*(?:gb?)?$/i;
 
-// Map a run's asset size to its bucket label (or null when size is unknown).
-function runAssetSizeBucket(run) {
+// Parse an expression into [{ op, bytes }] clauses, or null when empty/invalid
+// (any malformed clause invalidates the whole expression).
+function parseAssetSizeExpr(expr) {
+    if (!expr) return null;
+    const clauses = String(expr)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (clauses.length === 0) return null;
+    const parsed = [];
+    for (const clause of clauses) {
+        const m = clause.match(ASSET_SIZE_CLAUSE_PATTERN);
+        if (!m) return null;
+        const gb = parseFloat(m[2]);
+        if (!Number.isFinite(gb)) return null;
+        parsed.push({ op: m[1] === "==" ? "=" : m[1], bytes: gb * ASSET_SIZE_GB });
+    }
+    return parsed;
+}
+
+// Whether a run's asset size satisfies the expression. An empty/invalid
+// expression imposes no constraint; a run with unknown size never matches a
+// (valid) size filter.
+function matchesAssetSizeExpr(run, expr) {
+    const clauses = parseAssetSizeExpr(expr);
+    if (!clauses) return true;
     const bytes = runByteCount(run);
-    if (bytes === null) return null;
-    return ASSET_SIZE_BUCKETS.find((bucket) => bucket.test(bytes))?.label ?? null;
+    if (bytes === null) return false;
+    return clauses.every(({ op, bytes: threshold }) => {
+        switch (op) {
+            case ">":
+                return bytes > threshold;
+            case ">=":
+                return bytes >= threshold;
+            case "<":
+                return bytes < threshold;
+            case "<=":
+                return bytes <= threshold;
+            case "=":
+                return Math.round(bytes / ASSET_SIZE_GB) === Math.round(threshold / ASSET_SIZE_GB);
+            default:
+                return true;
+        }
+    });
 }
 
 // Build the params object for narrowUrl from the full current filter, omitting
@@ -332,17 +369,18 @@ function formatByteCount(value) {
     return `${DATA_SIZE_FORMATTER.format(scaledValue)} ${DECIMAL_DATA_SIZE_UNITS[unitIndex]}`;
 }
 
-function renderFilterInput(name, label, value, suggestions, clearHref = null) {
+function renderFilterInput(name, label, value, suggestions, clearHref = null, placeholder = "") {
     const listId = `filter-options-${name}`;
     const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
     const clearBtn = clearHref
         ? `<a class="filter-input-clear${value ? " filter-input-clear-active" : ""}" href="${e(clearHref)}" title="Clear ${label} filter" aria-label="Clear ${label} filter">×</a>`
         : "";
+    const placeholderAttr = placeholder ? ` placeholder="${e(placeholder)}"` : "";
     return `
 <label class="filter-input-wrap">
     <span class="filter-input-label">${label}</span>
     <span class="filter-input-row">
-        <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off">
+        <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off"${placeholderAttr}>
         ${clearBtn}
     </span>
     <datalist id="${listId}">${options}</datalist>
@@ -449,9 +487,6 @@ function renderFilterBanner(filter, availableRuns = []) {
     const configTypes = uniqueSortedValues(availableRuns.map(runConfigType));
     const dandiCodebaseHashes = uniqueSortedValues(availableRuns.map(runDandiCodebaseHash));
     const dandiCodebaseVersions = uniqueSortedValues(availableRuns.map((r) => r.codebase));
-    // Preserve natural (ascending) bucket order rather than alphabetical.
-    const presentSizeBuckets = new Set(availableRuns.map(runAssetSizeBucket).filter(Boolean));
-    const assetSizes = ASSET_SIZE_BUCKETS.map((b) => b.label).filter((label) => presentSizeBuckets.has(label));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
         ...availableRuns
@@ -504,7 +539,7 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
         ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
         ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
-        ${renderFilterInput("assetSize", "Asset Size", filter.assetSize, assetSizes, narrowUrl(filterNarrowParams(filter, ["assetSize"])))}
+        ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <div class="filter-actions">
             <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
