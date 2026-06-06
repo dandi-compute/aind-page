@@ -1253,15 +1253,29 @@ details[open] > .params-summary::before {
     color: var(--color-text-secondary);
 }
 
-.qc-ref-link {
-    margin-left: auto;
-    font-size: 0.82em;
-    color: var(--color-accent);
-    text-decoration: none;
-    white-space: nowrap;
+.qc-plot {
+    display: block;
+    margin-top: 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--color-surface);
+    transition: border-color 0.15s;
 }
-.qc-ref-link:hover {
-    text-decoration: underline;
+.qc-plot:hover {
+    border-color: var(--color-accent);
+}
+
+.qc-plot-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    object-fit: contain;
+    transition: opacity 0.2s;
+}
+.qc-plot:hover .qc-plot-img {
+    opacity: 0.92;
 }
 
 .qc-metric-desc {
