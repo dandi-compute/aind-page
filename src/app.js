@@ -280,7 +280,7 @@ function runByteCount(run) {
 // bytes). The "GB" unit and surrounding whitespace are optional, so all of
 // "> 10", ">10 GB", and ">50 GB, <100 GB" are accepted. Operators: > >= < <= =.
 const ASSET_SIZE_GB = 1e9;
-const ASSET_SIZE_SUGGESTIONS = ["> 10 GB", "> 50 GB", "< 10 GB", "> 50 GB, < 100 GB", ">= 100 GB"];
+const ASSET_SIZE_SUGGESTIONS = ["> 10", "> 50", "< 10", "> 50, < 100", ">= 100"];
 const ASSET_SIZE_CLAUSE_PATTERN = /^(>=|<=|==|=|>|<)\s*([0-9]*\.?[0-9]+)\s*(?:gb?)?$/i;
 
 // Parse an expression into [{ op, bytes }] clauses, or null when empty/invalid
@@ -539,7 +539,7 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
         ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
         ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
-        ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
+        ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >50, <100")}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <div class="filter-actions">
             <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
