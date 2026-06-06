@@ -91,7 +91,7 @@ async function loadFixtureRegistries() {
     }
 }
 
-function loadRenderQueuePriorities() {
+const renderQueuePriorities = (() => {
     const context = {
         console,
         URLSearchParams,
@@ -131,7 +131,7 @@ function loadRenderQueuePriorities() {
     vm.createContext(context);
     vm.runInContext(APP_SOURCE, context);
     return context.renderQueuePriorities;
-}
+})();
 
 beforeEach(() => {
     document.body.innerHTML = "";
@@ -1281,7 +1281,6 @@ describe("renderVisualizationSection", () => {
     });
 
     it("renders queue priorities with version links and plain params priorities", () => {
-        const renderQueuePriorities = loadRenderQueuePriorities();
         const html = renderQueuePriorities({
             pipelines: {
                 ephys: {
