@@ -1210,6 +1210,13 @@ details[open] > .params-summary::before {
     font-size: 0.9em;
     color: var(--color-text-secondary);
 }
+a.src-version-link {
+    text-decoration: none;
+}
+a.src-version-link:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
 
 /* ─── Quality control ───────────────────────────────────────── */
 .qc-status-summary {
@@ -1403,6 +1410,14 @@ a.prov-name:hover {
     padding: 1px 6px;
     color: var(--color-text-secondary);
     word-break: break-all;
+}
+a.prov-hash-link {
+    text-decoration: none;
+    transition: border-color 0.15s, color 0.15s;
+}
+a.prov-hash-link:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
 }
 .prov-card-desc {
     font-size: 0.82em;
