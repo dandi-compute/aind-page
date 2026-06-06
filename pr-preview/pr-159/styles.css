@@ -190,7 +190,7 @@ body {
 
 /* ─── Page layout ───────────────────────────────────────────── */
 .page-content {
-    max-width: 1100px;
+    max-width: 1210px;
     margin: 0 auto;
     padding: 0 20px;
 }
@@ -621,7 +621,7 @@ details[open] > .run-section-title::before {
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     width: 100%;
-    max-width: 1500px;
+    max-width: 1650px;
     max-height: calc(100vh - 48px);
     display: flex;
     flex-direction: column;
@@ -2181,7 +2181,7 @@ a.prov-hash-link:hover {
 }
 
 .page-content.params-page {
-    max-width: 1400px;
+    max-width: 1540px;
 }
 
 .params-editor {
