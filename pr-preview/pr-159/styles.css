@@ -1483,7 +1483,7 @@ a.prov-hash-link:hover {
 .filter-banner-main {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
 }
 
@@ -1608,8 +1608,15 @@ a.prov-hash-link:hover {
     color: var(--color-text-secondary);
 }
 
+.filter-actions {
+    flex-basis: 100%;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
 .filter-clear {
-    margin-left: auto;
     color: var(--color-text-secondary);
     text-decoration: none;
     border: 1px solid var(--color-border);
