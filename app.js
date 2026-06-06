@@ -732,34 +732,14 @@ async function fetchSlurmLogs(run) {
 }
 
 async function fetchDatasetDescription(run) {
+    // dataset_description.json's blob is provided in the entry's
+    // `dataset_description_path` map (merged into the run's lookup), so resolve it
+    // straight from the S3 blob bucket like every other artifact.
     const path = run.datasetDescriptionPath ?? `${run.path}/dataset_description.json`;
-
-    // 1) Prefer the S3 blob map, in case the file's blob is tracked among the
-    //    run's output/log paths.
-    const mappedUrl = resolveBlobUrl(run, path);
-    if (mappedUrl) {
-        try {
-            const resp = await cachedFetch(mappedUrl);
-            if (resp.ok) return await resp.json();
-        } catch {
-            /* fall through to the DANDI archive lookup */
-        }
-    }
-
-    // 2) Otherwise resolve the asset by path within the 001697 derivatives
-    //    dandiset on the DANDI archive and fetch its content. dataset_description.json
-    //    is not content-addressed in the queue, so only its path is provided.
-    if (!run.datasetDescriptionPath) return null;
-    const apiBase = dandiApiBaseUrl(DERIVATIVES_DANDISET_ID);
+    const url = resolveBlobUrl(run, path);
+    if (!url) return null;
     try {
-        const listUrl = `${apiBase}/api/dandisets/${DERIVATIVES_DANDISET_ID}/versions/draft/assets/?path=${encodeURIComponent(path)}&page_size=1`;
-        const listResp = await cachedFetch(listUrl);
-        if (!listResp.ok) return null;
-        const listData = await listResp.json();
-        const asset = Array.isArray(listData.results) ? listData.results[0] : null;
-        if (!asset?.asset_id) return null;
-        const downloadUrl = `${apiBase}/api/assets/${encodeURIComponent(asset.asset_id)}/download/`;
-        const resp = await cachedFetch(downloadUrl);
+        const resp = await cachedFetch(url);
         if (!resp.ok) return null;
         return await resp.json();
     } catch {
@@ -931,13 +911,27 @@ function buildRunPath(entry) {
 // `log_paths` map are supported and merged into one object.
 function normalizeOutputPaths(entry) {
     const merged = {};
-    for (const key of ["output_paths", "log_paths"]) {
+    for (const key of ["output_paths", "log_paths", "dataset_description_path"]) {
         const map = entry?.[key];
         if (map && typeof map === "object" && !Array.isArray(map)) {
             Object.assign(merged, map);
         }
     }
     return merged;
+}
+
+// Extract the dataset_description.json repo path from an entry. Newer entries
+// provide `dataset_description_path` as a { path: blob-id } map (its blob is then
+// merged into the run's lookup by normalizeOutputPaths); older entries used a
+// bare path string.
+function datasetDescriptionPathOf(entry) {
+    const dd = entry?.dataset_description_path;
+    if (typeof dd === "string") return dd;
+    if (dd && typeof dd === "object" && !Array.isArray(dd)) {
+        const keys = Object.keys(dd);
+        return keys.length > 0 ? keys[0] : null;
+    }
+    return null;
 }
 
 // Convert raw JSONL entries from the queue state file into run objects.
@@ -962,7 +956,7 @@ function parseQueueEntries(entries) {
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
             outputPaths: normalizeOutputPaths(entry),
-            datasetDescriptionPath: entry.dataset_description_path ?? null,
+            datasetDescriptionPath: datasetDescriptionPathOf(entry),
             assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
             runDate: createdAt ?? entry.date ?? null,
@@ -1355,6 +1349,7 @@ function renderRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
     ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
@@ -1384,10 +1379,30 @@ function renderPipelineInfo(pipelineName, pipelineVersion) {
     return `<span class="pipeline-name">${displayName}</span>` + `<span class="pipeline-version">${displayVer}</span>`;
 }
 
+// Canonicalize known pipeline repo forks to their upstream organization so links
+// point at the canonical source (e.g. a CodyCBakerPhD fork of aind-ephys-pipeline
+// → AllenNeuralDynamics). Any trailing path (e.g. /tree/v1.2.2) is preserved.
+function canonicalizeCodeUrl(url) {
+    if (!url) return url;
+    return url.replace(
+        /(https?:\/\/github\.com\/)[^/]+(\/aind-ephys-pipeline)(?=$|[/?#])/i,
+        "$1AllenNeuralDynamics$2"
+    );
+}
+
 function resolveCodeUrl(codeUrl, version) {
-    if (!codeUrl || !version) return codeUrl ?? null;
+    codeUrl = canonicalizeCodeUrl(codeUrl);
+    if (!codeUrl) return null;
+
+    // For the AIND ephys pipeline, a /tree/v<semver> CodeURL should link to the
+    // matching GitHub release page; the upstream release tags omit the leading "v"
+    // (e.g. /tree/v1.2.2 → /releases/tag/1.2.2).
+    const releaseMatch = codeUrl.match(/^(https?:\/\/github\.com\/[^/]+\/aind-ephys-pipeline)\/tree\/v(.+)$/i);
+    if (releaseMatch) return `${releaseMatch[1]}/releases/tag/${releaseMatch[2]}`;
+
+    if (!version) return codeUrl;
     // If the version looks like a bare commit hash and the CodeURL doesn't already
-    // point to a specific commit/tree/tag, append /commit/<hash> so the link goes
+    // point to a specific commit/tree/tag, append /tree/<hash> so the link goes
     // directly to the commit rather than the repository root.
     const isCommitHash = /^[0-9a-f]{6,40}$/i.test(version);
     const alreadySpecific = /\/(commit|tree|blob|releases\/tag)\//i.test(codeUrl);
@@ -1395,6 +1410,30 @@ function resolveCodeUrl(codeUrl, version) {
         return codeUrl.replace(/\/+$/, "") + "/tree/" + version;
     }
     return codeUrl;
+}
+
+// Extract a full/abbreviated git commit hash from a Version string. The pipeline
+// records versions as "<tag-or-shortsha>+<full-commit-hash>" (e.g.
+// "v1.2.2+d2b6aef…"), so prefer the segment after the last "+"; also accept a
+// bare hash. Returns null when no hash-like token is present.
+function extractCommitHash(version) {
+    if (!version) return null;
+    const v = String(version);
+    const candidate = v.includes("+") ? v.slice(v.lastIndexOf("+") + 1) : v;
+    return /^[0-9a-f]{7,40}$/i.test(candidate) ? candidate : null;
+}
+
+// Build a link to a GitHub repo at a specific commit state
+// (https://github.com/<owner>/<repo>/tree/<hash>) from a CodeURL + Version.
+// Owner is canonicalized like resolveCodeUrl. Returns null when no GitHub repo or
+// commit hash can be determined.
+function resolveCommitUrl(codeUrl, version) {
+    const url = canonicalizeCodeUrl(codeUrl);
+    const hash = extractCommitHash(version);
+    if (!url || !hash) return null;
+    const repoBase = url.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+?)(?:\.git)?(?:[/?#]|$)/i);
+    if (!repoBase) return null;
+    return `${repoBase[1]}/tree/${hash}`;
 }
 
 function renderSourceVersionsSection(generatedBy) {
@@ -1405,7 +1444,12 @@ function renderSourceVersionsSection(generatedBy) {
             const rawUrl = entry.CodeURL ?? null;
             const resolvedUrl = resolveCodeUrl(rawUrl, entry.Version ?? "");
             const codeUrl = resolvedUrl ? e(resolvedUrl) : null;
-            const versionHtml = version ? `<span class="src-version">${version}</span>` : "";
+            const commitUrl = resolveCommitUrl(rawUrl, entry.Version ?? "");
+            const versionHtml = version
+                ? commitUrl
+                    ? `<a class="src-version src-version-link" href="${e(commitUrl)}" target="_blank" rel="noopener" title="Open repository at this commit">${version}</a>`
+                    : `<span class="src-version">${version}</span>`
+                : "";
             const nameHtml = codeUrl
                 ? `<a class="src-link" href="${codeUrl}" target="_blank" rel="noopener">${name}</a>`
                 : `<span class="src-name">${name}</span>`;
@@ -1418,6 +1462,127 @@ function renderSourceVersionsSection(generatedBy) {
     <span class="source-versions-label">Source versions:</span>
     <span class="source-versions-list">${items}</span>
 </div>`;
+}
+
+/* ─── Provenance (dataset_description.json) ─────────────────────
+   Surfaces the fuller content of dataset_description.json: top-level metadata,
+   each GeneratedBy pipeline step with its version hash / description / container,
+   and any SourceDatasets. Resilient to missing/extra fields.                   */
+function prettyKey(key) {
+    return String(key)
+        .replace(/_/g, " ")
+        .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/^./, (c) => c.toUpperCase());
+}
+
+function renderProvenanceGeneratedBy(entry) {
+    if (entry == null) return "";
+    if (typeof entry !== "object") return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    const name = entry.Name ?? entry.name ?? "Step";
+    const version = entry.Version ?? entry.version ?? null;
+    const rawUrl = entry.CodeURL ?? entry.codeURL ?? entry.url ?? null;
+    const codeUrl = resolveCodeUrl(rawUrl, version ?? "");
+    const description = entry.Description ?? entry.description ?? null;
+    const nameHtml = codeUrl
+        ? `<a class="prov-name src-link" href="${e(codeUrl)}" target="_blank" rel="noopener">${e(name)}</a>`
+        : `<span class="prov-name">${e(name)}</span>`;
+    const commitUrl = resolveCommitUrl(rawUrl, version ?? "");
+    const versionHtml = version
+        ? commitUrl
+            ? `<a class="prov-hash prov-hash-link" href="${e(commitUrl)}" target="_blank" rel="noopener" title="Open repository at this commit">${e(String(version))}</a>`
+            : `<code class="prov-hash">${e(String(version))}</code>`
+        : "";
+    const descHtml = description ? `<p class="prov-card-desc">${e(String(description))}</p>` : "";
+
+    // Container/image details (e.g. BIDS GeneratedBy[].Container { Type, Tag, URI }).
+    const container = entry.Container ?? entry.container ?? null;
+    let containerHtml = "";
+    if (container && typeof container === "object") {
+        const parts = Object.entries(container)
+            .filter(([, v]) => v != null && typeof v !== "object")
+            .map(([k, v]) => `${prettyKey(k)}: ${v}`);
+        if (parts.length) containerHtml = `<p class="prov-card-meta">${e(parts.join(" · "))}</p>`;
+    } else if (typeof container === "string") {
+        containerHtml = `<p class="prov-card-meta">${e(container)}</p>`;
+    }
+
+    return `<div class="prov-card">
+    <div class="prov-card-head">${nameHtml}${versionHtml}</div>
+    ${descHtml}
+    ${containerHtml}
+</div>`;
+}
+
+function renderProvenanceSource(entry) {
+    if (entry == null) return "";
+    if (typeof entry !== "object") return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    const url = entry.URL ?? entry.url ?? null;
+    const doi = entry.DOI ?? entry.doi ?? null;
+    const version = entry.Version ?? entry.version ?? null;
+    const head = url
+        ? `<a class="prov-name src-link" href="${e(url)}" target="_blank" rel="noopener">${e(url)}</a>`
+        : `<span class="prov-name">${e(url ?? doi ?? "Source")}</span>`;
+    const versionHtml = version ? `<code class="prov-hash">${e(String(version))}</code>` : "";
+    const doiHtml = doi && doi !== url ? `<p class="prov-card-meta">DOI: ${e(String(doi))}</p>` : "";
+    return `<div class="prov-card"><div class="prov-card-head">${head}${versionHtml}</div>${doiHtml}</div>`;
+}
+
+function renderProvenanceSection(desc) {
+    if (!desc || typeof desc !== "object") return "";
+
+    // 1) Top-level scalar metadata: a curated order first, then any other
+    //    primitive fields so nothing useful is hidden.
+    const preferred = ["Name", "DatasetType", "BIDSVersion", "schema_version", "schemaVersion", "License", "license"];
+    const skip = new Set(["GeneratedBy", "SourceDatasets", "describedBy", "object_type"]);
+    const metaRows = [];
+    const seen = new Set();
+    const addRow = (key) => {
+        const v = desc[key];
+        if (seen.has(key) || v == null || typeof v === "object") return;
+        seen.add(key);
+        metaRows.push([key, String(v)]);
+    };
+    for (const k of preferred) if (k in desc) addRow(k);
+    for (const k of Object.keys(desc)) if (!skip.has(k)) addRow(k);
+
+    const metaHtml = metaRows.length
+        ? `<dl class="prov-meta">${metaRows
+              .map(([k, v]) => `<div class="prov-row"><dt>${e(prettyKey(k))}</dt><dd>${e(v)}</dd></div>`)
+              .join("")}</dl>`
+        : "";
+
+    const gb = Array.isArray(desc.GeneratedBy) ? desc.GeneratedBy : [];
+    const gbHtml = gb.length
+        ? `<div class="prov-group">
+        <div class="prov-group-title">Generated by</div>
+        <div class="prov-cards">${gb.map(renderProvenanceGeneratedBy).join("")}</div>
+    </div>`
+        : "";
+
+    const sd = Array.isArray(desc.SourceDatasets) ? desc.SourceDatasets : [];
+    const sdHtml = sd.length
+        ? `<div class="prov-group">
+        <div class="prov-group-title">Source datasets</div>
+        <div class="prov-cards">${sd.map(renderProvenanceSource).join("")}</div>
+    </div>`
+        : "";
+
+    if (!metaHtml && !gbHtml && !sdHtml) return "";
+    const count = metaRows.length + gb.length + sd.length;
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Provenance
+        <span class="count-badge">${count}</span>
+    </summary>
+    <div class="prov-body">
+        ${metaHtml}
+        ${gbHtml}
+        ${sdHtml}
+    </div>
+</details>`;
 }
 
 function renderTraceSection(tasks) {
@@ -2678,6 +2843,7 @@ function renderFlatRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
     ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
@@ -3659,7 +3825,7 @@ async function loadQueueData() {
             runs.map(async (run) => {
                 const [text, datasetDesc, dandiResult, qualityControl] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
-                    run.datasetDescriptionPath || run.hasLogs ? fetchDatasetDescription(run) : Promise.resolve(null),
+                    run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
                 ]);
@@ -3694,6 +3860,7 @@ async function loadQueueData() {
                     assetId,
                     inSourcedata,
                     generatedBy,
+                    datasetDescription: datasetDesc ?? null,
                     vizData: vizForDisplay,
                     qualityControl,
                     status,
