@@ -1461,11 +1461,13 @@ function renderLogSection(run, logFiles) {
             const url = resolveBlobUrl(run, `${run.path}/logs/${fname}`);
             if (!url) return "";
             const isHtml = fname.endsWith(".html");
+            const isTsv = fname === "trace.txt";
             const label = logLabel(fname);
             return `<button class="log-link"
             data-log-url="${e(url)}"
             data-log-label="${e(label)}"
             data-log-html="${isHtml}"
+            data-log-table="${isTsv}"
             data-log-external="${e(url)}">${e(label)}</button>`;
         })
         .filter(Boolean)
@@ -2849,7 +2851,8 @@ function initModal() {
             btn.dataset.logUrl,
             btn.dataset.logLabel,
             btn.dataset.logHtml === "true",
-            btn.dataset.logExternal
+            btn.dataset.logExternal,
+            btn.dataset.logTable === "true"
         );
     });
 
@@ -2901,7 +2904,7 @@ function setModalTitle(title) {
     }
 }
 
-function openLogModal(fileUrl, label, isHtml, externalHref) {
+function openLogModal(fileUrl, label, isHtml, externalHref, asTable) {
     const overlay = document.getElementById("log-modal");
     const bodyEl = document.getElementById("log-modal-body");
 
@@ -2935,6 +2938,18 @@ function openLogModal(fileUrl, label, isHtml, externalHref) {
             iframe.setAttribute("title", label);
             iframe.srcdoc = content;
             bodyEl.appendChild(iframe);
+        } else if (asTable) {
+            // Render tab-separated content (e.g. Nextflow trace.txt) as a table,
+            // falling back to plain text if it doesn't parse into rows.
+            const tableHtml = tsvToTableHtml(content);
+            if (tableHtml) {
+                bodyEl.innerHTML = tableHtml;
+            } else {
+                const pre = document.createElement("pre");
+                pre.className = "log-modal-text";
+                pre.textContent = content;
+                bodyEl.appendChild(pre);
+            }
         } else {
             const pre = document.createElement("pre");
             pre.className = "log-modal-text";
@@ -2942,6 +2957,23 @@ function openLogModal(fileUrl, label, isHtml, externalHref) {
             bodyEl.appendChild(pre);
         }
     });
+}
+
+// Convert tab-separated text into a themed table. Returns null when there isn't
+// at least a header plus one data row.
+function tsvToTableHtml(text) {
+    const rows = String(text)
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => line.split("\t"));
+    if (rows.length < 2) return null;
+    const [header, ...body] = rows;
+    const thead = `<thead><tr>${header.map((c) => `<th>${e(c)}</th>`).join("")}</tr></thead>`;
+    const tbody = `<tbody>${body
+        .map((cells) => `<tr>${cells.map((c) => `<td>${e(c)}</td>`).join("")}</tr>`)
+        .join("")}</tbody>`;
+    return `<div class="log-modal-table-wrap"><table class="trace-table log-modal-table">${thead}${tbody}</table></div>`;
 }
 
 function closeLogModal() {
