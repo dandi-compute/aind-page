@@ -830,7 +830,29 @@ function fetchVisualizationData(run) {
     return recordings.length > 0 ? recordings : null;
 }
 
-/* ─── Path helpers ──────────────────────────────────────────── */
+// Fetch and parse the quality_control.json produced for a successful run. It
+// lives alongside the visualization images under
+// "{run.path}/derivatives/visualization/quality_control.json" (or the legacy
+// "{run.path}/visualization/..."). Returns the parsed object or null.
+async function fetchQualityControl(run) {
+    if (!run?.outputPaths) return null;
+    const candidates = [
+        `${run.path}/derivatives/visualization/quality_control.json`,
+        `${run.path}/visualization/quality_control.json`,
+    ];
+    for (const repoPath of candidates) {
+        const url = resolveBlobUrl(run, repoPath);
+        if (!url) continue;
+        try {
+            const resp = await cachedFetch(url);
+            if (resp.ok) return await resp.json();
+        } catch {
+            /* try the next candidate */
+        }
+    }
+    return null;
+}
+
 // Returns subject, falling back to a per-dandiset default when subject is null.
 function resolveSubject(dandisetId, subject) {
     if (subject != null) return subject;
@@ -1339,6 +1361,7 @@ function renderRunEntry(run) {
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
@@ -1518,6 +1541,166 @@ function renderVisualizationSection(recordings) {
         <span class="count-badge">${totalImages}</span>
     </summary>
     ${recordingHtml}
+</details>`;
+}
+
+/* ─── Quality control rendering ─────────────────────────────────
+   Renders the aind-data-schema QualityControl object (quality_control.json) as a
+   collapsible panel: an overall status summary plus per-metric cards grouped by
+   processing stage, each showing the latest status, modality, description (with
+   any markdown links), the dropdown option → Pass/Fail legend, and a link to the
+   referenced visualization image when it can be matched to a known PNG.        */
+const QC_STATUS_CLASS = {
+    pass: "status-success",
+    fail: "status-failed",
+    pending: "status-queued",
+};
+
+function qcStatusClass(status) {
+    return QC_STATUS_CLASS[String(status ?? "").toLowerCase()] ?? "status-unknown";
+}
+
+// Latest status from a metric's status_history (the last recorded entry).
+function qcLatestStatus(metric) {
+    const history = Array.isArray(metric?.status_history) ? metric.status_history : [];
+    const last = history[history.length - 1];
+    return last?.status ?? null;
+}
+
+// Convert a description containing markdown links into safe HTML: escape first,
+// then turn [label](http…) into anchors.
+function qcLinkifyDescription(text) {
+    if (!text) return "";
+    return e(text).replace(
+        /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        (_match, label, url) => `<a href="${url}" target="_blank" rel="noopener">${label}</a>`
+    );
+}
+
+// Best-effort match of a metric "reference" (e.g.
+// "quality_control/<probe>/traces_raw.png") to one of the run's known viz images,
+// preferring an image whose recording group matches the probe segment.
+function qcResolveReference(reference, vizData) {
+    if (!reference || !Array.isArray(vizData)) return null;
+    const segments = reference.split("/").filter(Boolean);
+    const fileName = segments[segments.length - 1];
+    const probe = segments.length >= 2 ? segments[segments.length - 2] : null;
+    const candidates = [];
+    for (const rec of vizData) {
+        for (const img of rec.images) {
+            if (img.name === fileName) candidates.push({ recording: rec.name, ...img });
+        }
+    }
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1 || !probe) return candidates[0];
+    const preferred = candidates.find((c) => c.recording.includes(probe) || probe.includes(c.recording));
+    return preferred ?? candidates[0];
+}
+
+// Partition QC plots out of the visualization set: resolve each metric's
+// referenced image against the full viz data, attach it to the metric as
+// `.plot`, and return a filtered vizData with those plots removed. Removal is by
+// file name, so a duplicate copy of a QC plot living elsewhere in the gallery
+// (e.g. a top-level "summary" drift_map alongside the per-probe one) is dropped
+// too — each plot then appears only in its QC card. Empty recording groups are
+// dropped; returns null if nothing remains for the visualization section.
+function partitionQcPlots(qc, vizData) {
+    const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
+    const claimedNames = new Set();
+    for (const metric of metrics) {
+        const img = qcResolveReference(metric?.reference, vizData);
+        metric.plot = img ? { name: img.name, url: img.url } : null;
+        if (img) claimedNames.add(img.name);
+    }
+    if (!Array.isArray(vizData) || claimedNames.size === 0) return vizData;
+    const filtered = vizData
+        .map((rec) => ({ name: rec.name, images: rec.images.filter((img) => !claimedNames.has(img.name)) }))
+        .filter((rec) => rec.images.length > 0);
+    return filtered.length > 0 ? filtered : null;
+}
+
+function renderQcMetric(metric) {
+    const status = qcLatestStatus(metric);
+    const statusBadge = status
+        ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>`
+        : "";
+    const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
+    const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
+    const descHtml = metric?.description
+        ? `<p class="qc-metric-desc">${qcLinkifyDescription(metric.description)}</p>`
+        : "";
+
+    // Embedded plot (clickable to open full size in the image modal).
+    const plot = metric?.plot;
+    const label = metric?.name ?? plot?.name ?? "Plot";
+    const plotHtml = plot
+        ? `<a class="viz-link qc-plot" data-viz-url="${e(plot.url)}" data-viz-label="${e(label)}" href="${e(plot.url)}" rel="noopener" aria-haspopup="dialog">
+        <img class="qc-plot-img" src="${e(plot.url)}" loading="lazy" alt="${e(label)}">
+    </a>`
+        : "";
+
+    // Dropdown option → Pass/Fail legend.
+    let optionsHtml = "";
+    const value = metric?.value;
+    if (value && Array.isArray(value.options)) {
+        const statuses = Array.isArray(value.status) ? value.status : [];
+        optionsHtml = `<div class="qc-options">${value.options
+            .map((opt, i) => {
+                const verdict = String(statuses[i] ?? "").toLowerCase();
+                const cls = verdict === "pass" ? "qc-option-pass" : verdict === "fail" ? "qc-option-fail" : "";
+                const suffix = statuses[i] ? ` · ${e(statuses[i])}` : "";
+                return `<span class="qc-option ${cls}">${e(opt)}${suffix}</span>`;
+            })
+            .join("")}</div>`;
+    }
+
+    return `<div class="qc-metric">
+    <div class="qc-metric-head">
+        ${statusBadge}
+        <span class="qc-metric-name">${e(metric?.name ?? "Metric")}</span>
+        ${modalityHtml}
+    </div>
+    ${descHtml}
+    ${plotHtml}
+    ${optionsHtml}
+</div>`;
+}
+
+function renderQualityControlSection(qc) {
+    const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
+    if (metrics.length === 0) return "";
+
+    // Overall status summary (top-level `status` map: grouping key → status).
+    const summaryEntries = qc?.status && typeof qc.status === "object" ? Object.entries(qc.status) : [];
+    const summaryHtml = summaryEntries.length
+        ? `<div class="qc-status-summary">${summaryEntries
+              .map(([key, value]) => {
+                  const label = key.includes(":") ? key.slice(key.indexOf(":") + 1) : key;
+                  return `<span class="status-badge ${qcStatusClass(value)}" title="${e(key)}">${e(label)}: ${e(value)}</span>`;
+              })
+              .join("")}</div>`
+        : "";
+
+    // Group metrics by processing stage, preserving first-seen order.
+    const byStage = groupBy(metrics, (m) => m.stage || "Other");
+    const stagesHtml = Array.from(byStage.entries())
+        .map(([stage, stageMetrics]) => {
+            const cards = stageMetrics.map((m) => renderQcMetric(m)).join("");
+            return `<div class="qc-stage">
+        <div class="qc-stage-title">${e(stage)}</div>
+        <div class="qc-metrics">${cards}</div>
+    </div>`;
+        })
+        .join("");
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Quality Control
+        <span class="count-badge">${metrics.length}</span>
+    </summary>
+    ${summaryHtml}
+    ${stagesHtml}
 </details>`;
 }
 
@@ -2499,6 +2682,7 @@ function renderFlatRunEntry(run) {
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
@@ -3445,12 +3629,16 @@ async function loadQueueData() {
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, dandiResult] = await Promise.all([
+                const [text, datasetDesc, dandiResult, qualityControl] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
                     run.datasetDescriptionPath || run.hasLogs ? fetchDatasetDescription(run) : Promise.resolve(null),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
+                    run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
                 ]);
                 const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
+                // Move QC-referenced plots into the QC cards and drop them from
+                // the visualization gallery so each plot appears in one place.
+                const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
                 const parsed = parseTrace(text);
                 const assetId = dandiResult?.assetId ?? null;
                 const inSourcedata = dandiResult?.inSourcedata ?? false;
@@ -3478,7 +3666,8 @@ async function loadQueueData() {
                     assetId,
                     inSourcedata,
                     generatedBy,
-                    vizData,
+                    vizData: vizForDisplay,
+                    qualityControl,
                     status,
                     failureStep,
                     logFiles: runLogFiles(run),

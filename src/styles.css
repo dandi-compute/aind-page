@@ -1199,6 +1199,123 @@ details[open] > .params-summary::before {
     color: var(--color-text-secondary);
 }
 
+/* ─── Quality control ───────────────────────────────────────── */
+.qc-status-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 20px 4px;
+}
+
+.qc-stage {
+    padding: 8px 20px 14px;
+}
+
+.qc-stage-title {
+    font-size: 0.8em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    margin-bottom: 10px;
+}
+
+.qc-metrics {
+    display: grid;
+    gap: 10px;
+}
+
+.qc-metric {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+}
+
+.qc-metric-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.qc-metric-name {
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--color-text);
+}
+
+.qc-metric-modality {
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+}
+
+.qc-plot {
+    display: block;
+    margin-top: 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--color-surface);
+    transition: border-color 0.15s;
+}
+.qc-plot:hover {
+    border-color: var(--color-accent);
+}
+
+.qc-plot-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    object-fit: contain;
+    transition: opacity 0.2s;
+}
+.qc-plot:hover .qc-plot-img {
+    opacity: 0.92;
+}
+
+.qc-metric-desc {
+    font-size: 0.85em;
+    line-height: 1.45;
+    color: var(--color-text-secondary);
+    margin: 8px 0 0;
+}
+.qc-metric-desc a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+.qc-metric-desc a:hover {
+    text-decoration: underline;
+}
+
+.qc-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.qc-option {
+    font-size: 0.75em;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 2px 8px;
+    color: var(--color-text-secondary);
+}
+.qc-option-pass {
+    border-color: var(--color-success);
+    color: var(--color-success);
+}
+.qc-option-fail {
+    border-color: var(--color-failed);
+    color: var(--color-failed);
+}
+
 .filter-banner {
     display: flex;
     flex-direction: column;
