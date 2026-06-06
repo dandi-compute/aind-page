@@ -732,12 +732,36 @@ async function fetchSlurmLogs(run) {
 }
 
 async function fetchDatasetDescription(run) {
-    const url = resolveBlobUrl(run, `${run.path}/dataset_description.json`);
-    if (!url) return null;
+    const path = run.datasetDescriptionPath ?? `${run.path}/dataset_description.json`;
+
+    // 1) Prefer the S3 blob map, in case the file's blob is tracked among the
+    //    run's output/log paths.
+    const mappedUrl = resolveBlobUrl(run, path);
+    if (mappedUrl) {
+        try {
+            const resp = await cachedFetch(mappedUrl);
+            if (resp.ok) return await resp.json();
+        } catch {
+            /* fall through to the DANDI archive lookup */
+        }
+    }
+
+    // 2) Otherwise resolve the asset by path within the 001697 derivatives
+    //    dandiset on the DANDI archive and fetch its content. dataset_description.json
+    //    is not content-addressed in the queue, so only its path is provided.
+    if (!run.datasetDescriptionPath) return null;
+    const apiBase = dandiApiBaseUrl(DERIVATIVES_DANDISET_ID);
     try {
-        const resp = await cachedFetch(url);
+        const listUrl = `${apiBase}/api/dandisets/${DERIVATIVES_DANDISET_ID}/versions/draft/assets/?path=${encodeURIComponent(path)}&page_size=1`;
+        const listResp = await cachedFetch(listUrl);
+        if (!listResp.ok) return null;
+        const listData = await listResp.json();
+        const asset = Array.isArray(listData.results) ? listData.results[0] : null;
+        if (!asset?.asset_id) return null;
+        const downloadUrl = `${apiBase}/api/assets/${encodeURIComponent(asset.asset_id)}/download/`;
+        const resp = await cachedFetch(downloadUrl);
         if (!resp.ok) return null;
-        return resp.json();
+        return await resp.json();
     } catch {
         return null;
     }
@@ -916,6 +940,7 @@ function parseQueueEntries(entries) {
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
             outputPaths: normalizeOutputPaths(entry),
+            datasetDescriptionPath: entry.dataset_description_path ?? null,
             assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
             runDate: createdAt ?? entry.date ?? null,
@@ -3422,7 +3447,7 @@ async function loadQueueData() {
             runs.map(async (run) => {
                 const [text, datasetDesc, dandiResult] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
-                    fetchIfLogs(run.hasLogs, () => fetchDatasetDescription(run)),
+                    run.datasetDescriptionPath || run.hasLogs ? fetchDatasetDescription(run) : Promise.resolve(null),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                 ]);
                 const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
