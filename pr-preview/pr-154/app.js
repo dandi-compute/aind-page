@@ -732,34 +732,14 @@ async function fetchSlurmLogs(run) {
 }
 
 async function fetchDatasetDescription(run) {
+    // dataset_description.json's blob is provided in the entry's
+    // `dataset_description_path` map (merged into the run's lookup), so resolve it
+    // straight from the S3 blob bucket like every other artifact.
     const path = run.datasetDescriptionPath ?? `${run.path}/dataset_description.json`;
-
-    // 1) Prefer the S3 blob map, in case the file's blob is tracked among the
-    //    run's output/log paths.
-    const mappedUrl = resolveBlobUrl(run, path);
-    if (mappedUrl) {
-        try {
-            const resp = await cachedFetch(mappedUrl);
-            if (resp.ok) return await resp.json();
-        } catch {
-            /* fall through to the DANDI archive lookup */
-        }
-    }
-
-    // 2) Otherwise resolve the asset by path within the 001697 derivatives
-    //    dandiset on the DANDI archive and fetch its content. dataset_description.json
-    //    is not content-addressed in the queue, so only its path is provided.
-    if (!run.datasetDescriptionPath) return null;
-    const apiBase = dandiApiBaseUrl(DERIVATIVES_DANDISET_ID);
+    const url = resolveBlobUrl(run, path);
+    if (!url) return null;
     try {
-        const listUrl = `${apiBase}/api/dandisets/${DERIVATIVES_DANDISET_ID}/versions/draft/assets/?path=${encodeURIComponent(path)}&page_size=1`;
-        const listResp = await cachedFetch(listUrl);
-        if (!listResp.ok) return null;
-        const listData = await listResp.json();
-        const asset = Array.isArray(listData.results) ? listData.results[0] : null;
-        if (!asset?.asset_id) return null;
-        const downloadUrl = `${apiBase}/api/assets/${encodeURIComponent(asset.asset_id)}/download/`;
-        const resp = await cachedFetch(downloadUrl);
+        const resp = await cachedFetch(url);
         if (!resp.ok) return null;
         return await resp.json();
     } catch {
@@ -931,13 +911,27 @@ function buildRunPath(entry) {
 // `log_paths` map are supported and merged into one object.
 function normalizeOutputPaths(entry) {
     const merged = {};
-    for (const key of ["output_paths", "log_paths"]) {
+    for (const key of ["output_paths", "log_paths", "dataset_description_path"]) {
         const map = entry?.[key];
         if (map && typeof map === "object" && !Array.isArray(map)) {
             Object.assign(merged, map);
         }
     }
     return merged;
+}
+
+// Extract the dataset_description.json repo path from an entry. Newer entries
+// provide `dataset_description_path` as a { path: blob-id } map (its blob is then
+// merged into the run's lookup by normalizeOutputPaths); older entries used a
+// bare path string.
+function datasetDescriptionPathOf(entry) {
+    const dd = entry?.dataset_description_path;
+    if (typeof dd === "string") return dd;
+    if (dd && typeof dd === "object" && !Array.isArray(dd)) {
+        const keys = Object.keys(dd);
+        return keys.length > 0 ? keys[0] : null;
+    }
+    return null;
 }
 
 // Convert raw JSONL entries from the queue state file into run objects.
@@ -962,7 +956,7 @@ function parseQueueEntries(entries) {
             hasLogs: entry.has_logs,
             contentHash: entry.content_id ?? null,
             outputPaths: normalizeOutputPaths(entry),
-            datasetDescriptionPath: entry.dataset_description_path ?? null,
+            datasetDescriptionPath: datasetDescriptionPathOf(entry),
             assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
             runDate: createdAt ?? entry.date ?? null,
@@ -3777,7 +3771,7 @@ async function loadQueueData() {
             runs.map(async (run) => {
                 const [text, datasetDesc, dandiResult, qualityControl] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
-                    run.datasetDescriptionPath || run.hasLogs ? fetchDatasetDescription(run) : Promise.resolve(null),
+                    run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
                     fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
                 ]);
