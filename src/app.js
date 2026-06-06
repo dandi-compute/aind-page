@@ -120,9 +120,6 @@ function codeRepoRawUrl(path) {
 function dandiBaseUrl(_dandisetId) {
     return "https://dandiarchive.org";
 }
-function dandiApiBaseUrl(_dandisetId) {
-    return "https://api.dandiarchive.org";
-}
 
 /* ─── URL-based filtering ───────────────────────────────────── */
 function parseFilter() {
@@ -747,29 +744,6 @@ async function fetchDatasetDescription(run) {
     }
 }
 
-async function fetchDandiAssetId(dandisetId, subject, session) {
-    // Asset lookup requires a session path; return null when session is absent
-    if (!session) return null;
-    const apiBase = dandiApiBaseUrl(dandisetId);
-    async function queryPath(assetPath) {
-        const url = `${apiBase}/api/dandisets/${dandisetId}/versions/draft/assets/?path=${encodeURIComponent(assetPath)}&page_size=1`;
-        const resp = await fetch(url);
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        return data.results && data.results.length > 0 ? data.results[0].asset_id : null;
-    }
-    try {
-        const nwbName = `sub-${subject}_ses-${session}.nwb`;
-        const assetId = await queryPath(`sub-${subject}/${nwbName}`);
-        if (assetId) return { assetId, inSourcedata: false };
-        const sourcedataAssetId = await queryPath(`sourcedata/sub-${subject}/${nwbName}`);
-        if (sourcedataAssetId) return { assetId: sourcedataAssetId, inSourcedata: true };
-        return null;
-    } catch {
-        return null;
-    }
-}
-
 // Build the visualization recording groups for a run from its S3 blob map.
 // PNGs live under "{run.path}/derivatives/visualization/..." (or the legacy
 // "{run.path}/visualization/..."). Images inside a recording subdirectory are
@@ -957,6 +931,9 @@ function parseQueueEntries(entries) {
             contentHash: entry.content_id ?? null,
             outputPaths: normalizeOutputPaths(entry),
             datasetDescriptionPath: datasetDescriptionPathOf(entry),
+            // Whether the source asset lives under sourcedata/ in its dandiset —
+            // derived directly from the dandi_path (no DANDI API lookup needed).
+            inSourcedata: String(entry.dandi_path ?? "").startsWith("sourcedata/"),
             assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
             createdAt,
             runDate: createdAt ?? entry.date ?? null,
@@ -1270,26 +1247,16 @@ function derivativesUrl(filePath) {
     return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${location}&page=1`;
 }
 
-/* Build a Neurosift URL for a DANDI asset (legacy: via DANDI API asset download URL) */
-function neurosiftUrl(dandisetId, assetId) {
-    const assetDownloadUrl = `${dandiApiBaseUrl(dandisetId)}/api/assets/${assetId}/download/`;
-    return `https://neurosift.app/nwb?url=${encodeURIComponent(assetDownloadUrl)}&dandisetId=${encodeURIComponent(dandisetId)}&dandisetVersion=draft`;
-}
-
 /* Build a Neurosift NWB URL from a DANDI S3 content hash */
 function neurosiftBlobUrl(contentHash) {
     const blobFileUrl = blobUrl(contentHash);
     return `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
 }
 
-/* Build the best available Neurosift NWB URL: prefer blob URL (no API call), fall back to asset download URL */
-function neurosiftSessionUrl(dandisetId, contentHash, assetId) {
+/* Build a Neurosift NWB URL from the run's S3 content hash (no API call needed) */
+function neurosiftSessionUrl(dandisetId, contentHash) {
     if (contentHash) {
         return neurosiftBlobUrl(contentHash);
-    }
-    if (assetId) {
-        const url = neurosiftUrl(dandisetId, assetId);
-        return url;
     }
     return null;
 }
@@ -2650,9 +2617,9 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
 }
 
 function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
-    // Prefer a run with a known assetId to determine inSourcedata for the DANDI link
-    const rep = runs.find((r) => r.assetId) ?? runs[0];
-    const location = rep.inSourcedata ? `sourcedata/sub-${subject}` : `sub-${subject}`;
+    // Whether the subject lives under sourcedata/ (derived from each run's dandi_path).
+    const inSourcedata = runs.some((r) => r.inSourcedata);
+    const location = inSourcedata ? `sourcedata/sub-${subject}` : `sub-${subject}`;
     const subjectUrl = `${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}/draft/files?location=${e(location)}`;
 
     const bySession = groupBy(runs, (r) => r.session);
@@ -2688,9 +2655,9 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
 }
 
 function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
-    const rep = runs.find((r) => r.contentHash || r.assetId) ?? runs[0];
+    const rep = runs.find((r) => r.contentHash) ?? runs[0];
     const sessionLabel = session !== null ? session : "—";
-    const sessionHref = neurosiftSessionUrl(dandisetId, rep.contentHash, rep.assetId);
+    const sessionHref = neurosiftSessionUrl(dandisetId, rep.contentHash);
     const sessionLinkHtml = sessionHref
         ? `<a class="group-link" href="${e(sessionHref)}"
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
@@ -3823,10 +3790,9 @@ async function loadQueueData() {
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, dandiResult, qualityControl] = await Promise.all([
+                const [text, datasetDesc, qualityControl] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
                     run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
-                    fetchDandiAssetId(run.dandisetId, run.subject, run.session),
                     run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
                 ]);
                 const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
@@ -3834,8 +3800,6 @@ async function loadQueueData() {
                 // the visualization gallery so each plot appears in one place.
                 const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
                 const parsed = parseTrace(text);
-                const assetId = dandiResult?.assetId ?? null;
-                const inSourcedata = dandiResult?.inSourcedata ?? false;
                 const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
                 // Determine status from JSONL flags:
                 //   has_output=true            → success (use trace status for task detail)
@@ -3857,8 +3821,6 @@ async function loadQueueData() {
                 return {
                     ...run,
                     ...parsed,
-                    assetId,
-                    inSourcedata,
                     generatedBy,
                     datasetDescription: datasetDesc ?? null,
                     vizData: vizForDisplay,
