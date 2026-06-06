@@ -784,15 +784,14 @@ function fetchVisualizationData(run) {
     return recordings.length > 0 ? recordings : null;
 }
 
-// Fetch and parse the quality_control.json produced for a successful run. It
-// lives alongside the visualization images under
-// "{run.path}/derivatives/visualization/quality_control.json" (or the legacy
-// "{run.path}/visualization/..."). Returns the parsed object or null.
-async function fetchQualityControl(run) {
+// Fetch and parse a JSON artifact that lives alongside the visualization images
+// under "{run.path}/derivatives/visualization/<name>" (or the legacy
+// "{run.path}/visualization/<name>"), resolving its blob from the S3 map.
+async function fetchVizArtifactJson(run, fileName) {
     if (!run?.outputPaths) return null;
     const candidates = [
-        `${run.path}/derivatives/visualization/quality_control.json`,
-        `${run.path}/visualization/quality_control.json`,
+        `${run.path}/derivatives/visualization/${fileName}`,
+        `${run.path}/visualization/${fileName}`,
     ];
     for (const repoPath of candidates) {
         const url = resolveBlobUrl(run, repoPath);
@@ -805,6 +804,17 @@ async function fetchQualityControl(run) {
         }
     }
     return null;
+}
+
+// quality_control.json — QC metrics for a successful run.
+async function fetchQualityControl(run) {
+    return fetchVizArtifactJson(run, "quality_control.json");
+}
+
+// visualization_output.json — interactive Kachery/figurl view links, keyed by
+// recording: { "<recording>": { "<view>": "<figurl url>", ... }, ... }.
+async function fetchVisualizationOutput(run) {
+    return fetchVizArtifactJson(run, "visualization_output.json");
 }
 
 // Returns subject, falling back to a per-dandiset default when subject is null.
@@ -1298,7 +1308,7 @@ function renderRunEntry(run) {
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
     const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
-    const hasViz = run.vizData && run.vizData.length > 0;
+    const hasViz = (run.vizData && run.vizData.length > 0) || (run.vizLinks && Object.keys(run.vizLinks).length > 0);
     const bytes = runByteCount(run);
     const bytesHtml =
         bytes === null
@@ -1318,7 +1328,7 @@ function renderRunEntry(run) {
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
-    ${hasViz ? renderVisualizationSection(run.vizData) : ""}
+    ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
     ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
@@ -1641,11 +1651,39 @@ function renderReportSection(run, reportFiles) {
 </details>`;
 }
 
-function renderVisualizationSection(recordings) {
-    const totalImages = recordings.reduce((sum, r) => sum + r.images.length, 0);
-    const recordingHtml = recordings
-        .map((rec) => {
-            const imgHtml = rec.images
+// Friendly labels for the interactive views in visualization_output.json.
+const KACHERY_VIEW_LABELS = { timeseries: "Timeseries", sorting_summary: "Sorting Summary" };
+function kacheryViewLabel(name) {
+    return (
+        KACHERY_VIEW_LABELS[name] ??
+        String(name)
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase())
+    );
+}
+
+// recordings: [{ name, images: [{name, url}] }] (static PNGs)
+// vizLinks:   { "<recording>": { "<view>": "<figurl/kachery url>" } } (interactive)
+function renderVisualizationSection(recordings, vizLinks) {
+    const recs = Array.isArray(recordings) ? recordings : [];
+    const links = vizLinks && typeof vizLinks === "object" && !Array.isArray(vizLinks) ? vizLinks : {};
+    const imagesByRec = new Map(recs.map((r) => [r.name, r.images]));
+
+    // Merge recording names: image groups first (their order), then any
+    // recordings that only have interactive links.
+    const order = [];
+    const seen = new Set();
+    for (const r of recs) if (!seen.has(r.name)) (seen.add(r.name), order.push(r.name));
+    for (const name of Object.keys(links)) if (!seen.has(name)) (seen.add(name), order.push(name));
+
+    let totalImages = 0;
+    let totalLinks = 0;
+
+    const recordingHtml = order
+        .map((name) => {
+            const images = imagesByRec.get(name) ?? [];
+            totalImages += images.length;
+            const imgHtml = images
                 .map((img) => {
                     const href = e(img.url);
                     const caption = e(img.name.replace(/\.png$/i, "").replace(/_/g, " "));
@@ -1657,18 +1695,40 @@ function renderVisualizationSection(recordings) {
             </figure>`;
                 })
                 .join("");
+            const gridHtml = imgHtml ? `<div class="viz-grid">${imgHtml}</div>` : "";
+
+            const recLinks = links[name] && typeof links[name] === "object" ? links[name] : null;
+            let linksHtml = "";
+            if (recLinks) {
+                const buttons = Object.entries(recLinks)
+                    .filter(([, url]) => typeof url === "string" && /^https?:\/\//i.test(url))
+                    .map(([view, url]) => {
+                        totalLinks += 1;
+                        return `<a class="viz-kachery-link" href="${e(url)}" target="_blank" rel="noopener"
+                    title="Open interactive view in Figurl">↗ ${e(kacheryViewLabel(view))}</a>`;
+                    })
+                    .join("");
+                if (buttons) linksHtml = `<div class="viz-kachery-links">${buttons}</div>`;
+            }
+
+            if (!gridHtml && !linksHtml) return "";
             return `<div class="viz-recording">
-        <div class="viz-recording-label">${e(rec.name)}</div>
-        <div class="viz-grid">${imgHtml}</div>
+        <div class="viz-recording-label">${e(name)}</div>
+        ${gridHtml}
+        ${linksHtml}
     </div>`;
         })
+        .filter(Boolean)
         .join("");
+
+    if (!recordingHtml) return "";
+    const count = totalImages + totalLinks;
 
     return `
 <details class="run-section">
     <summary class="run-section-title">
         Visualizations
-        <span class="count-badge">${totalImages}</span>
+        <span class="count-badge">${count}</span>
     </summary>
     ${recordingHtml}
 </details>`;
@@ -2771,7 +2831,7 @@ function renderFlatRunEntry(run) {
     const hasInline = inlineLogs.length > 0;
     const hasTasks = run.tasks && run.tasks.length > 0;
     const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
-    const hasViz = run.vizData && run.vizData.length > 0;
+    const hasViz = (run.vizData && run.vizData.length > 0) || (run.vizLinks && Object.keys(run.vizLinks).length > 0);
     const bytes = runByteCount(run);
     const bytesHtml =
         bytes === null
@@ -2812,7 +2872,7 @@ function renderFlatRunEntry(run) {
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
     ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
-    ${hasViz ? renderVisualizationSection(run.vizData) : ""}
+    ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
     ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
@@ -3790,10 +3850,11 @@ async function loadQueueData() {
         const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
         const runsWithStatus = await Promise.all(
             runs.map(async (run) => {
-                const [text, datasetDesc, qualityControl] = await Promise.all([
+                const [text, datasetDesc, qualityControl, vizLinks] = await Promise.all([
                     fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
                     run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
                     run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
+                    run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
                 ]);
                 const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
                 // Move QC-referenced plots into the QC cards and drop them from
@@ -3824,6 +3885,7 @@ async function loadQueueData() {
                     generatedBy,
                     datasetDescription: datasetDesc ?? null,
                     vizData: vizForDisplay,
+                    vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
                     qualityControl,
                     status,
                     failureStep,
