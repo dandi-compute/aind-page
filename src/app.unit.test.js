@@ -30,6 +30,7 @@ const {
     renderDiffPage,
     renderDandisets,
     renderParamsGroup,
+    renderQueuePriorities,
     renderRegistryLink,
     renderFlatList,
     renderVisualizationSection,
@@ -1233,6 +1234,28 @@ describe("renderVisualizationSection", () => {
 
         const html = renderVisualizationSection(recordings);
         expect(html).toContain("traces full seg0");
+    });
+
+    it("renders queue priorities with version links and plain params priorities", () => {
+        const html = renderQueuePriorities({
+            pipelines: {
+                ephys: {
+                    version_priority: ["v1", "v2"],
+                    params_priority: ["fast", "slow"],
+                    max_attempts_per_asset: 3,
+                },
+            },
+        });
+
+        expect(html).toContain("Queue priorities");
+        expect(html).toContain("queue_config.json ↗");
+        expect(html).toContain("Version priority");
+        expect(html).toContain("Params priority");
+        expect(html).toContain("version=v1");
+        expect(html).toContain('<span class="qp-chip-label">fast</span>');
+        expect(html).not.toContain('href="?params=');
+        expect(html).toContain("Max attempts per asset");
+        expect(html).toContain(">3<");
     });
 
     it("escapes HTML in recording names and image names", () => {
