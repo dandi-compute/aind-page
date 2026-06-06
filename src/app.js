@@ -4424,6 +4424,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderFilterBanner,
         renderSummary,
         renderFlatList,
+        renderQueuePriorities,
         buildParamsCompareEntries,
         renderRegistryLink,
         renderVisualizationSection,
