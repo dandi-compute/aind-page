@@ -6,6 +6,8 @@ const DERIVATIVES_DANDISET_ID = "001697";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
 const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
+const QUEUE_CONFIG_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/queue_config.json";
+const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/main/queue_config.json";
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
@@ -1243,9 +1245,265 @@ function renderSummary(runs) {
         </div>`;
 }
 
-/* Log files rendered as always-open inline iframes (not modal buttons) */
-const INLINE_REPORT_FILES = new Set(["report.html", "timeline.html"]);
-const INLINE_REPORT_ORDER = ["timeline.html", "report.html"];
+/* ─── Queue priorities (top display) ─────────────────────────────
+   Fetches dandi-compute/queue's queue_config.json from the raw GitHub CDN and
+   renders the current scheduling priorities at the top of the dashboard. The
+   config schema isn't fixed here, so rendering adapts: an ordered priority list
+   (with any scalar settings) when one can be detected, otherwise a generic
+   key/value view. Dandiset-id entries link into the filtered dashboard.       */
+async function fetchQueueConfig() {
+    try {
+        const resp = await fetch(QUEUE_CONFIG_URL, { cache: "no-cache" });
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch {
+        return null;
+    }
+}
+
+function isDandisetId(value) {
+    return /^\d{6}$/.test(String(value));
+}
+
+// Detect an ordered priority list within the config. Returns { list, key }
+// where key is the source property (or null for a root array / numeric map).
+function extractQueuePriorityList(config) {
+    if (Array.isArray(config)) return { list: config, key: null };
+    if (config && typeof config === "object") {
+        for (const key of ["priorities", "priority", "order", "queue", "ranking", "dandisets", "dandiset_priorities"]) {
+            if (Array.isArray(config[key])) return { list: config[key], key };
+        }
+        // A flat { "<dandiset>": <priority number> } map → sort ascending.
+        const keys = Object.keys(config);
+        const numeric = Object.entries(config).filter(([, v]) => typeof v === "number");
+        if (keys.length > 0 && numeric.length === keys.length) {
+            const list = numeric.sort((a, b) => a[1] - b[1]).map(([name, priority]) => ({ name, priority }));
+            return { list, key: null };
+        }
+    }
+    return { list: null, key: null };
+}
+
+const QUEUE_ITEM_LABEL_KEYS = ["dandiset_id", "dandiset", "id", "name", "key", "label"];
+const QUEUE_ITEM_PRIORITY_KEYS = ["priority", "weight", "rank", "score"];
+
+function normalizeQueuePriorityItem(item) {
+    if (item === null || item === undefined) return null;
+    if (typeof item === "string" || typeof item === "number") {
+        return { label: String(item), priority: null, extra: [] };
+    }
+    if (typeof item === "object") {
+        let label = null;
+        for (const k of QUEUE_ITEM_LABEL_KEYS) {
+            if (item[k] !== undefined && item[k] !== null) {
+                label = String(item[k]);
+                break;
+            }
+        }
+        let priority = null;
+        for (const k of QUEUE_ITEM_PRIORITY_KEYS) {
+            if (item[k] !== undefined && item[k] !== null) {
+                priority = item[k];
+                break;
+            }
+        }
+        const skip = new Set([...QUEUE_ITEM_LABEL_KEYS, ...QUEUE_ITEM_PRIORITY_KEYS]);
+        const extra = Object.entries(item)
+            .filter(([k, v]) => !skip.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+            .map(([k, v]) => ({ key: k, value: v }));
+        return { label: label ?? JSON.stringify(item), priority, extra };
+    }
+    return null;
+}
+
+// Scalar top-level config entries shown as a "settings" strip (excluding the
+// property that supplied the priority list).
+function queueConfigSettings(config, usedKey) {
+    if (!config || typeof config !== "object" || Array.isArray(config)) return [];
+    return Object.entries(config)
+        .filter(([k, v]) => k !== usedKey && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+        .map(([key, value]) => ({ key, value }));
+}
+
+function renderQueueSettingsStrip(settings) {
+    if (!settings.length) return "";
+    const chips = settings
+        .map(
+            (s) =>
+                `<span class="qp-setting"><span class="qp-setting-key">${e(prettyKey(s.key))}</span><span class="qp-setting-val">${e(String(s.value))}</span></span>`
+        )
+        .join("");
+    return `<div class="qp-settings">${chips}</div>`;
+}
+
+// Generic fallback when no ordered list can be detected.
+function renderQueueConfigGeneric(config) {
+    if (config === null || typeof config !== "object") {
+        return `<div class="qp-generic"><span class="qp-setting-val">${e(String(config))}</span></div>`;
+    }
+    const rows = Object.entries(config)
+        .map(([k, v]) => {
+            let valHtml;
+            if (Array.isArray(v)) {
+                valHtml = `<span class="qp-setting-val">${e(v.map((x) => (x && typeof x === "object" ? JSON.stringify(x) : String(x))).join(", "))}</span>`;
+            } else if (v && typeof v === "object") {
+                valHtml = `<span class="qp-setting-val qp-mono">${e(JSON.stringify(v))}</span>`;
+            } else {
+                valHtml = `<span class="qp-setting-val">${e(String(v))}</span>`;
+            }
+            return `<div class="qp-generic-row"><span class="qp-setting-key">${e(prettyKey(k))}</span>${valHtml}</div>`;
+        })
+        .join("");
+    return `<div class="qp-generic">${rows}</div>`;
+}
+
+// Ordered priority chips (rank + value), optionally linking each value into the
+// dashboard filter named by linkKey (e.g. "pipelineVersion" → ?version=…).
+function renderQueuePriorityChips(values, linkKey) {
+    const items = (Array.isArray(values) ? values : []).filter((v) => v !== null && v !== undefined);
+    if (!items.length) return `<span class="qp-empty">—</span>`;
+    const chips = items
+        .map((v, i) => {
+            const label = e(String(v));
+            const inner = linkKey
+                ? `<a class="qp-chip-link" href="${e(narrowUrl({ [linkKey]: String(v) }))}" title="Filter dashboard to ${label}">${label}</a>`
+                : `<span class="qp-chip-label">${label}</span>`;
+            return `<li class="qp-chip"><span class="qp-rank">${i + 1}</span>${inner}</li>`;
+        })
+        .join("");
+    return `<ol class="qp-chips">${chips}</ol>`;
+}
+
+function renderQueuePriorityRow(label, values, linkKey) {
+    return `<div class="qp-row"><span class="qp-row-label">${e(label)}</span>${renderQueuePriorityChips(values, linkKey)}</div>`;
+}
+
+const QUEUE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Per-asset overrides as a small collapsible list. Asset keys are content ids,
+// so they link into Neurosift like the rest of the app.
+function renderQueueAssetOverrides(overrides) {
+    const entries = overrides && typeof overrides === "object" && !Array.isArray(overrides) ? Object.entries(overrides) : [];
+    if (!entries.length) return "";
+    const rows = entries
+        .map(([assetId, val]) => {
+            const idShort = assetId.length > 16 ? `${assetId.slice(0, 8)}…${assetId.slice(-4)}` : assetId;
+            const idHtml = QUEUE_UUID_PATTERN.test(assetId)
+                ? `<a class="qp-asset qp-asset-link" href="${e(neurosiftBlobUrl(assetId))}" target="_blank" rel="noopener" title="${e(assetId)} — open in Neurosift">${e(idShort)}</a>`
+                : `<code class="qp-asset" title="${e(assetId)}">${e(idShort)}</code>`;
+            const valHtml =
+                val === null || val === undefined
+                    ? `<span class="qp-override-val qp-override-null">null</span>`
+                    : `<span class="qp-override-val">${e(typeof val === "object" ? JSON.stringify(val) : String(val))}</span>`;
+            return `<div class="qp-override-row">${idHtml}<span class="qp-override-arrow">→</span>${valHtml}</div>`;
+        })
+        .join("");
+    return `<details class="qp-overrides">
+        <summary class="qp-overrides-summary">Asset overrides <span class="count-badge">${entries.length}</span></summary>
+        <div class="qp-overrides-body">${rows}</div>
+    </details>`;
+}
+
+// Tailored renderer for the { pipelines: { "<name>": {…} } } schema.
+function renderQueuePipelines(pipelines) {
+    const names = Object.keys(pipelines);
+    if (!names.length) return "";
+    const known = new Set(["version_priority", "params_priority", "asset_overrides"]);
+    return names
+        .map((name) => {
+            const p = pipelines[name];
+            if (!p || typeof p !== "object" || Array.isArray(p)) {
+                return `<div class="qp-pipeline"><div class="qp-pipeline-name">${e(name)}</div>${renderQueueConfigGeneric(p)}</div>`;
+            }
+            const rows = [];
+            if ("version_priority" in p) rows.push(renderQueuePriorityRow("Version priority", p.version_priority, "pipelineVersion"));
+            if ("params_priority" in p) rows.push(renderQueuePriorityRow("Params priority", p.params_priority, "paramsType"));
+            const settings = Object.entries(p)
+                .filter(([k, v]) => !known.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+                .map(([key, value]) => ({ key, value }));
+            return `<div class="qp-pipeline">
+        <div class="qp-pipeline-name">${e(name)}</div>
+        <div class="qp-rows">${rows.join("")}</div>
+        ${renderQueueSettingsStrip(settings)}
+        ${renderQueueAssetOverrides(p.asset_overrides)}
+    </div>`;
+        })
+        .join("");
+}
+
+// Adaptive fallback body for configs that don't match the pipelines schema.
+function renderQueueAdaptiveBody(config) {
+    const { list, key } = extractQueuePriorityList(config);
+    if (Array.isArray(list) && list.length > 0) {
+        const items = list.map(normalizeQueuePriorityItem).filter(Boolean);
+        const itemsHtml = items
+            .map((it, i) => {
+                const labelHtml = isDandisetId(it.label)
+                    ? `<a class="qp-label qp-label-link" href="${e(narrowUrl({ dandiset: it.label }))}" title="Filter dashboard to Dandiset ${e(it.label)}">${e(it.label)}</a>`
+                    : `<span class="qp-label">${e(it.label)}</span>`;
+                const prio = it.priority !== null ? `<span class="qp-priority" title="Priority">${e(String(it.priority))}</span>` : "";
+                const extra = it.extra.length
+                    ? `<span class="qp-item-meta">${it.extra.map((x) => `${e(prettyKey(x.key))}:&nbsp;${e(String(x.value))}`).join(" · ")}</span>`
+                    : "";
+                return `<li class="qp-item">
+            <span class="qp-rank">${i + 1}</span>
+            <span class="qp-item-body">
+                <span class="qp-item-head">${labelHtml}${prio}</span>
+                ${extra}
+            </span>
+        </li>`;
+            })
+            .join("");
+        return `<ol class="qp-list">${itemsHtml}</ol>${renderQueueSettingsStrip(queueConfigSettings(config, key))}`;
+    }
+    return renderQueueConfigGeneric(config);
+}
+
+function renderQueuePriorities(config) {
+    if (config === null || config === undefined) return "";
+    const source = `<a class="qp-source" href="${e(QUEUE_CONFIG_SOURCE_URL)}" target="_blank" rel="noopener">queue_config.json ↗</a>`;
+
+    const body =
+        config.pipelines && typeof config.pipelines === "object" && !Array.isArray(config.pipelines)
+            ? renderQueuePipelines(config.pipelines)
+            : renderQueueAdaptiveBody(config);
+    if (!body) return "";
+
+    return `
+<div class="queue-priorities-header">
+    <span class="queue-priorities-title">Queue priorities</span>
+    ${source}
+</div>
+${body}`;
+}
+
+// Insert the queue-priorities container at the top of the page content (once).
+function mountQueuePriorities() {
+    let el = document.getElementById("queue-priorities");
+    if (el) return el;
+    const pageContent = document.querySelector(".page-content");
+    if (!pageContent) return null;
+    el = document.createElement("section");
+    el.id = "queue-priorities";
+    el.className = "queue-priorities";
+    el.style.display = "none";
+    const banner = document.getElementById("filter-banner");
+    pageContent.insertBefore(el, banner ?? pageContent.firstChild);
+    return el;
+}
+
+async function initQueuePriorities() {
+    const el = mountQueuePriorities();
+    if (!el) return;
+    const config = await fetchQueueConfig();
+    const html = renderQueuePriorities(config);
+    if (!html) {
+        el.style.display = "none";
+        return;
+    }
+    el.innerHTML = html;
+    el.style.display = "";
+}
 
 /* Standard log files present whenever has_logs is true (Nextflow output) */
 const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
@@ -4096,6 +4354,8 @@ async function init() {
         }
         return;
     }
+    // Top display of current queue scheduling priorities (dashboard views only).
+    initQueuePriorities();
     await loadQueueData();
 }
 
