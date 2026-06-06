@@ -1330,7 +1330,7 @@ function renderQueueSettingsStrip(settings) {
     const chips = settings
         .map(
             (s) =>
-                `<span class="qp-setting"><span class="qp-setting-key">${e(prettyKey(s.key))}${queueFieldInfo(s.key)}</span><span class="qp-setting-val">${e(String(s.value))}</span></span>`
+                `<span class="qp-setting"><span class="qp-setting-key"${fieldTipAttrs(s.key)}>${e(prettyKey(s.key))}</span><span class="qp-setting-val">${e(String(s.value))}</span></span>`
         )
         .join("");
     return `<div class="qp-settings">${chips}</div>`;
@@ -1371,12 +1371,12 @@ const QUEUE_FIELD_DESCRIPTIONS = {
 };
 const QUEUE_OVERRIDE_NULL_DESCRIPTION = "No limit on the number of failures for this asset.";
 
-function infoIcon(description) {
+function tipAttrs(description) {
     if (!description) return "";
-    return ` <span class="qp-info" tabindex="0" role="note" aria-label="${e(description)}" data-tip="${e(description)}">i</span>`;
+    return ` tabindex="0" role="note" aria-label="${e(description)}" data-tip="${e(description)}"`;
 }
-function queueFieldInfo(field) {
-    return infoIcon(QUEUE_FIELD_DESCRIPTIONS[field]);
+function fieldTipAttrs(field) {
+    return tipAttrs(QUEUE_FIELD_DESCRIPTIONS[field]);
 }
 
 // Ordered priority chips (rank + value), optionally linking each value into the
@@ -1397,7 +1397,7 @@ function renderQueuePriorityChips(values, linkKey) {
 }
 
 function renderQueuePriorityRow(label, values, linkKey, fieldKey) {
-    return `<div class="qp-row"><span class="qp-row-label">${e(label)}${queueFieldInfo(fieldKey)}</span>${renderQueuePriorityChips(values, linkKey)}</div>`;
+    return `<div class="qp-row"><span class="qp-row-label"${fieldTipAttrs(fieldKey)}>${e(label)}</span>${renderQueuePriorityChips(values, linkKey)}</div>`;
 }
 
 const QUEUE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1415,13 +1415,13 @@ function renderQueueAssetOverrides(overrides) {
                 : `<code class="qp-asset" title="${e(assetId)}">${e(idShort)}</code>`;
             const valHtml =
                 val === null || val === undefined
-                    ? `<span class="qp-override-val qp-override-unlimited" title="${e(QUEUE_OVERRIDE_NULL_DESCRIPTION)}">no failure limit</span>`
+                    ? `<span class="qp-override-val qp-override-unlimited"${tipAttrs(QUEUE_OVERRIDE_NULL_DESCRIPTION)}>no failure limit</span>`
                     : `<span class="qp-override-val">${e(typeof val === "object" ? JSON.stringify(val) : String(val))}</span>`;
             return `<div class="qp-override-row">${idHtml}<span class="qp-override-arrow">→</span>${valHtml}</div>`;
         })
         .join("");
     return `<details class="qp-overrides">
-        <summary class="qp-overrides-summary">Asset overrides${queueFieldInfo("asset_overrides")} <span class="count-badge">${entries.length}</span></summary>
+        <summary class="qp-overrides-summary"><span class="qp-overrides-term"${fieldTipAttrs("asset_overrides")}>Asset overrides</span> <span class="count-badge">${entries.length}</span></summary>
         <div class="qp-overrides-body">${rows}</div>
     </details>`;
 }
@@ -1493,7 +1493,7 @@ function renderQueuePriorities(config) {
 
     return `
 <div class="queue-priorities-header">
-    <span class="queue-priorities-title">Queue priorities${infoIcon(QUEUE_CONFIG_DESCRIPTION)}</span>
+    <span class="queue-priorities-title"${tipAttrs(QUEUE_CONFIG_DESCRIPTION)}>Queue priorities</span>
     ${source}
 </div>
 ${body}`;
