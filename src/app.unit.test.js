@@ -42,8 +42,11 @@ const {
     treeUrl,
     uniquePipelineEntries,
 } = require("./app");
+const fs = require("node:fs");
+const vm = require("node:vm");
 
 const QUEUE_STATE_CACHE_KEY = queueStateCacheKey();
+const APP_SOURCE = fs.readFileSync(require.resolve("./app"), "utf8");
 
 /** A passthrough TransformStream that stands in for DecompressionStream in tests. */
 class MockDecompressionStream {
@@ -86,6 +89,48 @@ async function loadFixtureRegistries() {
     } finally {
         global.fetch = originalFetch;
     }
+}
+
+function loadRenderQueuePriorities() {
+    const context = {
+        console,
+        URLSearchParams,
+        document: {
+            addEventListener() {},
+            querySelector() {
+                return null;
+            },
+            getElementById() {
+                return null;
+            },
+        },
+        window: { location: { search: "" } },
+        localStorage: {
+            getItem() {
+                return null;
+            },
+            setItem() {},
+            removeItem() {},
+        },
+        sessionStorage: {
+            getItem() {
+                return null;
+            },
+            setItem() {},
+            removeItem() {},
+        },
+        fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+        Response,
+        TextEncoder,
+        ReadableStream,
+        TransformStream,
+        DecompressionStream: class {},
+        module: { exports: {} },
+        exports: {},
+    };
+    vm.createContext(context);
+    vm.runInContext(APP_SOURCE, context);
+    return context.renderQueuePriorities;
 }
 
 beforeEach(() => {
@@ -1233,6 +1278,29 @@ describe("renderVisualizationSection", () => {
 
         const html = renderVisualizationSection(recordings);
         expect(html).toContain("traces full seg0");
+    });
+
+    it("renders queue priorities with version links and plain params priorities", () => {
+        const renderQueuePriorities = loadRenderQueuePriorities();
+        const html = renderQueuePriorities({
+            pipelines: {
+                ephys: {
+                    version_priority: ["v1", "v2"],
+                    params_priority: ["fast", "slow"],
+                    max_attempts_per_asset: 3,
+                },
+            },
+        });
+
+        expect(html).toContain("Queue priorities");
+        expect(html).toContain("queue_config.json ↗");
+        expect(html).toContain("Version priority");
+        expect(html).toContain("Params priority");
+        expect(html).toContain("version=v1");
+        expect(html).toContain('<span class="qp-chip-label">fast</span>');
+        expect(html).not.toContain('href="?params=');
+        expect(html).toContain("Max attempts per asset");
+        expect(html).toContain(">3<");
     });
 
     it("escapes HTML in recording names and image names", () => {
