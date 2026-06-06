@@ -1355,6 +1355,7 @@ function renderRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
     ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
@@ -1418,6 +1419,122 @@ function renderSourceVersionsSection(generatedBy) {
     <span class="source-versions-label">Source versions:</span>
     <span class="source-versions-list">${items}</span>
 </div>`;
+}
+
+/* ─── Provenance (dataset_description.json) ─────────────────────
+   Surfaces the fuller content of dataset_description.json: top-level metadata,
+   each GeneratedBy pipeline step with its version hash / description / container,
+   and any SourceDatasets. Resilient to missing/extra fields.                   */
+function prettyKey(key) {
+    return String(key)
+        .replace(/_/g, " ")
+        .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/^./, (c) => c.toUpperCase());
+}
+
+function renderProvenanceGeneratedBy(entry) {
+    if (entry == null) return "";
+    if (typeof entry !== "object") return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    const name = entry.Name ?? entry.name ?? "Step";
+    const version = entry.Version ?? entry.version ?? null;
+    const rawUrl = entry.CodeURL ?? entry.codeURL ?? entry.url ?? null;
+    const codeUrl = resolveCodeUrl(rawUrl, version ?? "");
+    const description = entry.Description ?? entry.description ?? null;
+    const nameHtml = codeUrl
+        ? `<a class="prov-name src-link" href="${e(codeUrl)}" target="_blank" rel="noopener">${e(name)}</a>`
+        : `<span class="prov-name">${e(name)}</span>`;
+    const versionHtml = version ? `<code class="prov-hash">${e(String(version))}</code>` : "";
+    const descHtml = description ? `<p class="prov-card-desc">${e(String(description))}</p>` : "";
+
+    // Container/image details (e.g. BIDS GeneratedBy[].Container { Type, Tag, URI }).
+    const container = entry.Container ?? entry.container ?? null;
+    let containerHtml = "";
+    if (container && typeof container === "object") {
+        const parts = Object.entries(container)
+            .filter(([, v]) => v != null && typeof v !== "object")
+            .map(([k, v]) => `${prettyKey(k)}: ${v}`);
+        if (parts.length) containerHtml = `<p class="prov-card-meta">${e(parts.join(" · "))}</p>`;
+    } else if (typeof container === "string") {
+        containerHtml = `<p class="prov-card-meta">${e(container)}</p>`;
+    }
+
+    return `<div class="prov-card">
+    <div class="prov-card-head">${nameHtml}${versionHtml}</div>
+    ${descHtml}
+    ${containerHtml}
+</div>`;
+}
+
+function renderProvenanceSource(entry) {
+    if (entry == null) return "";
+    if (typeof entry !== "object") return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    const url = entry.URL ?? entry.url ?? null;
+    const doi = entry.DOI ?? entry.doi ?? null;
+    const version = entry.Version ?? entry.version ?? null;
+    const head = url
+        ? `<a class="prov-name src-link" href="${e(url)}" target="_blank" rel="noopener">${e(url)}</a>`
+        : `<span class="prov-name">${e(url ?? doi ?? "Source")}</span>`;
+    const versionHtml = version ? `<code class="prov-hash">${e(String(version))}</code>` : "";
+    const doiHtml = doi && doi !== url ? `<p class="prov-card-meta">DOI: ${e(String(doi))}</p>` : "";
+    return `<div class="prov-card"><div class="prov-card-head">${head}${versionHtml}</div>${doiHtml}</div>`;
+}
+
+function renderProvenanceSection(desc) {
+    if (!desc || typeof desc !== "object") return "";
+
+    // 1) Top-level scalar metadata: a curated order first, then any other
+    //    primitive fields so nothing useful is hidden.
+    const preferred = ["Name", "DatasetType", "BIDSVersion", "schema_version", "schemaVersion", "License", "license"];
+    const skip = new Set(["GeneratedBy", "SourceDatasets", "describedBy", "object_type"]);
+    const metaRows = [];
+    const seen = new Set();
+    const addRow = (key) => {
+        const v = desc[key];
+        if (seen.has(key) || v == null || typeof v === "object") return;
+        seen.add(key);
+        metaRows.push([key, String(v)]);
+    };
+    for (const k of preferred) if (k in desc) addRow(k);
+    for (const k of Object.keys(desc)) if (!skip.has(k)) addRow(k);
+
+    const metaHtml = metaRows.length
+        ? `<dl class="prov-meta">${metaRows
+              .map(([k, v]) => `<div class="prov-row"><dt>${e(prettyKey(k))}</dt><dd>${e(v)}</dd></div>`)
+              .join("")}</dl>`
+        : "";
+
+    const gb = Array.isArray(desc.GeneratedBy) ? desc.GeneratedBy : [];
+    const gbHtml = gb.length
+        ? `<div class="prov-group">
+        <div class="prov-group-title">Generated by</div>
+        <div class="prov-cards">${gb.map(renderProvenanceGeneratedBy).join("")}</div>
+    </div>`
+        : "";
+
+    const sd = Array.isArray(desc.SourceDatasets) ? desc.SourceDatasets : [];
+    const sdHtml = sd.length
+        ? `<div class="prov-group">
+        <div class="prov-group-title">Source datasets</div>
+        <div class="prov-cards">${sd.map(renderProvenanceSource).join("")}</div>
+    </div>`
+        : "";
+
+    if (!metaHtml && !gbHtml && !sdHtml) return "";
+    const count = metaRows.length + gb.length + sd.length;
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Provenance
+        <span class="count-badge">${count}</span>
+    </summary>
+    <div class="prov-body">
+        ${metaHtml}
+        ${gbHtml}
+        ${sdHtml}
+    </div>
+</details>`;
 }
 
 function renderTraceSection(tasks) {
@@ -2678,6 +2795,7 @@ function renderFlatRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData) : ""}
     ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
@@ -3694,6 +3812,7 @@ async function loadQueueData() {
                     assetId,
                     inSourcedata,
                     generatedBy,
+                    datasetDescription: datasetDesc ?? null,
                     vizData: vizForDisplay,
                     qualityControl,
                     status,
