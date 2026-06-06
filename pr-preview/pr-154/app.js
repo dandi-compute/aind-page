@@ -1379,7 +1379,19 @@ function renderPipelineInfo(pipelineName, pipelineVersion) {
     return `<span class="pipeline-name">${displayName}</span>` + `<span class="pipeline-version">${displayVer}</span>`;
 }
 
+// Canonicalize known pipeline repo forks to their upstream organization so links
+// point at the canonical source (e.g. a CodyCBakerPhD fork of aind-ephys-pipeline
+// → AllenNeuralDynamics). Any trailing path (e.g. /tree/v1.2.2) is preserved.
+function canonicalizeCodeUrl(url) {
+    if (!url) return url;
+    return url.replace(
+        /(https?:\/\/github\.com\/)[^/]+(\/aind-ephys-pipeline)(?=$|[/?#])/i,
+        "$1AllenNeuralDynamics$2"
+    );
+}
+
 function resolveCodeUrl(codeUrl, version) {
+    codeUrl = canonicalizeCodeUrl(codeUrl);
     if (!codeUrl || !version) return codeUrl ?? null;
     // If the version looks like a bare commit hash and the CodeURL doesn't already
     // point to a specific commit/tree/tag, append /commit/<hash> so the link goes
@@ -1392,6 +1404,30 @@ function resolveCodeUrl(codeUrl, version) {
     return codeUrl;
 }
 
+// Extract a full/abbreviated git commit hash from a Version string. The pipeline
+// records versions as "<tag-or-shortsha>+<full-commit-hash>" (e.g.
+// "v1.2.2+d2b6aef…"), so prefer the segment after the last "+"; also accept a
+// bare hash. Returns null when no hash-like token is present.
+function extractCommitHash(version) {
+    if (!version) return null;
+    const v = String(version);
+    const candidate = v.includes("+") ? v.slice(v.lastIndexOf("+") + 1) : v;
+    return /^[0-9a-f]{7,40}$/i.test(candidate) ? candidate : null;
+}
+
+// Build a link to a GitHub repo at a specific commit state
+// (https://github.com/<owner>/<repo>/tree/<hash>) from a CodeURL + Version.
+// Owner is canonicalized like resolveCodeUrl. Returns null when no GitHub repo or
+// commit hash can be determined.
+function resolveCommitUrl(codeUrl, version) {
+    const url = canonicalizeCodeUrl(codeUrl);
+    const hash = extractCommitHash(version);
+    if (!url || !hash) return null;
+    const repoBase = url.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+?)(?:\.git)?(?:[/?#]|$)/i);
+    if (!repoBase) return null;
+    return `${repoBase[1]}/tree/${hash}`;
+}
+
 function renderSourceVersionsSection(generatedBy) {
     const items = generatedBy
         .map((entry) => {
@@ -1400,7 +1436,12 @@ function renderSourceVersionsSection(generatedBy) {
             const rawUrl = entry.CodeURL ?? null;
             const resolvedUrl = resolveCodeUrl(rawUrl, entry.Version ?? "");
             const codeUrl = resolvedUrl ? e(resolvedUrl) : null;
-            const versionHtml = version ? `<span class="src-version">${version}</span>` : "";
+            const commitUrl = resolveCommitUrl(rawUrl, entry.Version ?? "");
+            const versionHtml = version
+                ? commitUrl
+                    ? `<a class="src-version src-version-link" href="${e(commitUrl)}" target="_blank" rel="noopener" title="Open repository at this commit">${version}</a>`
+                    : `<span class="src-version">${version}</span>`
+                : "";
             const nameHtml = codeUrl
                 ? `<a class="src-link" href="${codeUrl}" target="_blank" rel="noopener">${name}</a>`
                 : `<span class="src-name">${name}</span>`;
@@ -1438,7 +1479,12 @@ function renderProvenanceGeneratedBy(entry) {
     const nameHtml = codeUrl
         ? `<a class="prov-name src-link" href="${e(codeUrl)}" target="_blank" rel="noopener">${e(name)}</a>`
         : `<span class="prov-name">${e(name)}</span>`;
-    const versionHtml = version ? `<code class="prov-hash">${e(String(version))}</code>` : "";
+    const commitUrl = resolveCommitUrl(rawUrl, version ?? "");
+    const versionHtml = version
+        ? commitUrl
+            ? `<a class="prov-hash prov-hash-link" href="${e(commitUrl)}" target="_blank" rel="noopener" title="Open repository at this commit">${e(String(version))}</a>`
+            : `<code class="prov-hash">${e(String(version))}</code>`
+        : "";
     const descHtml = description ? `<p class="prov-card-desc">${e(String(description))}</p>` : "";
 
     // Container/image details (e.g. BIDS GeneratedBy[].Container { Type, Tag, URI }).
