@@ -1505,6 +1505,10 @@ async function initQueuePriorities() {
     el.style.display = "";
 }
 
+/* Log files rendered as always-open inline iframes (not modal buttons) */
+const INLINE_REPORT_FILES = new Set(["report.html", "timeline.html"]);
+const INLINE_REPORT_ORDER = ["timeline.html", "report.html"];
+
 /* Standard log files present whenever has_logs is true (Nextflow output) */
 const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
 
