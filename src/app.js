@@ -1373,7 +1373,7 @@ const QUEUE_OVERRIDE_NULL_DESCRIPTION = "No limit on the number of failures for 
 
 function infoIcon(description) {
     if (!description) return "";
-    return ` <span class="qp-info" tabindex="0" role="img" aria-label="${e(description)}" title="${e(description)}">i</span>`;
+    return ` <span class="qp-info" tabindex="0" role="note" aria-label="${e(description)}" data-tip="${e(description)}">i</span>`;
 }
 function queueFieldInfo(field) {
     return infoIcon(QUEUE_FIELD_DESCRIPTIONS[field]);
