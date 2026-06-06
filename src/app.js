@@ -502,8 +502,8 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
         ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
         ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
-        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
         ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
+        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
         ${renderFilterInput("assetSize", "Asset Size", filter.assetSize, assetSizes, narrowUrl(filterNarrowParams(filter, ["assetSize"])))}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <button class="filter-apply" type="submit">Apply</button>
