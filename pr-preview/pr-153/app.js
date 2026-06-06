@@ -1619,7 +1619,10 @@ function partitionQcPlots(qc, vizData) {
 
 function renderQcMetric(metric) {
     const status = qcLatestStatus(metric);
-    const statusBadge = status ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>` : "";
+    let statusBadge = "";
+    if (status) {
+        statusBadge = `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>`;
+    }
     const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
     const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
     const descHtml = metric?.description

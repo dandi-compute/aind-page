@@ -116,8 +116,8 @@ describe("app integration behavior", () => {
         renderSummary([{ status: "success", assetSizeBytes: 10 }, { status: "queued" }]);
 
         const summaryHtml = document.getElementById("summary").innerHTML;
-        expect(summaryHtml).toContain("stat-running");
-        expect(summaryHtml).toContain(">0<");
+        expect(summaryHtml).toContain('class="stat-item stat-running"');
+        expect(summaryHtml).toContain('<span class="stat-value">0</span>');
     });
 
     it("formats large byte counts with appropriate decimal units", () => {
