@@ -132,6 +132,8 @@ function parseFilter() {
         paramsType: params.get("params") ?? null,
         configType: params.get("config") ?? null,
         dandiCodebaseHash: params.get("codebaseHash") ?? null,
+        dandiCodebaseVersion: params.get("codebaseVersion") ?? null,
+        assetSize: params.get("assetSize") ?? null,
         failureStep: params.get("failureStep") ?? null,
         status: params.get("status") ?? null,
     };
@@ -211,6 +213,8 @@ function applyFilter(runs, filter) {
         if (!matchesResolvedOrRawValue(filter.paramsType, runParamsType(r), r.paramsProfile)) return false;
         if (!matchesResolvedOrRawValue(filter.configType, runConfigType(r), r.configHash)) return false;
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
+        if (filter.dandiCodebaseVersion && r.codebase !== filter.dandiCodebaseVersion) return false;
+        if (filter.assetSize && runAssetSizeBucket(r) !== filter.assetSize) return false;
         if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
@@ -239,6 +243,8 @@ function narrowUrl(params) {
     if (params.paramsType) sp.set("params", params.paramsType);
     if (params.configType) sp.set("config", params.configType);
     if (params.dandiCodebaseHash) sp.set("codebaseHash", params.dandiCodebaseHash);
+    if (params.dandiCodebaseVersion) sp.set("codebaseVersion", params.dandiCodebaseVersion);
+    if (params.assetSize) sp.set("assetSize", params.assetSize);
     if (params.failureStep) sp.set("failureStep", params.failureStep);
     if (params.status) sp.set("status", params.status);
     const qs = sp.toString();
@@ -267,6 +273,45 @@ function normalizeByteCount(value) {
 
 function runByteCount(run) {
     return normalizeByteCount(run?.assetSizeBytes);
+}
+
+// Asset-size filter buckets (decimal/SI sizes, matching formatByteCount). The
+// label is used both as the displayed option and the stored filter value.
+const ASSET_SIZE_BUCKETS = [
+    { label: "< 100 MB", test: (b) => b < 1e8 },
+    { label: "100 MB – 1 GB", test: (b) => b >= 1e8 && b < 1e9 },
+    { label: "1 – 10 GB", test: (b) => b >= 1e9 && b < 1e10 },
+    { label: "10 – 100 GB", test: (b) => b >= 1e10 && b < 1e11 },
+    { label: "≥ 100 GB", test: (b) => b >= 1e11 },
+];
+
+// Map a run's asset size to its bucket label (or null when size is unknown).
+function runAssetSizeBucket(run) {
+    const bytes = runByteCount(run);
+    if (bytes === null) return null;
+    return ASSET_SIZE_BUCKETS.find((bucket) => bucket.test(bytes))?.label ?? null;
+}
+
+// Build the params object for narrowUrl from the full current filter, omitting
+// the given filter keys. Used for each filter input's "clear" link so it drops
+// only its own dimension (with the dandiset→subject→session cascade) while
+// preserving every other active filter.
+function filterNarrowParams(filter, omit = []) {
+    const all = {
+        dandiset: filter.dandisetId,
+        subject: filter.subject,
+        session: filter.session,
+        pipelineVersion: filter.pipelineVersion,
+        paramsType: filter.paramsType,
+        configType: filter.configType,
+        dandiCodebaseHash: filter.dandiCodebaseHash,
+        dandiCodebaseVersion: filter.dandiCodebaseVersion,
+        assetSize: filter.assetSize,
+        failureStep: filter.failureStep,
+        status: filter.status,
+    };
+    for (const key of omit) delete all[key];
+    return all;
 }
 
 function sumRunByteCounts(runs) {
@@ -317,6 +362,8 @@ function renderFilterBanner(filter, availableRuns = []) {
         filter.paramsType ||
         filter.configType ||
         filter.dandiCodebaseHash ||
+        filter.dandiCodebaseVersion ||
+        filter.assetSize ||
         filter.failureStep ||
         filter.status
     );
@@ -357,6 +404,16 @@ function renderFilterBanner(filter, availableRuns = []) {
             `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseHash: filter.dandiCodebaseHash }))}">Codebase:&nbsp;${e(filter.dandiCodebaseHash)}</a>`
         );
     }
+    if (filter.dandiCodebaseVersion) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseVersion: filter.dandiCodebaseVersion }))}">Codebase&nbsp;ver:&nbsp;${e(filter.dandiCodebaseVersion)}</a>`
+        );
+    }
+    if (filter.assetSize) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ assetSize: filter.assetSize }))}">Size:&nbsp;${e(filter.assetSize)}</a>`
+        );
+    }
     if (filter.failureStep) {
         const failureStepLabel =
             filter.failureStep === "exclude-job-dispatch"
@@ -391,6 +448,10 @@ function renderFilterBanner(filter, availableRuns = []) {
     const paramsTypes = uniqueSortedValues(availableRuns.map(runParamsType));
     const configTypes = uniqueSortedValues(availableRuns.map(runConfigType));
     const dandiCodebaseHashes = uniqueSortedValues(availableRuns.map(runDandiCodebaseHash));
+    const dandiCodebaseVersions = uniqueSortedValues(availableRuns.map((r) => r.codebase));
+    // Preserve natural (ascending) bucket order rather than alphabetical.
+    const presentSizeBuckets = new Set(availableRuns.map(runAssetSizeBucket).filter(Boolean));
+    const assetSizes = ASSET_SIZE_BUCKETS.map((b) => b.label).filter((label) => presentSizeBuckets.has(label));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
         ...availableRuns
@@ -435,14 +496,16 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${sortHiddenInput}
         ${sortDirectionHiddenInput}
         ${statusHiddenInput}
-        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl({ pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl({ dandiset: filter.dandisetId, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, dandiCodebaseHash: filter.dandiCodebaseHash, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, failureStep: filter.failureStep, status: filter.status }))}
-        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session, pipelineVersion: filter.pipelineVersion, paramsType: filter.paramsType, configType: filter.configType, dandiCodebaseHash: filter.dandiCodebaseHash, status: filter.status }))}
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl(filterNarrowParams(filter, ["dandiset", "subject", "session"])))}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl(filterNarrowParams(filter, ["subject", "session"])))}
+        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl(filterNarrowParams(filter, ["session"])))}
+        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
+        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
+        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
+        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
+        ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
+        ${renderFilterInput("assetSize", "Asset Size", filter.assetSize, assetSizes, narrowUrl(filterNarrowParams(filter, ["assetSize"])))}
+        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <button class="filter-apply" type="submit">Apply</button>
         <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
     </form>
@@ -934,6 +997,7 @@ function parseQueueEntries(entries) {
             paramsProfile: entry.params,
             configHash: normalizeConfigHash(entry.config),
             attempt: entry.attempt,
+            codebase: entry.codebase ?? null,
             hasCode: entry.has_code,
             hasBeenSubmitted: entry.has_been_submitted ?? false,
             hasOutput: entry.has_output,
@@ -1086,27 +1150,8 @@ function renderSummary(runs) {
     const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(successfulRuns);
     const filter = parseFilter();
-    const successHref = narrowUrl({
-        dandiset: filter.dandisetId,
-        subject: filter.subject,
-        session: filter.session,
-        pipelineVersion: filter.pipelineVersion,
-        paramsType: filter.paramsType,
-        configType: filter.configType,
-        dandiCodebaseHash: filter.dandiCodebaseHash,
-        status: "success",
-    });
-    const failedHref = narrowUrl({
-        dandiset: filter.dandisetId,
-        subject: filter.subject,
-        session: filter.session,
-        pipelineVersion: filter.pipelineVersion,
-        paramsType: filter.paramsType,
-        configType: filter.configType,
-        dandiCodebaseHash: filter.dandiCodebaseHash,
-        failureStep: filter.failureStep,
-        status: "failed",
-    });
+    const successHref = narrowUrl({ ...filterNarrowParams(filter, ["failureStep", "status"]), status: "success" });
+    const failedHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "failed" });
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -2659,7 +2704,7 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
                target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
             <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
-               target="_blank" rel="noopener" onclick="event.stopPropagation()">Sourcedata&nbsp;↖</a>
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">↗&nbsp;Sourcedata</a>
             <span class="group-meta">
                 <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? "s" : ""}</span>
                 <span class="run-sep">·</span>
@@ -2853,7 +2898,7 @@ function renderFlatRunEntry(run) {
     return `
 <div class="run-entry flat-run-entry ${sc}">
     <div class="run-entry-header flat-run-header">
-        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
+        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">↗&nbsp;Sourcedata</a>
         <span class="status-badge ${sc}">${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
@@ -3913,6 +3958,8 @@ async function loadQueueData() {
             filter.paramsType ||
             filter.configType ||
             filter.dandiCodebaseHash ||
+            filter.dandiCodebaseVersion ||
+            filter.assetSize ||
             filter.failureStep ||
             filter.status
         );
