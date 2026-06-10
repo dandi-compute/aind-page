@@ -3089,7 +3089,16 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
-    const runsHtml = runs.map(renderRunEntry).join("");
+    const byPipelineVersion = groupBy(runs, (r) => `${r.pipelineName}\x00${r.pipelineVersion}`);
+    const pvKeys = [...byPipelineVersion.keys()].sort();
+    const runsHtml = pvKeys
+        .map((key) => {
+            const sep = key.indexOf("\x00");
+            const pipelineName = key.slice(0, sep);
+            const pipelineVersion = key.slice(sep + 1);
+            return renderPipelineVersionGroup(dandisetId, subject, session, pipelineName, pipelineVersion, byPipelineVersion.get(key));
+        })
+        .join("");
 
     return `
 <details class="session-group"${autoExpand ? " open" : ""}>
