@@ -1,0 +1,994 @@
+From 41059b4cf4d80af5ee4232f483d56b5e80442169 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 10 Jun 2026 18:33:16 +0000
+Subject: [PATCH] Restructure into a Python package with a rich-click CLI
+
+Replace the S3-oriented script with an installable package operating on local
+files. A framework-agnostic core (pozu_transcode.core) is shared by both CLI
+entry points:
+
+- single: transcode one file
+- batch:  transcode a directory and emit manifest.json
+- survey: report resolutions / aspect-ratio histogram (no transcoding)
+
+Core keeps the canonical encode (faststart, CFR, closed ~1s GOP H.264) and
+aspect-ratio bucketing with letterbox padding. Adds pyproject packaging,
+unit tests for the geometry/command logic, and a usage README.
+---
+ .gitignore                     |  19 +++
+ README.md                      |  94 ++++++++++-
+ pyproject.toml                 |  33 ++++
+ src/pozu_transcode/__init__.py |  49 ++++++
+ src/pozu_transcode/cli.py      | 177 +++++++++++++++++++++
+ src/pozu_transcode/config.py   |  49 ++++++
+ src/pozu_transcode/core.py     | 280 +++++++++++++++++++++++++++++++++
+ tests/test_core.py             |  68 ++++++++
+ transcode.py                   | 131 ---------------
+ 9 files changed, 768 insertions(+), 132 deletions(-)
+ create mode 100644 .gitignore
+ create mode 100644 pyproject.toml
+ create mode 100644 src/pozu_transcode/__init__.py
+ create mode 100644 src/pozu_transcode/cli.py
+ create mode 100644 src/pozu_transcode/config.py
+ create mode 100644 src/pozu_transcode/core.py
+ create mode 100644 tests/test_core.py
+ delete mode 100644 transcode.py
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..9ac849f
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,19 @@
++# Python
++__pycache__/
++*.py[cod]
++*.egg-info/
++.eggs/
++build/
++dist/
++.venv/
++venv/
++
++# Tooling
++.pytest_cache/
++.mypy_cache/
++.ruff_cache/
++
++# Transcode outputs / scratch
++transcoded/
++*.mp4
++!tests/**/*.mp4
+diff --git a/README.md b/README.md
+index 9656cdf..4333daa 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,95 @@
+ # Pozu (Transcoding)
+ 
+-Video transcoding for the Pozu project.
++Video transcoding for the [Pozu](https://github.com/CodyCBakerPhD/pozu) pose-labeling
++project.
++
++Pozu pulls random frames from random videos for labeling. To make that lookup fast
++and to give the ML pipeline a single, consistent "pixel space", this tool transcodes
++each source video into a **canonical** form:
++
++- **H.264 High / yuv420p**, broadly browser-decodable and watchable as a normal movie.
++- **`+faststart`** (moov atom at the front) so the browser can seek immediately over
++  HTTP range requests.
++- **Constant frame rate** so `frame = time x fps` is exact.
++- **Closed ~1s GOP** so any random seek decodes at most ~1s of video -- fast random
++  access without all-intra's storage blowup.
++- **Aspect-ratio bucketing**: every video is letterbox-padded (never stretched or
++  cropped) into its nearest-aspect-ratio canvas, giving the model a small set of
++  fixed input sizes at roughly equal pixel area. Black bars cost almost nothing in
++  H.264.
++
++The transcode space is canonical: all labeling, training, and inference run in it.
++
++## Install
++
++Requires **ffmpeg** / **ffprobe** on your `PATH`.
++
++```bash
++pip install -e .
++```
++
++## Usage
++
++```bash
++# 1. Inspect your corpus and confirm the bucket presets fit (no transcoding).
++pozu-transcode survey ./raw
++
++# 2a. Transcode one file.
++pozu-transcode single ./raw/clip.mov ./transcoded/clip.mp4
++
++# 2b. Transcode a whole directory; also writes transcoded/manifest.json.
++pozu-transcode batch ./raw ./transcoded
++```
++
++Common options (shared by `single` and `batch`):
++
++| Option | Default | Meaning |
++| --- | --- | --- |
++| `--crf` | `20` | x264 quality; lower = better/larger. |
++| `--preset` | `slow` | x264 speed/efficiency tradeoff. |
++| `--gop-seconds` | `1.0` | Keyframe interval; smaller = faster seeks. |
++| `--fps` | `30` | Force CFR to this fps (`0` keeps the source's fps). |
++| `--allow-upscale` | off | Upscale sources smaller than their canvas. |
++| `--bucket NAME:WxH` | built-in set | Override AR buckets (repeatable). |
++
++The default buckets are `sq:720x720`, `4x3:832x624`, `16x9:960x540` (~0.52 MP each).
++Tune them to your data based on the `survey` histogram, e.g.:
++
++```bash
++pozu-transcode batch ./raw ./transcoded \
++  --bucket sq:720x720 --bucket 16x9:960x540 --bucket wide:1024x512
++```
++
++## Manifest
++
++`batch` writes `manifest.json`: one record per output with the canvas, the active
++(non-padding) region, fps, and frame count -- everything the labeler needs to pick a
++random frame, and everything the model needs to mask the bars if desired.
++
++```json
++{
++  "video_id": "clip.mp4",
++  "src_path": "raw/clip.mov", "out_path": "transcoded/clip.mp4",
++  "src_w": 1920, "src_h": 1080, "frame_count": 300,
++  "bucket": "16x9", "canvas_w": 960, "canvas_h": 540,
++  "active_w": 960, "active_h": 540, "pad_x": 0, "pad_y": 0, "fps": 30
++}
++```
++
++## Library API
++
++The CLI is a thin shell over `pozu_transcode.core`, so you can script it directly:
++
++```python
++from pozu_transcode import TranscodeConfig, transcode, transcode_batch
++
++entry = transcode("raw/clip.mov", "transcoded/clip.mp4")
++entries = transcode_batch("raw", "transcoded", TranscodeConfig(crf=18))
++```
++
++## Development
++
++```bash
++pip install -e ".[test]"
++pytest
++```
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 0000000..9368992
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,33 @@
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[project]
++name = "pozu-transcode"
++version = "0.1.0"
++description = "Canonical, aspect-ratio-bucketed, fast-seek H.264 transcoding for the Pozu pose-labeling project."
++readme = "README.md"
++requires-python = ">=3.9"
++license = { text = "MIT" }
++authors = [{ name = "Cody Baker", email = "cody.c.baker.phd@gmail.com" }]
++keywords = ["video", "transcoding", "ffmpeg", "pose-estimation", "h264"]
++classifiers = [
++    "Programming Language :: Python :: 3",
++    "Topic :: Multimedia :: Video :: Conversion",
++]
++dependencies = ["rich-click>=1.7"]
++
++[project.optional-dependencies]
++test = ["pytest>=7"]
++
++[project.scripts]
++pozu-transcode = "pozu_transcode.cli:cli"
++
++[project.urls]
++Homepage = "https://github.com/CodyCBakerPhD/pozu-transcode"
++
++[tool.hatch.build.targets.wheel]
++packages = ["src/pozu_transcode"]
++
++[tool.pytest.ini_options]
++testpaths = ["tests"]
+diff --git a/src/pozu_transcode/__init__.py b/src/pozu_transcode/__init__.py
+new file mode 100644
+index 0000000..2d0eb55
+--- /dev/null
++++ b/src/pozu_transcode/__init__.py
+@@ -0,0 +1,49 @@
++"""pozu-transcode: canonical, AR-bucketed, fast-seek H.264 transcoding for Pozu.
++
++The package exposes a small core API (:mod:`pozu_transcode.core`) shared by both
++the single-file and batch CLI commands (:mod:`pozu_transcode.cli`).
++"""
++from .config import Bucket, DEFAULT_BUCKETS, TranscodeConfig
++from .core import (
++    EncodePlan,
++    FFmpegError,
++    Letterbox,
++    ManifestEntry,
++    VideoMeta,
++    aspect_histogram,
++    build_ffmpeg_command,
++    compute_letterbox,
++    iter_videos,
++    pick_bucket,
++    plan_encode,
++    probe,
++    survey,
++    transcode,
++    transcode_batch,
++    write_manifest,
++)
++
++__version__ = "0.1.0"
++
++__all__ = [
++    "__version__",
++    "Bucket",
++    "DEFAULT_BUCKETS",
++    "TranscodeConfig",
++    "EncodePlan",
++    "FFmpegError",
++    "Letterbox",
++    "ManifestEntry",
++    "VideoMeta",
++    "aspect_histogram",
++    "build_ffmpeg_command",
++    "compute_letterbox",
++    "iter_videos",
++    "pick_bucket",
++    "plan_encode",
++    "probe",
++    "survey",
++    "transcode",
++    "transcode_batch",
++    "write_manifest",
++]
+diff --git a/src/pozu_transcode/cli.py b/src/pozu_transcode/cli.py
+new file mode 100644
+index 0000000..a245909
+--- /dev/null
++++ b/src/pozu_transcode/cli.py
+@@ -0,0 +1,177 @@
++"""rich-click command-line interface.
++
++Two transcode entry points -- ``single`` (one file) and ``batch`` (a directory) --
++share the same options and the same :mod:`pozu_transcode.core` logic. ``survey``
++reports resolutions/aspect ratios so you can choose buckets before transcoding.
++"""
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Tuple
++
++import rich_click as click
++from rich.console import Console
++from rich.table import Table
++
++from . import __version__, core
++from .config import DEFAULT_BUCKETS, Bucket, TranscodeConfig
++
++click.rich_click.USE_RICH_MARKUP = True
++click.rich_click.SHOW_ARGUMENTS = True
++click.rich_click.GROUP_ARGUMENTS_OPTIONS = True
++
++console = Console()
++
++
++# ── shared option handling ──────────────────────────────────────────────────
++def _parse_buckets(raw: Tuple[str, ...]) -> list:
++    buckets = []
++    for item in raw:
++        try:
++            name, dims = item.split(":")
++            w, h = dims.lower().split("x")
++            buckets.append(Bucket(name, int(w), int(h)))
++        except ValueError as exc:
++            raise click.BadParameter(
++                f"invalid bucket {item!r}; expected NAME:WIDTHxHEIGHT, e.g. 16x9:960x540"
++            ) from exc
++    return buckets
++
++
++def encode_options(func):
++    """Attach the transcode knobs shared by ``single`` and ``batch``."""
++    options = [
++        click.option("--crf", type=int, default=20, show_default=True,
++                     help="x264 CRF quality (lower = better quality, larger files)."),
++        click.option("--preset", default="slow", show_default=True,
++                     help="x264 speed/efficiency preset."),
++        click.option("--gop-seconds", type=float, default=1.0, show_default=True,
++                     help="Keyframe interval in seconds (smaller = faster random seeks)."),
++        click.option("--fps", "target_fps", type=int, default=30, show_default=True,
++                     help="Force constant frame rate to this fps. Use [cyan]0[/] to keep each source's fps."),
++        click.option("--allow-upscale/--no-upscale", default=False, show_default=True,
++                     help="Allow upscaling sources smaller than their canvas."),
++        click.option("--bucket", "buckets_raw", multiple=True, metavar="NAME:WxH",
++                     help="Override aspect-ratio buckets (repeatable), e.g. [cyan]--bucket 16x9:960x540[/]."),
++    ]
++    for option in reversed(options):
++        func = option(func)
++    return func
++
++
++def _build_config(crf, preset, gop_seconds, target_fps, allow_upscale, buckets_raw) -> TranscodeConfig:
++    return TranscodeConfig(
++        buckets=_parse_buckets(buckets_raw) if buckets_raw else list(DEFAULT_BUCKETS),
++        target_fps=target_fps or None,  # 0 -> keep source fps
++        crf=crf,
++        preset=preset,
++        gop_seconds=gop_seconds,
++        allow_upscale=allow_upscale,
++    )
++
++
++def _print_entry(entry: core.ManifestEntry) -> None:
++    table = Table(show_header=False, box=None, pad_edge=False)
++    table.add_row("output", entry.out_path)
++    table.add_row("bucket", f"{entry.bucket} ({entry.canvas_w}x{entry.canvas_h})")
++    table.add_row("source", f"{entry.src_w}x{entry.src_h}")
++    table.add_row("active", f"{entry.active_w}x{entry.active_h} (pad {entry.pad_x},{entry.pad_y})")
++    table.add_row("fps", str(entry.fps))
++    table.add_row("frames", str(entry.frame_count))
++    console.print(table)
++
++
++# ── commands ────────────────────────────────────────────────────────────────
++@click.group(context_settings={"help_option_names": ["-h", "--help"]})
++@click.version_option(__version__, prog_name="pozu-transcode")
++def cli() -> None:
++    """Canonical, AR-bucketed, fast-seek H.264 transcoding for [bold]Pozu[/].
++
++    Outputs are faststart, constant-frame-rate H.264 with a closed ~1s GOP --
++    watchable as normal movies, but tuned for fast random-frame seeking. Each
++    source is letterbox-padded (never stretched or cropped) into its nearest
++    aspect-ratio canvas.
++    """
++
++
++@cli.command(short_help="Transcode a single video file.")
++@click.argument("input", type=click.Path(exists=True, dir_okay=False, path_type=Path))
++@click.argument("output", type=click.Path(dir_okay=False, path_type=Path))
++@encode_options
++def single(input: Path, output: Path, **opts) -> None:
++    """Transcode one [cyan]INPUT[/] video into [cyan]OUTPUT[/] (an .mp4)."""
++    config = _build_config(**opts)
++    with console.status(f"Transcoding {input} ..."):
++        entry = core.transcode(input, output, config)
++    console.print(f"[green]✓[/] {input} [dim]->[/] {output}")
++    _print_entry(entry)
++
++
++@cli.command(short_help="Transcode every video in a directory.")
++@click.argument("input_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
++@click.argument("output_dir", type=click.Path(file_okay=False, path_type=Path))
++@encode_options
++def batch(input_dir: Path, output_dir: Path, **opts) -> None:
++    """Transcode all videos under [cyan]INPUT_DIR[/] into [cyan]OUTPUT_DIR[/].
++
++    Writes one .mp4 per source plus a [cyan]manifest.json[/] describing every
++    output (bucket, canvas, active region, fps, frame count).
++    """
++    config = _build_config(**opts)
++
++    def on_done(src: Path, entry: core.ManifestEntry) -> None:
++        console.print(
++            f"[green]✓[/] {src} [dim]->[/] {entry.out_path} "
++            f"[cyan]\\[{entry.bucket}][/]"
++        )
++
++    entries = core.transcode_batch(input_dir, output_dir, config, on_done=on_done)
++    if not entries:
++        console.print(f"[yellow]No videos found under {input_dir}.[/]")
++        return
++    console.print(
++        f"\n[bold green]Transcoded {len(entries)} videos[/] "
++        f"[dim]->[/] {output_dir / 'manifest.json'}"
++    )
++
++
++@cli.command(short_help="Report resolutions and aspect ratios (no transcoding).")
++@click.argument("input_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
++@click.option("--bucket", "buckets_raw", multiple=True, metavar="NAME:WxH",
++              help="Buckets to assign against (repeatable); defaults to the built-in set.")
++def survey(input_dir: Path, buckets_raw: Tuple[str, ...]) -> None:
++    """Probe every video under [cyan]INPUT_DIR[/] and print an aspect-ratio histogram.
++
++    Run this first to confirm the bucket presets fit your corpus.
++    """
++    buckets = _parse_buckets(buckets_raw) if buckets_raw else list(DEFAULT_BUCKETS)
++    paths = list(core.iter_videos(input_dir, TranscodeConfig().video_extensions))
++    if not paths:
++        console.print(f"[yellow]No videos found under {input_dir}.[/]")
++        return
++
++    results = core.survey(paths)
++    table = Table(title=f"{len(results)} videos under {input_dir}")
++    for col in ("file", "resolution", "AR", "codec", "fps", "bucket"):
++        table.add_column(col)
++    for path, meta in results:
++        bucket = core.pick_bucket(meta.aspect_ratio, buckets)
++        table.add_row(
++            str(path),
++            f"{meta.width}x{meta.height}",
++            f"{meta.aspect_ratio:.2f}",
++            meta.codec,
++            f"{meta.fps_r:.2f}" + (" [red]VFR[/]" if meta.is_vfr else ""),
++            bucket.name,
++        )
++    console.print(table)
++
++    hist = core.aspect_histogram([m for _, m in results])
++    console.print(
++        "AR histogram: "
++        + ", ".join(f"[cyan]{ar:.2f}[/]: {n}" for ar, n in hist.items())
++    )
++
++
++if __name__ == "__main__":  # pragma: no cover
++    cli()
+diff --git a/src/pozu_transcode/config.py b/src/pozu_transcode/config.py
+new file mode 100644
+index 0000000..62b57ba
+--- /dev/null
++++ b/src/pozu_transcode/config.py
+@@ -0,0 +1,49 @@
++"""Configuration objects for the transcoding pipeline."""
++from __future__ import annotations
++
++from dataclasses import dataclass, field
++from typing import List, Optional, Tuple
++
++
++@dataclass(frozen=True)
++class Bucket:
++    """A fixed output canvas that videos of a similar aspect ratio are padded into."""
++
++    name: str
++    width: int
++    height: int
++
++    @property
++    def aspect_ratio(self) -> float:
++        return self.width / self.height
++
++
++# Default canvases: ~0.52 MP each, even dimensions, spanning common aspect ratios.
++# Tune these to your corpus (run `pozu-transcode survey ...` first).
++DEFAULT_BUCKETS: Tuple[Bucket, ...] = (
++    Bucket("sq", 720, 720),    # 1.00
++    Bucket("4x3", 832, 624),   # 1.33
++    Bucket("16x9", 960, 540),  # 1.78
++)
++
++VIDEO_EXTENSIONS: Tuple[str, ...] = (".mp4", ".mov", ".avi", ".mkv")
++
++
++@dataclass
++class TranscodeConfig:
++    """Knobs shared by the single-file and batch entry points.
++
++    The defaults encode every output as faststart, constant-frame-rate H.264 with a
++    closed ~1s GOP -- watchable as a normal movie, but tuned for fast random-frame
++    seeking. Each source is letterbox-padded (never stretched or cropped) into its
++    nearest-aspect-ratio :class:`Bucket`.
++    """
++
++    buckets: List[Bucket] = field(default_factory=lambda: list(DEFAULT_BUCKETS))
++    target_fps: Optional[int] = 30  # force CFR to this; None keeps each source's fps
++    crf: int = 20
++    preset: str = "slow"
++    gop_seconds: float = 1.0  # keyframe interval -> fast seeks, small size cost
++    allow_upscale: bool = False  # don't invent detail in small sources by default
++    audio_bitrate: str = "128k"
++    video_extensions: Tuple[str, ...] = VIDEO_EXTENSIONS
+diff --git a/src/pozu_transcode/core.py b/src/pozu_transcode/core.py
+new file mode 100644
+index 0000000..cf97d5c
+--- /dev/null
++++ b/src/pozu_transcode/core.py
+@@ -0,0 +1,280 @@
++"""Core, framework-agnostic transcoding API.
++
++This module knows nothing about the CLI; it operates on plain paths and returns
++plain data, so both the ``single`` and ``batch`` commands -- and any external
++caller -- share the exact same logic.
++"""
++from __future__ import annotations
++
++import json
++import math
++import subprocess
++from collections import Counter
++from dataclasses import asdict, dataclass
++from pathlib import Path
++from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
++
++from .config import Bucket, TranscodeConfig
++
++PathLike = Union[str, Path]
++
++
++class FFmpegError(RuntimeError):
++    """Raised when ffmpeg/ffprobe is missing or returns a non-zero exit code."""
++
++
++# ── data ────────────────────────────────────────────────────────────────────
++@dataclass
++class VideoMeta:
++    width: int
++    height: int
++    fps_r: float  # nominal (r_frame_rate)
++    fps_avg: float  # measured average
++    codec: str
++    duration: float
++
++    @property
++    def aspect_ratio(self) -> float:
++        return self.width / self.height
++
++    @property
++    def is_vfr(self) -> bool:
++        return self.fps_avg > 0 and abs(self.fps_r - self.fps_avg) > 0.01
++
++
++@dataclass
++class Letterbox:
++    """How a source is scaled and centered inside a bucket canvas."""
++
++    active_w: int
++    active_h: int
++    pad_x: int
++    pad_y: int
++
++
++@dataclass
++class EncodePlan:
++    bucket: Bucket
++    letterbox: Letterbox
++    fps: int
++    gop: int
++
++    @property
++    def vf(self) -> str:
++        """The ffmpeg ``-vf`` filter chain: uniform scale, then centered pad."""
++        lb, b = self.letterbox, self.bucket
++        return (
++            f"scale={lb.active_w}:{lb.active_h}:flags=lanczos,"
++            f"pad={b.width}:{b.height}:{lb.pad_x}:{lb.pad_y}:color=black,setsar=1"
++        )
++
++
++@dataclass
++class ManifestEntry:
++    video_id: str
++    src_path: str
++    out_path: str
++    src_w: int
++    src_h: int
++    frame_count: int
++    bucket: str
++    canvas_w: int
++    canvas_h: int
++    active_w: int
++    active_h: int
++    pad_x: int
++    pad_y: int
++    fps: int
++
++    def to_dict(self) -> Dict[str, object]:
++        return asdict(self)
++
++
++# ── ffprobe / ffmpeg ────────────────────────────────────────────────────────
++def _run(cmd: Sequence[str], *, capture: bool = False) -> str:
++    try:
++        result = subprocess.run(
++            list(cmd), capture_output=True, text=True, check=True
++        )
++    except FileNotFoundError as exc:  # ffmpeg/ffprobe not installed
++        raise FFmpegError(f"Command not found: {cmd[0]!r} (is ffmpeg installed?)") from exc
++    except subprocess.CalledProcessError as exc:
++        raise FFmpegError(f"{cmd[0]} failed:\n{exc.stderr}") from exc
++    return result.stdout if capture else ""
++
++
++def _rate(value: str) -> float:
++    """Parse an ffprobe rational like ``30000/1001`` into a float."""
++    try:
++        num, _, den = value.partition("/")
++        d = float(den) if den else 1.0
++        return float(num) / d if d else 0.0
++    except (ValueError, ZeroDivisionError):
++        return 0.0
++
++
++def probe(path: PathLike) -> VideoMeta:
++    """Read width/height/fps/codec/duration of the first video stream."""
++    out = _run(
++        [
++            "ffprobe", "-v", "error", "-select_streams", "v:0",
++            "-show_entries",
++            "stream=width,height,r_frame_rate,avg_frame_rate,codec_name",
++            "-show_entries", "format=duration",
++            "-of", "json", str(path),
++        ],
++        capture=True,
++    )
++    data = json.loads(out)
++    streams = data.get("streams") or []
++    if not streams:
++        raise FFmpegError(f"No video stream found in {path}")
++    st = streams[0]
++    return VideoMeta(
++        width=int(st["width"]),
++        height=int(st["height"]),
++        fps_r=_rate(st.get("r_frame_rate", "0/1")),
++        fps_avg=_rate(st.get("avg_frame_rate", "0/1")),
++        codec=st.get("codec_name", "?"),
++        duration=float(data.get("format", {}).get("duration", 0.0)),
++    )
++
++
++# ── geometry ────────────────────────────────────────────────────────────────
++def even(x: float) -> int:
++    """Round to the nearest even integer >= 2 (yuv420p requires even dims)."""
++    return max(2, int(round(x / 2)) * 2)
++
++
++def pick_bucket(aspect_ratio: float, buckets: Sequence[Bucket]) -> Bucket:
++    """Choose the bucket whose AR is nearest in log-space (minimizes bar area)."""
++    return min(buckets, key=lambda b: abs(math.log(aspect_ratio / b.aspect_ratio)))
++
++
++def compute_letterbox(
++    src_w: int, src_h: int, bucket: Bucket, allow_upscale: bool = False
++) -> Letterbox:
++    """Uniformly scale a source to fit a bucket canvas, then center it."""
++    scale = min(bucket.width / src_w, bucket.height / src_h)
++    if not allow_upscale:
++        scale = min(scale, 1.0)
++    aw, ah = even(src_w * scale), even(src_h * scale)
++    return Letterbox(aw, ah, (bucket.width - aw) // 2, (bucket.height - ah) // 2)
++
++
++def plan_encode(
++    meta: VideoMeta, config: TranscodeConfig, bucket: Optional[Bucket] = None
++) -> EncodePlan:
++    """Resolve the bucket, letterbox, output fps, and keyframe interval."""
++    bucket = bucket or pick_bucket(meta.aspect_ratio, config.buckets)
++    letterbox = compute_letterbox(meta.width, meta.height, bucket, config.allow_upscale)
++    fps = config.target_fps if config.target_fps else max(1, round(meta.fps_r))
++    gop = max(1, round(fps * config.gop_seconds))
++    return EncodePlan(bucket=bucket, letterbox=letterbox, fps=fps, gop=gop)
++
++
++def build_ffmpeg_command(
++    src: PathLike, dst: PathLike, plan: EncodePlan, config: TranscodeConfig
++) -> List[str]:
++    """Build the ffmpeg invocation for a single transcode (no I/O performed)."""
++    return [
++        "ffmpeg", "-y", "-i", str(src),
++        "-vf", plan.vf,
++        "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p",
++        "-crf", str(config.crf), "-preset", config.preset,
++        "-g", str(plan.gop), "-keyint_min", str(plan.gop),
++        "-x264-params", "scenecut=0:open-gop=0", "-bf", "2",
++        "-fps_mode", "cfr", "-r", str(plan.fps),
++        "-c:a", "aac", "-b:a", config.audio_bitrate,
++        "-movflags", "+faststart",
++        str(dst),
++    ]
++
++
++# ── transcode ───────────────────────────────────────────────────────────────
++def transcode(
++    src: PathLike,
++    dst: PathLike,
++    config: Optional[TranscodeConfig] = None,
++    *,
++    bucket: Optional[Bucket] = None,
++) -> ManifestEntry:
++    """Transcode one file into the canonical space and return its manifest entry."""
++    config = config or TranscodeConfig()
++    src, dst = Path(src), Path(dst)
++    dst.parent.mkdir(parents=True, exist_ok=True)
++
++    meta = probe(src)
++    plan = plan_encode(meta, config, bucket)
++    _run(build_ffmpeg_command(src, dst, plan, config))
++
++    out_meta = probe(dst)
++    frame_count = round(out_meta.duration * plan.fps)
++    return ManifestEntry(
++        video_id=dst.name,
++        src_path=str(src),
++        out_path=str(dst),
++        src_w=meta.width,
++        src_h=meta.height,
++        frame_count=frame_count,
++        bucket=plan.bucket.name,
++        canvas_w=plan.bucket.width,
++        canvas_h=plan.bucket.height,
++        active_w=plan.letterbox.active_w,
++        active_h=plan.letterbox.active_h,
++        pad_x=plan.letterbox.pad_x,
++        pad_y=plan.letterbox.pad_y,
++        fps=plan.fps,
++    )
++
++
++def iter_videos(root: PathLike, extensions: Sequence[str]) -> Iterator[Path]:
++    """Yield video files under ``root`` (recursive), sorted for determinism."""
++    exts = tuple(e.lower() for e in extensions)
++    for path in sorted(Path(root).rglob("*")):
++        if path.is_file() and path.suffix.lower() in exts:
++            yield path
++
++
++def transcode_batch(
++    in_dir: PathLike,
++    out_dir: PathLike,
++    config: Optional[TranscodeConfig] = None,
++    *,
++    on_start: Optional[Callable[[Path], None]] = None,
++    on_done: Optional[Callable[[Path, ManifestEntry], None]] = None,
++) -> List[ManifestEntry]:
++    """Transcode every video under ``in_dir`` and write ``out_dir/manifest.json``."""
++    config = config or TranscodeConfig()
++    out_dir = Path(out_dir)
++    out_dir.mkdir(parents=True, exist_ok=True)
++
++    entries: List[ManifestEntry] = []
++    for src in iter_videos(in_dir, config.video_extensions):
++        if on_start:
++            on_start(src)
++        entry = transcode(src, out_dir / (src.stem + ".mp4"), config)
++        entries.append(entry)
++        if on_done:
++            on_done(src, entry)
++
++    write_manifest(entries, out_dir / "manifest.json")
++    return entries
++
++
++def write_manifest(entries: Sequence[ManifestEntry], path: PathLike) -> None:
++    Path(path).write_text(
++        json.dumps([e.to_dict() for e in entries], indent=2), encoding="utf-8"
++    )
++
++
++# ── survey ──────────────────────────────────────────────────────────────────
++def survey(paths: Sequence[PathLike]) -> List[Tuple[Path, VideoMeta]]:
++    """Probe each path, returning (path, metadata) pairs."""
++    return [(Path(p), probe(p)) for p in paths]
++
++
++def aspect_histogram(metas: Sequence[VideoMeta], ndigits: int = 2) -> Dict[float, int]:
++    """Count videos by rounded aspect ratio -- use it to choose your buckets."""
++    counts = Counter(round(m.aspect_ratio, ndigits) for m in metas)
++    return dict(sorted(counts.items()))
+diff --git a/tests/test_core.py b/tests/test_core.py
+new file mode 100644
+index 0000000..ae23784
+--- /dev/null
++++ b/tests/test_core.py
+@@ -0,0 +1,68 @@
++"""Unit tests for the pure (no-ffmpeg) parts of the core API."""
++from pozu_transcode import core
++from pozu_transcode.config import DEFAULT_BUCKETS, TranscodeConfig
++
++
++def _bucket(name):
++    return next(b for b in DEFAULT_BUCKETS if b.name == name)
++
++
++def test_even():
++    assert core.even(720) == 720
++    assert core.even(99) % 2 == 0
++    assert core.even(0.4) == 2  # floor of 2
++
++
++def test_pick_bucket_nearest():
++    assert core.pick_bucket(1.00, DEFAULT_BUCKETS).name == "sq"
++    assert core.pick_bucket(1.33, DEFAULT_BUCKETS).name == "4x3"
++    assert core.pick_bucket(1.78, DEFAULT_BUCKETS).name == "16x9"
++    # An extreme wide source still snaps to the widest available bucket.
++    assert core.pick_bucket(3.0, DEFAULT_BUCKETS).name == "16x9"
++
++
++def test_letterbox_exact_fit_no_padding():
++    lb = core.compute_letterbox(1920, 1080, _bucket("16x9"))  # scales to 960x540
++    assert (lb.active_w, lb.active_h, lb.pad_x, lb.pad_y) == (960, 540, 0, 0)
++
++
++def test_letterbox_no_upscale_pads_small_source():
++    lb = core.compute_letterbox(100, 100, _bucket("sq"))  # 720x720 canvas
++    assert (lb.active_w, lb.active_h) == (100, 100)
++    assert lb.pad_x == (720 - 100) // 2 and lb.pad_y == (720 - 100) // 2
++
++
++def test_letterbox_upscale_when_allowed():
++    lb = core.compute_letterbox(100, 100, _bucket("sq"), allow_upscale=True)
++    assert (lb.active_w, lb.active_h) == (720, 720)
++
++
++def _meta(w, h, fps=29.97):
++    return core.VideoMeta(width=w, height=h, fps_r=fps, fps_avg=fps,
++                          codec="h264", duration=10.0)
++
++
++def test_plan_encode_defaults():
++    plan = core.plan_encode(_meta(1920, 1080), TranscodeConfig())
++    assert plan.bucket.name == "16x9"
++    assert plan.fps == 30
++    assert plan.gop == 30  # 1s GOP at 30fps
++
++
++def test_plan_encode_keeps_source_fps():
++    plan = core.plan_encode(_meta(1920, 1080, fps=24.0),
++                            TranscodeConfig(target_fps=None))
++    assert plan.fps == 24
++
++
++def test_build_ffmpeg_command_has_fast_seek_flags():
++    plan = core.plan_encode(_meta(1920, 1080), TranscodeConfig())
++    cmd = core.build_ffmpeg_command("in.mp4", "out.mp4", plan, TranscodeConfig())
++    joined = " ".join(cmd)
++
++    assert "+faststart" in cmd
++    assert "scale=960:540" in joined and "pad=960:540" in joined
++    assert "scenecut=0:open-gop=0" in cmd
++    assert cmd[cmd.index("-g") + 1] == "30"
++    assert cmd[cmd.index("-crf") + 1] == "20"
++    assert cmd[cmd.index("-fps_mode") + 1] == "cfr"
+diff --git a/transcode.py b/transcode.py
+deleted file mode 100644
+index 9e2f03c..0000000
+--- a/transcode.py
++++ /dev/null
+@@ -1,131 +0,0 @@
+-"""
+-Transcode S3 videos into a canonical, AR-bucketed, fast-seek H.264 space.
+-
+-Usage:
+-  python transcode.py --survey                      # print AR histogram, pick buckets
+-  python transcode.py --in-prefix raw/ --out-prefix transcoded/
+-"""
+-import argparse, json, math, subprocess, tempfile, os, collections
+-import boto3
+-
+-# ── config ────────────────────────────────────────────────────────────────
+-BUCKET_NAME = "your-s3-bucket"
+-# (name, canvas_w, canvas_h) — fixed model input sizes, ~0.52 MP each, even dims.
+-AR_BUCKETS = [
+-    ("sq",   720, 720),   # 1.00
+-    ("4x3",  832, 624),   # 1.33
+-    ("16x9", 960, 540),   # 1.78
+-]
+-TARGET_FPS    = 30        # force CFR to this; set None to keep source fps (still CFR)
+-CRF           = 20
+-PRESET        = "slow"
+-GOP_SECONDS   = 1.0       # keyframe interval → fast random seeks, small size cost
+-ALLOW_UPSCALE = False     # don't invent detail in sources smaller than the canvas
+-
+-s3 = boto3.client("s3")
+-
+-# ── helpers ───────────────────────────────────────────────────────────────
+-def ffprobe(path):
+-    out = subprocess.run(
+-        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+-         "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate,codec_name",
+-         "-show_entries", "format=duration", "-of", "json", path],
+-        capture_output=True, text=True, check=True).stdout
+-    j = json.loads(out)
+-    st = j["streams"][0]
+-    def rate(s):
+-        n, d = s.split("/"); d = float(d) or 1.0; return float(n) / d
+-    return {
+-        "w": int(st["width"]), "h": int(st["height"]),
+-        "fps_r": rate(st["r_frame_rate"]), "fps_avg": rate(st["avg_frame_rate"]),
+-        "codec": st["codec_name"], "dur": float(j["format"]["duration"]),
+-    }
+-
+-def pick_bucket(ar):
+-    # nearest in log-AR space → minimizes letterbox bar area
+-    return min(AR_BUCKETS, key=lambda b: abs(math.log(ar / (b[1] / b[2]))))
+-
+-def even(x):
+-    return max(2, int(round(x / 2) * 2))
+-
+-def letterbox(src_w, src_h, W, H):
+-    scale = min(W / src_w, H / src_h)
+-    if not ALLOW_UPSCALE:
+-        scale = min(scale, 1.0)
+-    aw, ah = even(src_w * scale), even(src_h * scale)
+-    return aw, ah, (W - aw) // 2, (H - ah) // 2     # active w,h + pad x,y
+-
+-def transcode(src_path, out_path, meta, bucket):
+-    name, W, H = bucket
+-    aw, ah, px, py = letterbox(meta["w"], meta["h"], W, H)
+-    fps = TARGET_FPS or round(meta["fps_r"])
+-    g = max(1, round(fps * GOP_SECONDS))
+-    vf = (f"scale={aw}:{ah}:flags=lanczos,"
+-          f"pad={W}:{H}:{px}:{py}:color=black,setsar=1")
+-    subprocess.run(
+-        ["ffmpeg", "-y", "-i", src_path,
+-         "-vf", vf,
+-         "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p",
+-         "-crf", str(CRF), "-preset", PRESET,
+-         "-g", str(g), "-keyint_min", str(g),
+-         "-x264-params", "scenecut=0:open-gop=0", "-bf", "2",
+-         "-fps_mode", "cfr", "-r", str(fps),
+-         "-c:a", "aac", "-b:a", "128k",
+-         "-movflags", "+faststart", out_path],
+-        check=True)
+-    return {"bucket": name, "canvas_w": W, "canvas_h": H,
+-            "active_w": aw, "active_h": ah, "pad_x": px, "pad_y": py, "fps": fps}
+-
+-def list_videos(prefix):
+-    p = s3.get_paginator("list_objects_v2")
+-    for page in p.paginate(Bucket=BUCKET_NAME, Prefix=prefix):
+-        for o in page.get("Contents", []):
+-            if o["Key"].lower().endswith((".mp4", ".mov", ".avi", ".mkv")):
+-                yield o["Key"]
+-
+-# ── modes ─────────────────────────────────────────────────────────────────
+-def survey(prefix):
+-    hist = collections.Counter()
+-    with tempfile.TemporaryDirectory() as d:
+-        for key in list_videos(prefix):
+-            local = os.path.join(d, "v")
+-            s3.download_file(BUCKET_NAME, key, local)
+-            m = ffprobe(local)
+-            ar = m["w"] / m["h"]
+-            hist[round(ar, 2)] += 1
+-            vfr = abs(m["fps_r"] - m["fps_avg"]) > 0.01
+-            print(f"{key}: {m['w']}x{m['h']} AR={ar:.2f} {m['codec']} "
+-                  f"{m['fps_r']:.2f}fps{' VFR' if vfr else ''}")
+-    print("\nAR histogram:", dict(sorted(hist.items())))
+-
+-def run(in_prefix, out_prefix):
+-    manifest = []
+-    with tempfile.TemporaryDirectory() as d:
+-        for key in list_videos(in_prefix):
+-            src = os.path.join(d, "in.mp4"); out = os.path.join(d, "out.mp4")
+-            s3.download_file(BUCKET_NAME, key, src)
+-            m = ffprobe(src)
+-            bucket = pick_bucket(m["w"] / m["h"])
+-            geom = transcode(src, out, m, bucket)
+-            out_meta = ffprobe(out)
+-            out_key = out_prefix + os.path.basename(key).rsplit(".", 1)[0] + ".mp4"
+-            s3.upload_file(out, BUCKET_NAME, out_key,
+-                           ExtraArgs={"ContentType": "video/mp4"})
+-            frame_count = round(out_meta["dur"] * geom["fps"])
+-            manifest.append({"video_id": os.path.basename(out_key),
+-                             "src_key": key, "out_key": out_key,
+-                             "src_w": m["w"], "src_h": m["h"],
+-                             "frame_count": frame_count, **geom})
+-            print(f"✓ {key} → {out_key} [{geom['bucket']}]")
+-    s3.put_object(Bucket=BUCKET_NAME, Key=out_prefix + "manifest.json",
+-                  Body=json.dumps(manifest, indent=2).encode(),
+-                  ContentType="application/json")
+-    print(f"\nWrote manifest with {len(manifest)} entries.")
+-
+-if __name__ == "__main__":
+-    ap = argparse.ArgumentParser()
+-    ap.add_argument("--survey", action="store_true")
+-    ap.add_argument("--in-prefix", default="raw/")
+-    ap.add_argument("--out-prefix", default="transcoded/")
+-    a = ap.parse_args()
+-    survey(a.in_prefix) if a.survey else run(a.in_prefix, a.out_prefix)
+-- 
+2.43.0
+
