@@ -1686,6 +1686,8 @@ function renderRunEntry(run) {
     <div class="run-entry-header">
         <span class="status-badge ${sc}">${slbl}</span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
+        ${run.paramsProfile ? `<span class="run-sep">·</span><span class="run-params">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>` : ""}
+        ${run.configHash ? `<span class="run-sep">·</span><span class="run-config">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
         <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
