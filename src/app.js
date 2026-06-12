@@ -894,10 +894,7 @@ function fetchVisualizationData(run) {
 // "{run.path}/visualization/<name>"), resolving its blob from the S3 map.
 async function fetchVizArtifactJson(run, fileName) {
     if (!run?.outputPaths) return null;
-    const candidates = [
-        `${run.path}/derivatives/visualization/${fileName}`,
-        `${run.path}/visualization/${fileName}`,
-    ];
+    const candidates = [`${run.path}/derivatives/visualization/${fileName}`, `${run.path}/visualization/${fileName}`];
     for (const repoPath of candidates) {
         const url = resolveBlobUrl(run, repoPath);
         if (!url) continue;
@@ -1316,7 +1313,9 @@ function normalizeQueuePriorityItem(item) {
         }
         const skip = new Set([...QUEUE_ITEM_LABEL_KEYS, ...QUEUE_ITEM_PRIORITY_KEYS]);
         const extra = Object.entries(item)
-            .filter(([k, v]) => !skip.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+            .filter(
+                ([k, v]) => !skip.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+            )
             .map(([k, v]) => ({ key: k, value: v }));
         return { label: label ?? JSON.stringify(item), priority, extra };
     }
@@ -1374,7 +1373,8 @@ const QUEUE_FIELD_DESCRIPTIONS = {
     max_attempts_per_asset: "The maximum number of times the pipeline should be retried on a single asset.",
     asset_overrides:
         "A mapping of asset identifiers (e.g. UUIDs) to an override value. A null value means there is no limit on the number of failures for that asset.",
-    max_fail_per_dandiset: "The maximum number of failures permitted per dandiset before the pipeline is considered failed.",
+    max_fail_per_dandiset:
+        "The maximum number of failures permitted per dandiset before the pipeline is considered failed.",
 };
 const QUEUE_OVERRIDE_NULL_DESCRIPTION = "No limit on the number of failures for this asset.";
 
@@ -1412,7 +1412,8 @@ const QUEUE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 // Per-asset overrides as a small collapsible list. Asset keys are content ids,
 // so they link into Neurosift like the rest of the app.
 function renderQueueAssetOverrides(overrides) {
-    const entries = overrides && typeof overrides === "object" && !Array.isArray(overrides) ? Object.entries(overrides) : [];
+    const entries =
+        overrides && typeof overrides === "object" && !Array.isArray(overrides) ? Object.entries(overrides) : [];
     if (!entries.length) return "";
     const rows = entries
         .map(([assetId, val]) => {
@@ -1445,10 +1446,22 @@ function renderQueuePipelines(pipelines) {
                 return `<div class="qp-pipeline"><div class="qp-pipeline-name">${e(name)}</div>${renderQueueConfigGeneric(p)}</div>`;
             }
             const rows = [];
-            if ("version_priority" in p) rows.push(renderQueuePriorityRow("Version priority", p.version_priority, "pipelineVersion", "version_priority"));
-            if ("params_priority" in p) rows.push(renderQueuePriorityRow("Params priority", p.params_priority, null, "params_priority"));
+            if ("version_priority" in p)
+                rows.push(
+                    renderQueuePriorityRow(
+                        "Version priority",
+                        p.version_priority,
+                        "pipelineVersion",
+                        "version_priority"
+                    )
+                );
+            if ("params_priority" in p)
+                rows.push(renderQueuePriorityRow("Params priority", p.params_priority, null, "params_priority"));
             const settings = Object.entries(p)
-                .filter(([k, v]) => !known.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+                .filter(
+                    ([k, v]) =>
+                        !known.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+                )
                 .map(([key, value]) => ({ key, value }));
             return `<div class="qp-pipeline">
         <div class="qp-pipeline-name">${e(name)}</div>
@@ -1470,7 +1483,10 @@ function renderQueueAdaptiveBody(config) {
                 const labelHtml = isDandisetId(it.label)
                     ? `<a class="qp-label qp-label-link" href="${e(narrowUrl({ dandiset: it.label }))}" title="Filter dashboard to Dandiset ${e(it.label)}">${e(it.label)}</a>`
                     : `<span class="qp-label">${e(it.label)}</span>`;
-                const prio = it.priority !== null ? `<span class="qp-priority" title="Priority">${e(String(it.priority))}</span>` : "";
+                const prio =
+                    it.priority !== null
+                        ? `<span class="qp-priority" title="Priority">${e(String(it.priority))}</span>`
+                        : "";
                 const extra = it.extra.length
                     ? `<span class="qp-item-meta">${it.extra.map((x) => `${e(prettyKey(x.key))}:&nbsp;${e(String(x.value))}`).join(" · ")}</span>`
                     : "";
@@ -1736,10 +1752,7 @@ function renderPipelineInfo(pipelineName, pipelineVersion) {
 // → AllenNeuralDynamics). Any trailing path (e.g. /tree/v1.2.2) is preserved.
 function canonicalizeCodeUrl(url) {
     if (!url) return url;
-    return url.replace(
-        /(https?:\/\/github\.com\/)[^/]+(\/aind-ephys-pipeline)(?=$|[/?#])/i,
-        "$1AllenNeuralDynamics$2"
-    );
+    return url.replace(/(https?:\/\/github\.com\/)[^/]+(\/aind-ephys-pipeline)(?=$|[/?#])/i, "$1AllenNeuralDynamics$2");
 }
 
 function resolveCodeUrl(codeUrl, version) {
@@ -1830,7 +1843,8 @@ function prettyKey(key) {
 
 function renderProvenanceGeneratedBy(entry) {
     if (entry == null) return "";
-    if (typeof entry !== "object") return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    if (typeof entry !== "object")
+        return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
     const name = entry.Name ?? entry.name ?? "Step";
     const version = entry.Version ?? entry.version ?? null;
     const rawUrl = entry.CodeURL ?? entry.codeURL ?? entry.url ?? null;
@@ -1868,7 +1882,8 @@ function renderProvenanceGeneratedBy(entry) {
 
 function renderProvenanceSource(entry) {
     if (entry == null) return "";
-    if (typeof entry !== "object") return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    if (typeof entry !== "object")
+        return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
     const url = entry.URL ?? entry.url ?? null;
     const doi = entry.DOI ?? entry.doi ?? null;
     const version = entry.Version ?? entry.version ?? null;
@@ -2186,9 +2201,7 @@ function partitionQcPlots(qc, vizData) {
 
 function renderQcMetric(metric) {
     const status = qcLatestStatus(metric);
-    const statusBadge = status
-        ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>`
-        : "";
+    const statusBadge = status ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>` : "";
     const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
     const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
     const descHtml = metric?.description
