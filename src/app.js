@@ -41,7 +41,7 @@ let _viewMode = null;
 
 /* Module-level layout mode ("tree" | "flat"), toggled by the layout bar */
 let _layoutMode = "tree";
-/* Module-level sort mode ("attempt" | "created_at"), toggled by the layout bar */
+/* Module-level sort mode ("attempt" | "created_at" | "dandiset_id"), toggled by the layout bar */
 let _sortMode = "attempt";
 /* Module-level sort direction ("desc" | "asc"), toggled by the layout bar */
 let _sortDirection = "desc";
@@ -77,8 +77,11 @@ function parseLayoutMode() {
 
 function parseSortMode() {
     const sort = new URLSearchParams(window.location.search).get("sort");
-    if (sort === "attempt" || sort === "created_at") return sort;
-    return localStorage.getItem("sortMode") === "created_at" ? "created_at" : "attempt";
+    if (sort === "attempt" || sort === "created_at" || sort === "dandiset_id") return sort;
+    const storedSortMode = localStorage.getItem("sortMode");
+    if (storedSortMode === "attempt" || storedSortMode === "created_at" || storedSortMode === "dandiset_id")
+        return storedSortMode;
+    return "attempt";
 }
 
 function parseSortDirection() {
@@ -96,7 +99,7 @@ function updateLayoutModeUrl(mode) {
 }
 
 function updateSortModeUrl(mode) {
-    if (mode !== "attempt" && mode !== "created_at") return;
+    if (mode !== "attempt" && mode !== "created_at" && mode !== "dandiset_id") return;
     const params = new URLSearchParams(window.location.search);
     params.set("sort", mode);
     const qs = params.toString();
@@ -1141,6 +1144,10 @@ function sortRuns(runs, sortMode = _sortMode, sortDirection = _sortDirection) {
         if (sortMode === "created_at") {
             const createdCompare = String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""));
             if (createdCompare !== 0) return sortDirection === "asc" ? -createdCompare : createdCompare;
+        }
+        if (sortMode === "dandiset_id") {
+            const dandisetCompare = String(a.dandisetId ?? "").localeCompare(String(b.dandisetId ?? ""));
+            if (dandisetCompare !== 0) return sortDirection === "asc" ? dandisetCompare : -dandisetCompare;
         }
         const attemptCompare = (b.attempt ?? 0) - (a.attempt ?? 0);
         if (attemptCompare !== 0) return sortDirection === "asc" ? -attemptCompare : attemptCompare;
@@ -3002,8 +3009,12 @@ function renderDiffPage(data) {
 /* ─── Nested rendering ──────────────────────────────────────── */
 function renderDandisets(runs) {
     const byDandiset = groupBy(runs, (r) => r.dandisetId);
-    // Sort dandisets by most recent run (runs are already sorted newest-first)
     const dandisetIds = [...byDandiset.keys()].sort((a, b) => {
+        if (_sortMode === "dandiset_id") {
+            const dandisetCompare = String(a ?? "").localeCompare(String(b ?? ""));
+            return _sortDirection === "asc" ? dandisetCompare : -dandisetCompare;
+        }
+        // Sort dandisets by most recent run (runs are already sorted newest-first)
         const aDate = byDandiset.get(a)[0]?.runDate ?? "";
         const bDate = byDandiset.get(b)[0]?.runDate ?? "";
         return bDate.localeCompare(aDate);
@@ -3267,6 +3278,7 @@ function renderLayoutBar() {
             <select class="layout-sort-select" data-sort-mode aria-label="Sort runs">
                 <option value="attempt"${_sortMode === "attempt" ? " selected" : ""}>Attempt</option>
                 <option value="created_at"${_sortMode === "created_at" ? " selected" : ""}>Created</option>
+                <option value="dandiset_id"${_sortMode === "dandiset_id" ? " selected" : ""}>Dandiset ID</option>
             </select>
         </label>
         <button
