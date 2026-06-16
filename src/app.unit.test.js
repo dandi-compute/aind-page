@@ -119,9 +119,9 @@ describe("app unit behavior", () => {
     });
 
     it("falls back to localStorage sort mode when URL query is absent", () => {
-        localStorage.setItem("sortMode", "created_at");
+        localStorage.setItem("sortMode", "dandiset_id");
         window.history.replaceState(null, "", "/");
-        expect(parseSortMode()).toBe("created_at");
+        expect(parseSortMode()).toBe("dandiset_id");
     });
 
     it("parses sort direction from URL query when present", () => {
@@ -1507,6 +1507,24 @@ describe("renderFlatList", () => {
         expect(sortedRuns.map((run) => run.subject)).toEqual(["A", "B"]);
     });
 
+    it("sorts runs by dandiset ID when requested", () => {
+        const higherIdRun = {
+            ...baseRun,
+            path: `${baseRun.path}-higher`,
+            dandisetId: "001698",
+            subject: "B",
+        };
+        const lowerIdRun = {
+            ...baseRun,
+            path: `${baseRun.path}-lower`,
+            dandisetId: "000233",
+            subject: "A",
+        };
+
+        const sortedRuns = sortRuns([higherIdRun, lowerIdRun], "dandiset_id", "asc");
+        expect(sortedRuns.map((run) => run.dandisetId)).toEqual(["000233", "001698"]);
+    });
+
     it("includes dandiset ID in each flat run entry", () => {
         const html = renderFlatList([baseRun]);
         expect(html).toContain("001697");
@@ -1711,6 +1729,60 @@ describe("renderDandisets", () => {
         expect(html).not.toContain("pipeline-version-group");
         expect(html).not.toContain("params-group");
         expect((html.match(/class="run-entry status-/g) || []).length).toBe(2);
+    });
+
+    it("orders tree groups by dandiset ID when that sort mode is selected", () => {
+        document.body.innerHTML = '<div id="layout-bar"></div><div id="runs"></div>';
+        initLayoutToggle();
+        document.querySelector("[data-sort-direction]").click();
+        const select = document.querySelector("[data-sort-mode]");
+        select.value = "dandiset_id";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+
+        const lowerIdRun = {
+            status: "success",
+            attempt: 1,
+            runDate: "2026-05-19T09:15:00Z",
+            createdAt: "2026-05-19T09:15:00Z",
+            tasks: [],
+            generatedBy: [],
+            vizData: null,
+            hasLogs: false,
+            hasCode: true,
+            hasOutput: true,
+            logFiles: [],
+            outputPaths: {},
+            path: "derivatives/dandiset-000233/sub-A/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+            dandiPath: "sourcedata/sub-A/ses-S1/sub-A_ses-S1_ecephys.nwb",
+            dandisetId: "000233",
+            subject: "A",
+            session: "S1",
+            pipelineName: "ephys",
+            pipelineVersion: "v1",
+            paramsProfile: "fast",
+            configHash: "abc",
+            assetId: null,
+            inSourcedata: false,
+            failureStep: null,
+            assetSizeBytes: 1024,
+        };
+        const higherIdRun = {
+            ...lowerIdRun,
+            path: "derivatives/dandiset-001697/sub-B/ses-S2/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+            dandisetId: "001697",
+            subject: "B",
+            session: "S2",
+            runDate: "2026-05-20T09:15:00Z",
+            createdAt: "2026-05-20T09:15:00Z",
+        };
+
+        const html = renderDandisets([higherIdRun, lowerIdRun]);
+        expect(html.indexOf("Dandiset&nbsp;000233")).toBeLessThan(html.indexOf("Dandiset&nbsp;001697"));
+
+        const resetSelect = document.querySelector("[data-sort-mode]");
+        resetSelect.value = "attempt";
+        resetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        document.querySelector("[data-sort-direction]").click();
     });
 });
 
@@ -2556,14 +2628,14 @@ describe("initLayoutToggle", () => {
     it("updates URL sort query param while preserving other URL state", () => {
         initLayoutToggle();
         const select = document.querySelector("[data-sort-mode]");
-        select.value = "created_at";
+        select.value = "dandiset_id";
         select.dispatchEvent(new Event("change", { bubbles: true }));
 
         const params = new URLSearchParams(window.location.search);
-        expect(params.get("sort")).toBe("created_at");
+        expect(params.get("sort")).toBe("dandiset_id");
         expect(params.get("view")).toBe("tests");
         expect(params.get("dandiset")).toBe("001697");
-        expect(localStorage.getItem("sortMode")).toBe("created_at");
+        expect(localStorage.getItem("sortMode")).toBe("dandiset_id");
     });
 
     it("updates URL sort direction query param while preserving other URL state", () => {
