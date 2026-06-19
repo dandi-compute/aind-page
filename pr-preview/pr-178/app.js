@@ -518,7 +518,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
-    const statuses = Object.keys(STATUS_LABELS);
+    const statuses = Object.keys(STATUS_LABELS).filter((s) => s !== "partial");
     const clearAllParams = new URLSearchParams();
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
