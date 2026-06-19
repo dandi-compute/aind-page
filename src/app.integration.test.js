@@ -132,6 +132,7 @@ describe("app integration behavior", () => {
         expect(summaryHtml).toContain("stat-stalled");
         expect(summaryHtml).toContain("Stalled");
         expect(summaryHtml).toContain("⚠ 1");
+        expect(summaryHtml).toContain('status=stalled');
     });
 
     it("hides stalled counter when no running runs exceed 24 hours", () => {
