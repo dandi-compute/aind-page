@@ -449,7 +449,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     }
     if (filter.dandiCodebaseVersion) {
         crumbs.push(
-            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseVersion: filter.dandiCodebaseVersion }))}">Codebase&nbsp;ver:&nbsp;${e(filter.dandiCodebaseVersion)}</a>`
+            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseVersion: filter.dandiCodebaseVersion }))}">Compute&nbsp;ver:&nbsp;${e(filter.dandiCodebaseVersion)}</a>`
         );
     }
     if (filter.assetSize) {
@@ -540,7 +540,7 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
         ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
         ${renderFilterInput("version", "Pipeline Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
-        ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
+        ${renderFilterInput("codebaseVersion", "Compute Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
         ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
         ${renderFilterInput("status", "Status", filter.status, statuses, narrowUrl(filterNarrowParams(filter, ["status"])))}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
