@@ -220,7 +220,10 @@ function applyFilter(runs, filter) {
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
         if (filter.dandiCodebaseVersion && r.codebase !== filter.dandiCodebaseVersion) return false;
         if (filter.assetSize && !matchesAssetSizeExpr(r, filter.assetSize)) return false;
-        if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
+        if (normalizedFilterStatus === "stalled") {
+            const stalledThresholdMs = 24 * 60 * 60 * 1000;
+            if (r.status !== "running" || !r.createdAt || Date.now() - new Date(r.createdAt).getTime() <= stalledThresholdMs) return false;
+        } else if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
             const failedStep = r.failureStep;
@@ -265,6 +268,7 @@ const STATUS_LABELS = {
     queued: "Queued",
     running: "Running",
     partial: "Partial",
+    stalled: "Stalled",
 };
 const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
 const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -1201,6 +1205,7 @@ function renderSummary(runs) {
     const successHref = narrowUrl({ ...filterNarrowParams(filter, ["failureStep", "status"]), status: "success" });
     const failedHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "failed" });
     const runningHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "running" });
+    const stalledHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "stalled" });
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -1214,10 +1219,10 @@ function renderSummary(runs) {
             </a>
             ${
                 stalled
-                    ? `<div class="stat-item stat-stalled" title="Running jobs that have been running for more than 24 hours">
+                    ? `<a class="stat-item stat-stalled" href="${e(stalledHref)}" title="Show only stalled runs (running for more than 24 hours)">
                 <span class="stat-value">⚠ ${stalled}</span>
                 <span class="stat-label">Stalled</span>
-            </div>`
+            </a>`
                     : ""
             }
             <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
