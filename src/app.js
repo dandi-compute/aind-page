@@ -254,7 +254,6 @@ function narrowUrl(params) {
     if (params.pipelineVersion) sp.set("version", params.pipelineVersion);
     if (params.paramsType) sp.set("params", params.paramsType);
     if (params.configType) sp.set("config", params.configType);
-    if (params.dandiCodebaseHash) sp.set("codebaseHash", params.dandiCodebaseHash);
     if (params.dandiCodebaseVersion) sp.set("codebaseVersion", params.dandiCodebaseVersion);
     if (params.assetSize) sp.set("assetSize", params.assetSize);
     if (params.failureStep) sp.set("failureStep", params.failureStep);
@@ -271,7 +270,7 @@ const STATUS_LABELS = {
     failed: "Failed",
     queued: "Queued",
     running: "Running",
-    partial: "Partial",
+
     stalled: "Stalled",
 };
 const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
@@ -354,7 +353,6 @@ function filterNarrowParams(filter, omit = []) {
         pipelineVersion: filter.pipelineVersion,
         paramsType: filter.paramsType,
         configType: filter.configType,
-        dandiCodebaseHash: filter.dandiCodebaseHash,
         dandiCodebaseVersion: filter.dandiCodebaseVersion,
         assetSize: filter.assetSize,
         failureStep: filter.failureStep,
@@ -412,7 +410,6 @@ function renderFilterBanner(filter, availableRuns = []) {
         filter.pipelineVersion ||
         filter.paramsType ||
         filter.configType ||
-        filter.dandiCodebaseHash ||
         filter.dandiCodebaseVersion ||
         filter.assetSize ||
         filter.failureStep ||
@@ -450,14 +447,9 @@ function renderFilterBanner(filter, availableRuns = []) {
             `<a class="filter-crumb" href="${e(narrowUrl({ configType: filter.configType }))}">Config:&nbsp;${e(filter.configType)}</a>`
         );
     }
-    if (filter.dandiCodebaseHash) {
-        crumbs.push(
-            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseHash: filter.dandiCodebaseHash }))}">Codebase:&nbsp;${e(filter.dandiCodebaseHash)}</a>`
-        );
-    }
     if (filter.dandiCodebaseVersion) {
         crumbs.push(
-            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseVersion: filter.dandiCodebaseVersion }))}">Codebase&nbsp;ver:&nbsp;${e(filter.dandiCodebaseVersion)}</a>`
+            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseVersion: filter.dandiCodebaseVersion }))}">Compute&nbsp;ver:&nbsp;${e(filter.dandiCodebaseVersion)}</a>`
         );
     }
     if (filter.assetSize) {
@@ -498,7 +490,6 @@ function renderFilterBanner(filter, availableRuns = []) {
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
     const paramsTypes = uniqueSortedValues(availableRuns.map(runParamsType));
     const configTypes = uniqueSortedValues(availableRuns.map(runConfigType));
-    const dandiCodebaseHashes = uniqueSortedValues(availableRuns.map(runDandiCodebaseHash));
     const dandiCodebaseVersions = uniqueSortedValues(availableRuns.map((r) => r.codebase));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
@@ -527,7 +518,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
-    const statusHiddenInput = filter.status ? `<input type="hidden" name="status" value="${e(filter.status)}">` : "";
+    const statuses = Object.keys(STATUS_LABELS);
     const clearAllParams = new URLSearchParams();
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
@@ -543,16 +534,15 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${layoutHiddenInput}
         ${sortHiddenInput}
         ${sortDirectionHiddenInput}
-        ${statusHiddenInput}
         ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl(filterNarrowParams(filter, ["dandiset", "subject", "session"])))}
         ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl(filterNarrowParams(filter, ["subject", "session"])))}
         ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl(filterNarrowParams(filter, ["session"])))}
-        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
+        ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
         ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
         ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
-        ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
-        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
-        ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
+        ${renderFilterInput("version", "Pipeline Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
+        ${renderFilterInput("codebaseVersion", "Compute Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
+        ${renderFilterInput("status", "Status", filter.status, statuses, narrowUrl(filterNarrowParams(filter, ["status"])))}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <div class="filter-actions">
             <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
@@ -1184,7 +1174,7 @@ function parseTrace(text) {
 
     const anyFailed = tasks.some((t) => t.status === "FAILED");
     const allCompleted = tasks.every((t) => t.status === "COMPLETED");
-    const status = anyFailed ? "failed" : allCompleted ? "success" : "partial";
+    const status = anyFailed ? "failed" : allCompleted ? "success" : "running";
     return { status, tasks };
 }
 
@@ -1196,8 +1186,7 @@ function renderSummary(runs) {
     const queued = runs.filter((r) => r.status === "queued").length;
     const running = runs.filter((r) => r.status === "running").length;
     const stalled = runs.filter(isStalled).length;
-    const partial = runs.filter((r) => r.status === "partial").length;
-    const unknown = total - success - failed - queued - running - partial;
+    const unknown = total - success - failed - queued - running;
     const successfulRuns = runs.filter((run) => run.status === "success");
     const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(successfulRuns);
@@ -1238,14 +1227,6 @@ function renderSummary(runs) {
                     ? `<div class="stat-item stat-queued">
                 <span class="stat-value">${queued}</span>
                 <span class="stat-label">Queued</span>
-            </div>`
-                    : ""
-            }
-            ${
-                partial
-                    ? `<div class="stat-item stat-partial">
-                <span class="stat-value">${partial}</span>
-                <span class="stat-label">Partial</span>
             </div>`
                     : ""
             }
@@ -1697,8 +1678,6 @@ function renderRunEntry(run) {
                   ? "status-running"
                   : run.status === "queued"
                     ? "status-queued"
-                    : run.status === "partial"
-                      ? "status-partial"
                       : "status-unknown";
     const slbl =
         run.status === "success"
@@ -1711,8 +1690,6 @@ function renderRunEntry(run) {
                   ? "▶ Running"
                   : run.status === "queued"
                     ? "⧗ Queued"
-                    : run.status === "partial"
-                      ? "⚠ Partial"
                       : "? Unknown";
 
     // Log files present for this run, sourced from the S3 blob map (run.logFiles).
@@ -2323,8 +2300,7 @@ function renderGroupBadges(runs) {
     const s = runs.filter((r) => r.status === "success").length;
     const f = runs.filter((r) => r.status === "failed").length;
     const q = runs.filter((r) => r.status === "queued").length;
-    const p = runs.filter((r) => r.status === "partial").length;
-    const u = runs.length - s - f - q - p;
+    const u = runs.length - s - f - q;
     const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(runs);
     const parts = [];
@@ -2339,10 +2315,6 @@ function renderGroupBadges(runs) {
     if (q)
         parts.push(
             `<span class="gbadge gbadge-queued" title="${q} queued run${q !== 1 ? "s" : ""}">${q}&thinsp;⧗</span>`
-        );
-    if (p)
-        parts.push(
-            `<span class="gbadge gbadge-partial" title="${p} partial run${p !== 1 ? "s" : ""}">${p}&thinsp;⚠</span>`
         );
     if (u)
         parts.push(
@@ -3231,8 +3203,6 @@ function renderFlatRunEntry(run) {
                   ? "status-running"
                   : run.status === "queued"
                     ? "status-queued"
-                    : run.status === "partial"
-                      ? "status-partial"
                       : "status-unknown";
     const slbl =
         run.status === "success"
@@ -3245,8 +3215,6 @@ function renderFlatRunEntry(run) {
                   ? "▶ Running"
                   : run.status === "queued"
                     ? "⧗ Queued"
-                    : run.status === "partial"
-                      ? "⚠ Partial"
                       : "? Unknown";
 
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
@@ -4336,7 +4304,6 @@ async function loadQueueData() {
             filter.pipelineVersion ||
             filter.paramsType ||
             filter.configType ||
-            filter.dandiCodebaseHash ||
             filter.dandiCodebaseVersion ||
             filter.assetSize ||
             filter.failureStep ||
