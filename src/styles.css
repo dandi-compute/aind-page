@@ -14,8 +14,7 @@
     --color-success-bg: rgba(76, 175, 130, 0.1);
     --color-failed: #e05c5c;
     --color-failed-bg: rgba(224, 92, 92, 0.1);
-    --color-partial: #e0a83a;
-    --color-partial-bg: rgba(224, 168, 58, 0.1);
+
     --color-queued: #53a8b6;
     --color-queued-bg: rgba(83, 168, 182, 0.1);
     --color-running: #9b7fde;
@@ -39,7 +38,7 @@
     --color-accent-subtle: rgba(83, 168, 182, 0.1);
     --color-success-bg: rgba(76, 175, 130, 0.08);
     --color-failed-bg: rgba(224, 92, 92, 0.08);
-    --color-partial-bg: rgba(224, 168, 58, 0.08);
+
     --color-queued-bg: rgba(83, 168, 182, 0.08);
     --color-running-bg: rgba(155, 127, 222, 0.08);
     --color-stalled-bg: rgba(224, 123, 58, 0.08);
@@ -604,9 +603,7 @@ a.qp-asset-link:hover {
 .stat-running .stat-value {
     color: var(--color-running);
 }
-.stat-partial .stat-value {
-    color: var(--color-partial);
-}
+
 .stat-stalled .stat-value {
     color: var(--color-stalled);
 }
@@ -628,9 +625,7 @@ a.qp-asset-link:hover {
 .run-card.status-failed {
     border-left-color: var(--color-failed);
 }
-.run-card.status-partial {
-    border-left-color: var(--color-partial);
-}
+
 .run-card.status-stalled {
     border-left-color: var(--color-stalled);
 }
@@ -676,10 +671,7 @@ a.qp-asset-link:hover {
     background: var(--color-stalled-bg);
     color: var(--color-stalled);
 }
-.status-badge.status-partial {
-    background: var(--color-partial-bg);
-    color: var(--color-partial);
-}
+
 .status-badge.status-unknown {
     background: var(--color-accent-subtle);
     color: var(--color-text-secondary);
@@ -1410,10 +1402,7 @@ details[open] > .params-summary::before {
     background: var(--color-queued-bg);
     color: var(--color-queued);
 }
-.gbadge-partial {
-    background: var(--color-partial-bg);
-    color: var(--color-partial);
-}
+
 .gbadge-unknown {
     background: var(--color-accent-subtle);
     color: var(--color-text-secondary);
@@ -1462,9 +1451,6 @@ details[open] > .params-summary::before {
 }
 .run-entry.status-running {
     border-left-color: var(--color-running);
-}
-.run-entry.status-partial {
-    border-left-color: var(--color-partial);
 }
 .run-entry.status-stalled {
     border-left-color: var(--color-stalled);
