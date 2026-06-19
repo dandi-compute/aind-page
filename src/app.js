@@ -254,7 +254,6 @@ function narrowUrl(params) {
     if (params.pipelineVersion) sp.set("version", params.pipelineVersion);
     if (params.paramsType) sp.set("params", params.paramsType);
     if (params.configType) sp.set("config", params.configType);
-    if (params.dandiCodebaseHash) sp.set("codebaseHash", params.dandiCodebaseHash);
     if (params.dandiCodebaseVersion) sp.set("codebaseVersion", params.dandiCodebaseVersion);
     if (params.assetSize) sp.set("assetSize", params.assetSize);
     if (params.failureStep) sp.set("failureStep", params.failureStep);
@@ -354,7 +353,6 @@ function filterNarrowParams(filter, omit = []) {
         pipelineVersion: filter.pipelineVersion,
         paramsType: filter.paramsType,
         configType: filter.configType,
-        dandiCodebaseHash: filter.dandiCodebaseHash,
         dandiCodebaseVersion: filter.dandiCodebaseVersion,
         assetSize: filter.assetSize,
         failureStep: filter.failureStep,
@@ -412,7 +410,6 @@ function renderFilterBanner(filter, availableRuns = []) {
         filter.pipelineVersion ||
         filter.paramsType ||
         filter.configType ||
-        filter.dandiCodebaseHash ||
         filter.dandiCodebaseVersion ||
         filter.assetSize ||
         filter.failureStep ||
@@ -448,11 +445,6 @@ function renderFilterBanner(filter, availableRuns = []) {
     if (filter.configType) {
         crumbs.push(
             `<a class="filter-crumb" href="${e(narrowUrl({ configType: filter.configType }))}">Config:&nbsp;${e(filter.configType)}</a>`
-        );
-    }
-    if (filter.dandiCodebaseHash) {
-        crumbs.push(
-            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseHash: filter.dandiCodebaseHash }))}">Codebase:&nbsp;${e(filter.dandiCodebaseHash)}</a>`
         );
     }
     if (filter.dandiCodebaseVersion) {
@@ -498,7 +490,6 @@ function renderFilterBanner(filter, availableRuns = []) {
     const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
     const paramsTypes = uniqueSortedValues(availableRuns.map(runParamsType));
     const configTypes = uniqueSortedValues(availableRuns.map(runConfigType));
-    const dandiCodebaseHashes = uniqueSortedValues(availableRuns.map(runDandiCodebaseHash));
     const dandiCodebaseVersions = uniqueSortedValues(availableRuns.map((r) => r.codebase));
     const failureSteps = uniqueSortedValues([
         ...FAILURE_STEP_FILTER_OPTIONS,
@@ -527,7 +518,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
-    const statusHiddenInput = filter.status ? `<input type="hidden" name="status" value="${e(filter.status)}">` : "";
+    const statuses = Object.keys(STATUS_LABELS);
     const clearAllParams = new URLSearchParams();
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
@@ -543,16 +534,15 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${layoutHiddenInput}
         ${sortHiddenInput}
         ${sortDirectionHiddenInput}
-        ${statusHiddenInput}
         ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl(filterNarrowParams(filter, ["dandiset", "subject", "session"])))}
         ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl(filterNarrowParams(filter, ["subject", "session"])))}
         ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl(filterNarrowParams(filter, ["session"])))}
-        ${renderFilterInput("version", "Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
-        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
-        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
-        ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
-        ${renderFilterInput("codebaseHash", "DANDI Codebase Hash", filter.dandiCodebaseHash, dandiCodebaseHashes, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseHash"])))}
         ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
+        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
+        ${renderFilterInput("version", "Pipeline Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
+        ${renderFilterInput("codebaseVersion", "DANDI Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
+        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
+        ${renderFilterInput("status", "Status", filter.status, statuses, narrowUrl(filterNarrowParams(filter, ["status"])))}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <div class="filter-actions">
             <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
@@ -4336,7 +4326,6 @@ async function loadQueueData() {
             filter.pipelineVersion ||
             filter.paramsType ||
             filter.configType ||
-            filter.dandiCodebaseHash ||
             filter.dandiCodebaseVersion ||
             filter.assetSize ||
             filter.failureStep ||
