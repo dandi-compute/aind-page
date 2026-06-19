@@ -539,9 +539,9 @@ ${testsPageHtml}<div class="filter-banner-main">
         ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl(filterNarrowParams(filter, ["session"])))}
         ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
         ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
+        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
         ${renderFilterInput("version", "Pipeline Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
         ${renderFilterInput("codebaseVersion", "Compute Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
-        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
         ${renderFilterInput("status", "Status", filter.status, statuses, narrowUrl(filterNarrowParams(filter, ["status"])))}
         ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
         <div class="filter-actions">
