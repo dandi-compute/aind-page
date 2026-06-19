@@ -1195,6 +1195,7 @@ function renderSummary(runs) {
     const filter = parseFilter();
     const successHref = narrowUrl({ ...filterNarrowParams(filter, ["failureStep", "status"]), status: "success" });
     const failedHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "failed" });
+    const runningHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "running" });
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -1202,10 +1203,10 @@ function renderSummary(runs) {
                 <span class="stat-value">${total}</span>
                 <span class="stat-label">Total Runs</span>
             </div>
-            <div class="stat-item stat-running">
+            <a class="stat-item stat-running" href="${e(runningHref)}" title="Show only running runs">
                 <span class="stat-value">${running}</span>
                 <span class="stat-label">Running</span>
-            </div>
+            </a>
             <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
                 <span class="stat-value">${success}</span>
                 <span class="stat-label">Successful</span>
