@@ -120,6 +120,30 @@ describe("app integration behavior", () => {
         expect(summaryHtml).toContain('<span class="stat-value">0</span>');
     });
 
+    it("shows stalled counter when running runs exceed 24 hours", () => {
+        const oldCreatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+        const recentCreatedAt = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+        renderSummary([
+            { status: "running", createdAt: oldCreatedAt },
+            { status: "running", createdAt: recentCreatedAt },
+        ]);
+
+        const summaryHtml = document.getElementById("summary").innerHTML;
+        expect(summaryHtml).toContain("stat-stalled");
+        expect(summaryHtml).toContain("Stalled");
+        expect(summaryHtml).toContain("⚠ 1");
+        expect(summaryHtml).toContain('status=stalled');
+    });
+
+    it("hides stalled counter when no running runs exceed 24 hours", () => {
+        const recentCreatedAt = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+        renderSummary([{ status: "running", createdAt: recentCreatedAt }]);
+
+        const summaryHtml = document.getElementById("summary").innerHTML;
+        expect(summaryHtml).not.toContain("stat-stalled");
+        expect(summaryHtml).not.toContain("Stalled");
+    });
+
     it("formats large byte counts with appropriate decimal units", () => {
         renderSummary([{ status: "success", assetSizeBytes: 2_500_000_000_000 }]);
         expect(document.getElementById("summary").innerHTML).toContain("2.5 TB");

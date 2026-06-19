@@ -208,6 +208,11 @@ function normalizeStatus(status) {
     return status ? String(status).toLowerCase() : null;
 }
 
+function isStalled(run) {
+    if (run.status !== "running" || !run.createdAt) return false;
+    return Date.now() - new Date(run.createdAt).getTime() > 24 * 60 * 60 * 1000;
+}
+
 function applyFilter(runs, filter) {
     const normalizedFilterStatus = normalizeStatus(filter.status);
     return runs.filter((r) => {
@@ -220,7 +225,9 @@ function applyFilter(runs, filter) {
         if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
         if (filter.dandiCodebaseVersion && r.codebase !== filter.dandiCodebaseVersion) return false;
         if (filter.assetSize && !matchesAssetSizeExpr(r, filter.assetSize)) return false;
-        if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
+        if (normalizedFilterStatus === "stalled") {
+            if (!isStalled(r)) return false;
+        } else if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
             const failedStep = r.failureStep;
@@ -265,6 +272,7 @@ const STATUS_LABELS = {
     queued: "Queued",
     running: "Running",
     partial: "Partial",
+    stalled: "Stalled",
 };
 const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
 const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -1187,6 +1195,7 @@ function renderSummary(runs) {
     const failed = runs.filter((r) => r.status === "failed").length;
     const queued = runs.filter((r) => r.status === "queued").length;
     const running = runs.filter((r) => r.status === "running").length;
+    const stalled = runs.filter(isStalled).length;
     const partial = runs.filter((r) => r.status === "partial").length;
     const unknown = total - success - failed - queued - running - partial;
     const successfulRuns = runs.filter((run) => run.status === "success");
@@ -1196,6 +1205,7 @@ function renderSummary(runs) {
     const successHref = narrowUrl({ ...filterNarrowParams(filter, ["failureStep", "status"]), status: "success" });
     const failedHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "failed" });
     const runningHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "running" });
+    const stalledHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "stalled" });
 
     document.getElementById("summary").innerHTML = `
         <div class="summary-stats">
@@ -1207,6 +1217,14 @@ function renderSummary(runs) {
                 <span class="stat-value">${running}</span>
                 <span class="stat-label">Running</span>
             </a>
+            ${
+                stalled
+                    ? `<a class="stat-item stat-stalled" href="${e(stalledHref)}" title="Show only stalled runs (running for more than 24 hours)">
+                <span class="stat-value">⚠ ${stalled}</span>
+                <span class="stat-label">Stalled</span>
+            </a>`
+                    : ""
+            }
             <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
                 <span class="stat-value">${success}</span>
                 <span class="stat-label">Successful</span>
@@ -1667,30 +1685,35 @@ function neurosiftDandisetUrl(dandisetId) {
 }
 
 function renderRunEntry(run) {
+    const stalled = isStalled(run);
     const sc =
         run.status === "success"
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "running"
-                ? "status-running"
-                : run.status === "queued"
-                  ? "status-queued"
-                  : run.status === "partial"
-                    ? "status-partial"
-                    : "status-unknown";
+              : stalled
+                ? "status-stalled"
+                : run.status === "running"
+                  ? "status-running"
+                  : run.status === "queued"
+                    ? "status-queued"
+                    : run.status === "partial"
+                      ? "status-partial"
+                      : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "running"
-                ? "▶ Running"
-                : run.status === "queued"
-                  ? "⧗ Queued"
-                  : run.status === "partial"
-                    ? "⚠ Partial"
-                    : "? Unknown";
+              : stalled
+                ? "⚠ Stalled"
+                : run.status === "running"
+                  ? "▶ Running"
+                  : run.status === "queued"
+                    ? "⧗ Queued"
+                    : run.status === "partial"
+                      ? "⚠ Partial"
+                      : "? Unknown";
 
     // Log files present for this run, sourced from the S3 blob map (run.logFiles).
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
@@ -3196,30 +3219,35 @@ function renderParamsGroup(paramsProfile, configHash, runs) {
 
 /* ─── Flat view rendering ───────────────────────────────────── */
 function renderFlatRunEntry(run) {
+    const stalled = isStalled(run);
     const sc =
         run.status === "success"
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "running"
-                ? "status-running"
-                : run.status === "queued"
-                  ? "status-queued"
-                  : run.status === "partial"
-                    ? "status-partial"
-                    : "status-unknown";
+              : stalled
+                ? "status-stalled"
+                : run.status === "running"
+                  ? "status-running"
+                  : run.status === "queued"
+                    ? "status-queued"
+                    : run.status === "partial"
+                      ? "status-partial"
+                      : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "running"
-                ? "▶ Running"
-                : run.status === "queued"
-                  ? "⧗ Queued"
-                  : run.status === "partial"
-                    ? "⚠ Partial"
-                    : "? Unknown";
+              : stalled
+                ? "⚠ Stalled"
+                : run.status === "running"
+                  ? "▶ Running"
+                  : run.status === "queued"
+                    ? "⧗ Queued"
+                    : run.status === "partial"
+                      ? "⚠ Partial"
+                      : "? Unknown";
 
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
     const hasLogs = buttonLogs.length > 0;
