@@ -1186,7 +1186,12 @@ function renderSummary(runs) {
     const success = runs.filter((r) => r.status === "success").length;
     const failed = runs.filter((r) => r.status === "failed").length;
     const queued = runs.filter((r) => r.status === "queued").length;
+    const now = Date.now();
+    const stalledThresholdMs = 24 * 60 * 60 * 1000;
     const running = runs.filter((r) => r.status === "running").length;
+    const stalled = runs.filter(
+        (r) => r.status === "running" && r.createdAt && now - new Date(r.createdAt).getTime() > stalledThresholdMs,
+    ).length;
     const partial = runs.filter((r) => r.status === "partial").length;
     const unknown = total - success - failed - queued - running - partial;
     const successfulRuns = runs.filter((run) => run.status === "success");
@@ -1207,6 +1212,14 @@ function renderSummary(runs) {
                 <span class="stat-value">${running}</span>
                 <span class="stat-label">Running</span>
             </a>
+            ${
+                stalled
+                    ? `<div class="stat-item stat-stalled" title="Running jobs that have been running for more than 24 hours">
+                <span class="stat-value">⚠ ${stalled}</span>
+                <span class="stat-label">Stalled</span>
+            </div>`
+                    : ""
+            }
             <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
                 <span class="stat-value">${success}</span>
                 <span class="stat-label">Successful</span>

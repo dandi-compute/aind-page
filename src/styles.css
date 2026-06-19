@@ -20,6 +20,8 @@
     --color-queued-bg: rgba(83, 168, 182, 0.1);
     --color-running: #9b7fde;
     --color-running-bg: rgba(155, 127, 222, 0.1);
+    --color-stalled: #e07b3a;
+    --color-stalled-bg: rgba(224, 123, 58, 0.1);
     --font-main: "Source Sans 3", -apple-system, sans-serif;
     --radius: 6px;
 }
@@ -40,6 +42,7 @@
     --color-partial-bg: rgba(224, 168, 58, 0.08);
     --color-queued-bg: rgba(83, 168, 182, 0.08);
     --color-running-bg: rgba(155, 127, 222, 0.08);
+    --color-stalled-bg: rgba(224, 123, 58, 0.08);
 }
 
 *,
@@ -603,6 +606,9 @@ a.qp-asset-link:hover {
 }
 .stat-partial .stat-value {
     color: var(--color-partial);
+}
+.stat-stalled .stat-value {
+    color: var(--color-stalled);
 }
 
 /* ─── Run card ──────────────────────────────────────────────── */
