@@ -44,7 +44,6 @@ describe("app integration behavior", () => {
                 pipelineVersion: null,
                 paramsType: failedRun.paramsProfile,
                 configType: failedRun.configHash,
-                dandiCodebaseHash: "abc1234",
                 failureStep: "pre-processing",
             },
             [failedRun, successfulRun]
@@ -56,13 +55,10 @@ describe("app integration behavior", () => {
         expect(banner.innerHTML).toContain("Failed in pre-processing");
         expect(banner.innerHTML).toContain(`Params:&nbsp;${failedRun.paramsProfile}`);
         expect(banner.innerHTML).toContain(`Config:&nbsp;${failedRun.configHash}`);
-        expect(banner.innerHTML).toContain("Codebase:&nbsp;abc1234");
         expect(banner.innerHTML).toContain(`option value="${failedRun.paramsProfile}"`);
         expect(banner.innerHTML).toContain(`option value="${successfulRun.paramsProfile}"`);
         expect(banner.innerHTML).toContain(`option value="${failedRun.configHash}"`);
         expect(banner.innerHTML).toContain(`option value="${successfulRun.configHash}"`);
-        expect(banner.innerHTML).toContain('option value="abc1234"');
-        expect(banner.innerHTML).toContain('option value="def5678"');
     });
 
     it("updates page state displays and escapes error content", () => {
@@ -211,7 +207,6 @@ describe("app integration behavior", () => {
                 pipelineVersion: null,
                 paramsType: null,
                 configType: null,
-                dandiCodebaseHash: null,
                 failureStep: null,
                 status: "failed",
             },
