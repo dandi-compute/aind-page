@@ -631,6 +631,9 @@ a.qp-asset-link:hover {
 .run-card.status-partial {
     border-left-color: var(--color-partial);
 }
+.run-card.status-stalled {
+    border-left-color: var(--color-stalled);
+}
 
 .run-header {
     display: flex;
@@ -668,6 +671,10 @@ a.qp-asset-link:hover {
 .status-badge.status-running {
     background: var(--color-running-bg);
     color: var(--color-running);
+}
+.status-badge.status-stalled {
+    background: var(--color-stalled-bg);
+    color: var(--color-stalled);
 }
 .status-badge.status-partial {
     background: var(--color-partial-bg);
@@ -1458,6 +1465,9 @@ details[open] > .params-summary::before {
 }
 .run-entry.status-partial {
     border-left-color: var(--color-partial);
+}
+.run-entry.status-stalled {
+    border-left-color: var(--color-stalled);
 }
 
 .run-entry-header {

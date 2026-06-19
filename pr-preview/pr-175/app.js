@@ -208,6 +208,11 @@ function normalizeStatus(status) {
     return status ? String(status).toLowerCase() : null;
 }
 
+function isStalled(run) {
+    if (run.status !== "running" || !run.createdAt) return false;
+    return Date.now() - new Date(run.createdAt).getTime() > 24 * 60 * 60 * 1000;
+}
+
 function applyFilter(runs, filter) {
     const normalizedFilterStatus = normalizeStatus(filter.status);
     return runs.filter((r) => {
@@ -221,8 +226,7 @@ function applyFilter(runs, filter) {
         if (filter.dandiCodebaseVersion && r.codebase !== filter.dandiCodebaseVersion) return false;
         if (filter.assetSize && !matchesAssetSizeExpr(r, filter.assetSize)) return false;
         if (normalizedFilterStatus === "stalled") {
-            const stalledThresholdMs = 24 * 60 * 60 * 1000;
-            if (r.status !== "running" || !r.createdAt || Date.now() - new Date(r.createdAt).getTime() <= stalledThresholdMs) return false;
+            if (!isStalled(r)) return false;
         } else if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
@@ -1190,12 +1194,8 @@ function renderSummary(runs) {
     const success = runs.filter((r) => r.status === "success").length;
     const failed = runs.filter((r) => r.status === "failed").length;
     const queued = runs.filter((r) => r.status === "queued").length;
-    const now = Date.now();
-    const stalledThresholdMs = 24 * 60 * 60 * 1000;
     const running = runs.filter((r) => r.status === "running").length;
-    const stalled = runs.filter(
-        (r) => r.status === "running" && r.createdAt && now - new Date(r.createdAt).getTime() > stalledThresholdMs,
-    ).length;
+    const stalled = runs.filter(isStalled).length;
     const partial = runs.filter((r) => r.status === "partial").length;
     const unknown = total - success - failed - queued - running - partial;
     const successfulRuns = runs.filter((run) => run.status === "success");
@@ -1685,30 +1685,35 @@ function neurosiftDandisetUrl(dandisetId) {
 }
 
 function renderRunEntry(run) {
+    const stalled = isStalled(run);
     const sc =
         run.status === "success"
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "running"
-                ? "status-running"
-                : run.status === "queued"
-                  ? "status-queued"
-                  : run.status === "partial"
-                    ? "status-partial"
-                    : "status-unknown";
+              : stalled
+                ? "status-stalled"
+                : run.status === "running"
+                  ? "status-running"
+                  : run.status === "queued"
+                    ? "status-queued"
+                    : run.status === "partial"
+                      ? "status-partial"
+                      : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "running"
-                ? "▶ Running"
-                : run.status === "queued"
-                  ? "⧗ Queued"
-                  : run.status === "partial"
-                    ? "⚠ Partial"
-                    : "? Unknown";
+              : stalled
+                ? "⚠ Stalled"
+                : run.status === "running"
+                  ? "▶ Running"
+                  : run.status === "queued"
+                    ? "⧗ Queued"
+                    : run.status === "partial"
+                      ? "⚠ Partial"
+                      : "? Unknown";
 
     // Log files present for this run, sourced from the S3 blob map (run.logFiles).
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
@@ -3214,30 +3219,35 @@ function renderParamsGroup(paramsProfile, configHash, runs) {
 
 /* ─── Flat view rendering ───────────────────────────────────── */
 function renderFlatRunEntry(run) {
+    const stalled = isStalled(run);
     const sc =
         run.status === "success"
             ? "status-success"
             : run.status === "failed"
               ? "status-failed"
-              : run.status === "running"
-                ? "status-running"
-                : run.status === "queued"
-                  ? "status-queued"
-                  : run.status === "partial"
-                    ? "status-partial"
-                    : "status-unknown";
+              : stalled
+                ? "status-stalled"
+                : run.status === "running"
+                  ? "status-running"
+                  : run.status === "queued"
+                    ? "status-queued"
+                    : run.status === "partial"
+                      ? "status-partial"
+                      : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
             : run.status === "failed"
               ? "✗ Failed"
-              : run.status === "running"
-                ? "▶ Running"
-                : run.status === "queued"
-                  ? "⧗ Queued"
-                  : run.status === "partial"
-                    ? "⚠ Partial"
-                    : "? Unknown";
+              : stalled
+                ? "⚠ Stalled"
+                : run.status === "running"
+                  ? "▶ Running"
+                  : run.status === "queued"
+                    ? "⧗ Queued"
+                    : run.status === "partial"
+                      ? "⚠ Partial"
+                      : "? Unknown";
 
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
     const hasLogs = buttonLogs.length > 0;
