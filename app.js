@@ -6,6 +6,10 @@ const DERIVATIVES_DANDISET_ID = "001697";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
 const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
+/* Archived failing runs live in a separate, uncompressed state file on the
+   queue repo's main branch, surfaced on the dedicated Archive page
+   (?view=archive) to keep them out of the main queue. */
+const ARCHIVE_STATE_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/archive_state.jsonl";
 const QUEUE_CONFIG_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/queue_config.json";
 const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/main/queue_config.json";
 
@@ -36,7 +40,8 @@ const TEST_DANDISETS = new Set(["001849"]);
 /* Per-dandiset fallback subject used when a queue entry carries a null subject */
 const DANDISET_SUBJECT_DEFAULTS = new Map([["001849", "test"]]);
 
-/* Module-level view mode ("tests" | null), set during init */
+/* Module-level view mode ("tests" | "archive" | "compare" | "params" | null),
+   set during init */
 let _viewMode = null;
 
 /* Module-level layout mode ("tree" | "flat"), toggled by the layout bar */
@@ -58,6 +63,7 @@ function syncTopNav(viewMode = parseViewMode()) {
         { selector: '.site-view-toggle-link[href="?view=compare"]', mode: "compare" },
         { selector: '.site-view-toggle-link[href="?view=params"]', mode: "params" },
         { selector: '.site-view-toggle-link[href="?view=tests"]', mode: "tests" },
+        { selector: '.site-view-toggle-link[href="?view=archive"]', mode: "archive" },
     ];
     navLinks.forEach(({ selector, mode }) => {
         const link = document.querySelector(selector);
@@ -239,15 +245,15 @@ function applyFilter(runs, filter) {
 }
 
 /* Build a page URL with the given filter parameters.
-   When on the tests page (_viewMode === "tests"), the view=tests param is
-   automatically preserved so navigation stays within the tests scope.
+   When on a scoped dashboard page (tests or archive), the matching view param
+   is automatically preserved so navigation stays within that scope.
    When on the main page (_viewMode === null), no view param is emitted. */
 function narrowUrl(params) {
     const sp = new URLSearchParams();
     sp.set("layout", parseLayoutMode());
     sp.set("sort", parseSortMode());
     sp.set("sortDir", parseSortDirection());
-    if (_viewMode === "tests") sp.set("view", "tests");
+    if (_viewMode === "tests" || _viewMode === "archive") sp.set("view", _viewMode);
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
@@ -505,16 +511,26 @@ function renderFilterBanner(filter, availableRuns = []) {
 </div>`
         : "";
 
-    const testsPageHtml =
-        _viewMode === "tests"
-            ? `<div class="tests-page-banner">
-    <span class="tests-page-label">🧪 Tests</span>
-    <span class="tests-page-desc">Showing internal test runs only (Dandiset 001849)</span>
+    const scopedPageBanners = {
+        tests: {
+            label: "🧪 Tests",
+            desc: "Showing internal test runs only (Dandiset 001849)",
+        },
+        archive: {
+            label: "🗄️ Archive",
+            desc: "Showing archived failing runs only (separate from the main queue)",
+        },
+    };
+    const scopedBanner = scopedPageBanners[_viewMode];
+    const testsPageHtml = scopedBanner
+        ? `<div class="tests-page-banner">
+    <span class="tests-page-label">${scopedBanner.label}</span>
+    <span class="tests-page-desc">${scopedBanner.desc}</span>
     <a class="tests-back-link" href="./">← Back to main</a>
 </div>`
-            : "";
+        : "";
 
-    const viewHiddenInput = _viewMode === "tests" ? `<input type="hidden" name="view" value="tests">` : "";
+    const viewHiddenInput = scopedBanner ? `<input type="hidden" name="view" value="${_viewMode}">` : "";
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
@@ -523,7 +539,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
     clearAllParams.set("sortDir", sortDirection);
-    if (_viewMode === "tests") clearAllParams.set("view", "tests");
+    if (_viewMode === "tests" || _viewMode === "archive") clearAllParams.set("view", _viewMode);
     const clearAllHref = `?${clearAllParams.toString()}`;
 
     banner.innerHTML = `
@@ -733,9 +749,15 @@ function queueStateCacheKey() {
     return ETAG_CACHE_PREFIX + `${QUEUE_CDN_BASE}/state.jsonl.gz`;
 }
 
-async function fetchQueueState() {
-    const url = `${QUEUE_CDN_BASE}/state.jsonl.gz`;
-    const cacheKey = queueStateCacheKey();
+function archiveStateCacheKey() {
+    return ETAG_CACHE_PREFIX + ARCHIVE_STATE_URL;
+}
+
+// Fetch and parse a JSONL queue state file with ETag-based session caching.
+// Defaults to the gzip-compressed main queue state; pass { url, compressed,
+// cacheKey } to fetch a different source (e.g. the uncompressed archive state).
+async function fetchQueueState(options = {}) {
+    const { url = `${QUEUE_CDN_BASE}/state.jsonl.gz`, compressed = true, cacheKey = queueStateCacheKey() } = options;
 
     let cached = null;
     try {
@@ -756,14 +778,18 @@ async function fetchQueueState() {
     if (resp.status === 304 && cached) {
         text = cached.body;
     } else if (resp.ok) {
-        if (typeof DecompressionStream === "undefined") {
-            throw new Error(
-                "Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+)."
-            );
+        if (compressed) {
+            if (typeof DecompressionStream === "undefined") {
+                throw new Error(
+                    "Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+)."
+                );
+            }
+            const ds = new DecompressionStream("gzip");
+            const decompressed = resp.body.pipeThrough(ds);
+            text = await new Response(decompressed).text();
+        } else {
+            text = await resp.text();
         }
-        const ds = new DecompressionStream("gzip");
-        const decompressed = resp.body.pipeThrough(ds);
-        text = await new Response(decompressed).text();
 
         const etag = resp.headers.get("ETag");
         if (etag) {
@@ -787,9 +813,20 @@ async function fetchQueueState() {
         .map((line) => JSON.parse(line));
 }
 
+// Fetch the archived failing runs from the queue repo's uncompressed
+// archive_state.jsonl (shares the same JSONL schema as the main queue state).
+async function fetchArchiveState() {
+    return fetchQueueState({
+        url: ARCHIVE_STATE_URL,
+        compressed: false,
+        cacheKey: archiveStateCacheKey(),
+    });
+}
+
 function clearQueueStateCache() {
     try {
         sessionStorage.removeItem(queueStateCacheKey());
+        sessionStorage.removeItem(archiveStateCacheKey());
     } catch {
         /* sessionStorage unavailable; nothing to clear */
     }
@@ -1678,7 +1715,7 @@ function renderRunEntry(run) {
                   ? "status-running"
                   : run.status === "queued"
                     ? "status-queued"
-                      : "status-unknown";
+                    : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
@@ -1690,7 +1727,7 @@ function renderRunEntry(run) {
                   ? "▶ Running"
                   : run.status === "queued"
                     ? "⧗ Queued"
-                      : "? Unknown";
+                    : "? Unknown";
 
     // Log files present for this run, sourced from the S3 blob map (run.logFiles).
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
@@ -3203,7 +3240,7 @@ function renderFlatRunEntry(run) {
                   ? "status-running"
                   : run.status === "queued"
                     ? "status-queued"
-                      : "status-unknown";
+                    : "status-unknown";
     const slbl =
         run.status === "success"
             ? "✓ Success"
@@ -3215,7 +3252,7 @@ function renderFlatRunEntry(run) {
                   ? "▶ Running"
                   : run.status === "queued"
                     ? "⧗ Queued"
-                      : "? Unknown";
+                    : "? Unknown";
 
     const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
     const hasLogs = buttonLogs.length > 0;
@@ -4218,20 +4255,21 @@ function e(str) {
 
 /* ─── Queue data loader ─────────────────────────────────────── */
 // Fetches, processes, and renders the queue state for the current view.
-// Only applies to the default queue views ("main" and "tests"); the "compare" and
-// "params" views are handled separately in init() and never call this function.
+// Only applies to the dashboard queue views ("main", "tests", and "archive");
+// the "compare" and "params" views are handled separately in init() and never
+// call this function.
 // Called on initial page load and when the user clicks the Refresh button.
 async function loadQueueData() {
     showLoading();
     renderFilterBanner(parseFilter(), []);
 
     try {
-        const entries = await fetchQueueState();
+        const entries = _viewMode === "archive" ? await fetchArchiveState() : await fetchQueueState();
         const runs = parseQueueEntries(entries);
 
         if (runs.length === 0) {
             renderFilterBanner(parseFilter(), []);
-            showError("No pipeline runs found in the queue.");
+            showError(_viewMode === "archive" ? "No archived runs found." : "No pipeline runs found in the queue.");
             return;
         }
 
@@ -4289,12 +4327,15 @@ async function loadQueueData() {
         const sortedRuns = sortRuns(runsWithStatus, parseSortMode());
 
         // Scope runs by view mode:
-        //   tests page  → show only TEST_DANDISETS entries
-        //   main page   → hide TEST_DANDISETS entries
+        //   tests page    → show only TEST_DANDISETS entries
+        //   archive page  → show every entry from the archive state file as-is
+        //   main page     → hide TEST_DANDISETS entries
         const runsInScope =
             _viewMode === "tests"
                 ? sortedRuns.filter((r) => TEST_DANDISETS.has(r.dandisetId))
-                : sortedRuns.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
+                : _viewMode === "archive"
+                  ? sortedRuns
+                  : sortedRuns.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
 
         const filter = parseFilter();
         const isFiltered = !!(
@@ -4358,6 +4399,12 @@ async function init() {
             'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
         );
     }
+    if (_viewMode === "archive") {
+        setPageCopy(
+            "Archived Pipeline Runs",
+            'Failing runs that have been archived from the main queue, sourced from <a href="https://github.com/dandi-compute/queue/blob/main/archive_state.jsonl" target="_blank" rel="noopener">archive_state.jsonl</a>.'
+        );
+    }
 
     showLoading();
     if (_viewMode !== "params") {
@@ -4405,8 +4452,9 @@ async function init() {
         }
         return;
     }
-    // Top display of current queue scheduling priorities (dashboard views only).
-    initQueuePriorities();
+    // Top display of current queue scheduling priorities. Irrelevant to the
+    // archive page, which shows already-completed (failed) runs.
+    if (_viewMode !== "archive") initQueuePriorities();
     await loadQueueData();
 }
 
@@ -4419,6 +4467,8 @@ if (typeof module !== "undefined" && module.exports) {
         classifyFailedTaskStep,
         clearQueueStateCache,
         fetchQueueState,
+        fetchArchiveState,
+        archiveStateCacheKey,
         fetchSlurmLogs,
         fetchVisualizationData,
         initModal,

@@ -8,6 +8,8 @@ const {
     collectJsonDiffs,
     collectTextDiffs,
     fetchQueueState,
+    fetchArchiveState,
+    archiveStateCacheKey,
     fetchSlurmLogs,
     fetchVisualizationData,
     initModal,
@@ -196,6 +198,24 @@ describe("app unit behavior", () => {
         expect(document.querySelector(".site-diffs-link").hasAttribute("aria-current")).toBe(false);
         expect(document.querySelector(".site-params-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-params-link").hasAttribute("aria-current")).toBe(false);
+    });
+
+    it("marks archive top nav link as active when archive view is selected", () => {
+        document.body.innerHTML = `
+            <nav>
+                <a class="site-dashboard-link site-view-toggle-link" href="./"></a>
+                <a class="site-tests-link site-view-toggle-link" href="?view=tests"></a>
+                <a class="site-archive-link site-view-toggle-link" href="?view=archive"></a>
+            </nav>
+        `;
+
+        syncTopNav("archive");
+        const archiveLink = document.querySelector('.site-view-toggle-link[href="?view=archive"]');
+
+        expect(archiveLink.classList.contains("active")).toBe(true);
+        expect(archiveLink.getAttribute("aria-current")).toBe("page");
+        expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(false);
     });
 
     it("includes all test-only dandisets used to scope dashboard and tests views", () => {
@@ -1118,6 +1138,65 @@ describe("fetchQueueState ETag caching", () => {
         delete global.DecompressionStream;
         global.fetch = vi.fn().mockResolvedValue(new Response(makeReadableStream(JSONL_TEXT), { status: 200 }));
         await expect(fetchQueueState()).rejects.toThrow("DecompressionStream");
+    });
+});
+
+describe("fetchArchiveState", () => {
+    const SAMPLE_ENTRY = {
+        dandiset_id: "000409",
+        subject: "SWC-038",
+        pipeline: "aind+ephys",
+        version: "v1.2.4",
+        params: "1cbdbee",
+        config: "7940dfd",
+        attempt: 1,
+        has_code: true,
+        has_been_submitted: true,
+        has_output: false,
+        has_logs: true,
+    };
+    const JSONL_TEXT = JSON.stringify(SAMPLE_ENTRY);
+    const ARCHIVE_CACHE_KEY = archiveStateCacheKey();
+
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("fetches the uncompressed archive_state.jsonl without DecompressionStream", async () => {
+        delete global.DecompressionStream;
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSONL_TEXT, {
+                status: 200,
+                headers: { ETag: '"archive-v1"' },
+            })
+        );
+
+        const result = await fetchArchiveState();
+
+        expect(result).toHaveLength(1);
+        expect(result[0].dandiset_id).toBe("000409");
+
+        // Must request the archive URL, not the main compressed state file.
+        const [url] = global.fetch.mock.calls[0];
+        expect(url).toContain("archive_state.jsonl");
+        expect(url).not.toContain(".gz");
+
+        // ETag/body cached under the archive-specific key.
+        const stored = JSON.parse(sessionStorage.getItem(ARCHIVE_CACHE_KEY));
+        expect(stored.etag).toBe('"archive-v1"');
+        expect(stored.body).toBe(JSONL_TEXT);
+    });
+
+    it("uses a cache key distinct from the main queue state", () => {
+        expect(archiveStateCacheKey()).not.toBe(QUEUE_STATE_CACHE_KEY);
     });
 });
 
