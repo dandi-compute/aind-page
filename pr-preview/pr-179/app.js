@@ -1,0 +1,4520 @@
+/* ─── Configuration ─────────────────────────────────────────── */
+const OWNER = "dandi-compute";
+const REPO = "001697";
+const BRANCH = "draft";
+const DERIVATIVES_DANDISET_ID = "001697";
+const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
+
+const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
+/* Archived failing runs live in a separate, uncompressed state file on the
+   queue repo's main branch, surfaced on the dedicated Archive page
+   (?view=archive) to keep them out of the main queue. */
+const ARCHIVE_STATE_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/archive_state.jsonl";
+const QUEUE_CONFIG_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/queue_config.json";
+const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/main/queue_config.json";
+
+const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
+
+const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
+const PIPELINE_API_BASE = "https://api.github.com/repos/CodyCBakerPhD/aind-ephys-pipeline";
+const CODE_REPO_URL = "https://github.com/dandi-compute/code";
+const AIND_EPHYS_PIPELINE_CODE_URL =
+    "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
+const PARAMS_SCHEMA_URL =
+    "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params_schema.json";
+const PARAMS_PLACEHOLDER_URL =
+    "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params.json";
+const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
+const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
+const FULL_COMMIT_HASH_LENGTH = 40;
+const DANDI_CODE_REPO_PATTERN = /github\.com\/dandi-compute\/code(?:\/|$)/;
+const ROOT_DIFF_PATH_LABEL = "(root)";
+const COMMIT_HASH_PATTERN = new RegExp(`^[0-9a-f]{${MIN_SHORT_COMMIT_HASH_LENGTH},${FULL_COMMIT_HASH_LENGTH}}$`, "i");
+const REGISTERED_PARAMS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json";
+const REGISTERED_CONFIGS_PATH = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_configs.json";
+let PARAMS_REGISTRY = [];
+let CONFIG_REGISTRY = [];
+/* Dandisets used for internal testing – hidden from the main view and moved to
+   the dedicated Tests page (?view=tests). */
+const TEST_DANDISETS = new Set(["001849"]);
+/* Per-dandiset fallback subject used when a queue entry carries a null subject */
+const DANDISET_SUBJECT_DEFAULTS = new Map([["001849", "test"]]);
+
+/* Module-level view mode ("tests" | "archive" | "compare" | "params" | null),
+   set during init */
+let _viewMode = null;
+
+/* Module-level layout mode ("tree" | "flat"), toggled by the layout bar */
+let _layoutMode = "tree";
+/* Module-level sort mode ("attempt" | "created_at" | "dandiset_id"), toggled by the layout bar */
+let _sortMode = "attempt";
+/* Module-level sort direction ("desc" | "asc"), toggled by the layout bar */
+let _sortDirection = "desc";
+/* Cached filtered runs for re-rendering on layout toggle */
+let _filteredRuns = [];
+
+function parseViewMode() {
+    return new URLSearchParams(window.location.search).get("view") ?? null;
+}
+
+function syncTopNav(viewMode = parseViewMode()) {
+    const navLinks = [
+        { selector: '.site-view-toggle-link[href="./"]', mode: null },
+        { selector: '.site-view-toggle-link[href="?view=compare"]', mode: "compare" },
+        { selector: '.site-view-toggle-link[href="?view=params"]', mode: "params" },
+        { selector: '.site-view-toggle-link[href="?view=tests"]', mode: "tests" },
+        { selector: '.site-view-toggle-link[href="?view=archive"]', mode: "archive" },
+    ];
+    navLinks.forEach(({ selector, mode }) => {
+        const link = document.querySelector(selector);
+        if (!link) return;
+        const active = viewMode === mode;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+    });
+}
+
+function parseLayoutMode() {
+    const layout = new URLSearchParams(window.location.search).get("layout");
+    if (layout === "flat" || layout === "tree") return layout;
+    return localStorage.getItem("layoutMode") === "flat" ? "flat" : "tree";
+}
+
+function parseSortMode() {
+    const sort = new URLSearchParams(window.location.search).get("sort");
+    if (sort === "attempt" || sort === "created_at" || sort === "dandiset_id") return sort;
+    const storedSortMode = localStorage.getItem("sortMode");
+    if (storedSortMode === "attempt" || storedSortMode === "created_at" || storedSortMode === "dandiset_id")
+        return storedSortMode;
+    return "attempt";
+}
+
+function parseSortDirection() {
+    const sortDir = new URLSearchParams(window.location.search).get("sortDir");
+    if (sortDir === "asc" || sortDir === "desc") return sortDir;
+    return localStorage.getItem("sortDirection") === "asc" ? "asc" : "desc";
+}
+
+function updateLayoutModeUrl(mode) {
+    if (mode !== "flat" && mode !== "tree") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("layout", mode);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+}
+
+function updateSortModeUrl(mode) {
+    if (mode !== "attempt" && mode !== "created_at" && mode !== "dandiset_id") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("sort", mode);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+}
+
+function updateSortDirectionUrl(direction) {
+    if (direction !== "asc" && direction !== "desc") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("sortDir", direction);
+    const qs = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+}
+
+function codeRepoBlobUrl(path) {
+    return `${CODE_REPO_URL}/blob/main/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function codeRepoRawUrl(path) {
+    return `https://raw.githubusercontent.com/dandi-compute/code/main/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function dandiBaseUrl(_dandisetId) {
+    return "https://dandiarchive.org";
+}
+
+/* ─── URL-based filtering ───────────────────────────────────── */
+function parseFilter() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        dandisetId: params.get("dandiset") ?? null,
+        subject: params.get("subject") ?? null,
+        session: params.get("session") ?? null,
+        pipelineVersion: params.get("version") ?? null,
+        paramsType: params.get("params") ?? null,
+        configType: params.get("config") ?? null,
+        dandiCodebaseHash: params.get("codebaseHash") ?? null,
+        dandiCodebaseVersion: params.get("codebaseVersion") ?? null,
+        assetSize: params.get("assetSize") ?? null,
+        failureStep: params.get("failureStep") ?? null,
+        status: params.get("status") ?? null,
+    };
+}
+
+// Extract a stable hash-like identifier for the dandi-compute/code source
+// backing a run. Prefer explicit commit-looking versions, then commit-like
+// `+hash` segments, and finally fall back to the raw version text.
+function runDandiCodebaseHash(run) {
+    const generatedByEntries = Array.isArray(run.generatedBy) ? run.generatedBy : [];
+    for (const entry of generatedByEntries) {
+        if (!DANDI_CODE_REPO_PATTERN.test(String(entry.CodeURL ?? ""))) continue;
+        const version = String(entry.Version ?? "").trim();
+        if (!version) continue;
+        if (COMMIT_HASH_PATTERN.test(version)) return version;
+        const refCandidate = pipelineCompareRefCandidates(version)[0];
+        if (refCandidate) return refCandidate;
+        return version;
+    }
+    return null;
+}
+
+// Resolve a run params identifier to a registered alias when available;
+// otherwise preserve the raw params value for matching and display.
+function runParamsType(run) {
+    const alias = resolveRegistryAlias(run.paramsProfile, PARAMS_REGISTRY)?.alias;
+    return alias ?? run.paramsProfile ?? null;
+}
+
+// Resolve a run config identifier to a registered alias when available;
+// otherwise preserve the raw config value for matching and display.
+function runConfigType(run) {
+    const alias = resolveRegistryAlias(run.configHash, CONFIG_REGISTRY)?.alias;
+    return alias ?? run.configHash ?? null;
+}
+
+function matchesResolvedOrRawValue(filterValue, resolvedValue, rawValue) {
+    if (!filterValue) return true;
+    return resolvedValue === filterValue || rawValue === filterValue;
+}
+
+function classifyFailedTaskStep(taskName = "") {
+    const normalized = String(taskName).toLowerCase();
+    if (/dispatch/.test(normalized)) return "job-dispatch";
+    if (/pre[\s_-]*process/.test(normalized)) return "pre-processing";
+    if (/post[\s_-]*process/.test(normalized)) return "post-processing";
+    return "other";
+}
+
+function isFailedStatus(status) {
+    return String(status).toLowerCase() === "failed";
+}
+
+function runFailureStep(run) {
+    if (!isFailedStatus(run.status)) return null;
+    const failedTasks = (run.tasks ?? []).filter((task) => isFailedStatus(task.status));
+    if (failedTasks.length === 0) return "other";
+
+    const failedSteps = failedTasks.map((task) => classifyFailedTaskStep(task.name));
+    if (failedSteps.includes("pre-processing")) return "pre-processing";
+    if (failedSteps.includes("post-processing")) return "post-processing";
+    if (failedSteps.includes("job-dispatch")) return "job-dispatch";
+    return "other";
+}
+
+function normalizeStatus(status) {
+    return status ? String(status).toLowerCase() : null;
+}
+
+function isStalled(run) {
+    if (run.status !== "running" || !run.createdAt) return false;
+    return Date.now() - new Date(run.createdAt).getTime() > 24 * 60 * 60 * 1000;
+}
+
+function applyFilter(runs, filter) {
+    const normalizedFilterStatus = normalizeStatus(filter.status);
+    return runs.filter((r) => {
+        if (filter.dandisetId && r.dandisetId !== filter.dandisetId) return false;
+        if (filter.subject && r.subject !== filter.subject) return false;
+        if (filter.session && r.session !== filter.session) return false;
+        if (filter.pipelineVersion && r.pipelineVersion !== filter.pipelineVersion) return false;
+        if (!matchesResolvedOrRawValue(filter.paramsType, runParamsType(r), r.paramsProfile)) return false;
+        if (!matchesResolvedOrRawValue(filter.configType, runConfigType(r), r.configHash)) return false;
+        if (filter.dandiCodebaseHash && runDandiCodebaseHash(r) !== filter.dandiCodebaseHash) return false;
+        if (filter.dandiCodebaseVersion && r.codebase !== filter.dandiCodebaseVersion) return false;
+        if (filter.assetSize && !matchesAssetSizeExpr(r, filter.assetSize)) return false;
+        if (normalizedFilterStatus === "stalled") {
+            if (!isStalled(r)) return false;
+        } else if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
+        if (filter.failureStep) {
+            if (!isFailedStatus(r.status)) return false;
+            const failedStep = r.failureStep;
+            if (filter.failureStep === "exclude-job-dispatch") return failedStep !== "job-dispatch";
+            return failedStep === filter.failureStep;
+        }
+        return true;
+    });
+}
+
+/* Build a page URL with the given filter parameters.
+   When on a scoped dashboard page (tests or archive), the matching view param
+   is automatically preserved so navigation stays within that scope.
+   When on the main page (_viewMode === null), no view param is emitted. */
+function narrowUrl(params) {
+    const sp = new URLSearchParams();
+    sp.set("layout", parseLayoutMode());
+    sp.set("sort", parseSortMode());
+    sp.set("sortDir", parseSortDirection());
+    if (_viewMode === "tests" || _viewMode === "archive") sp.set("view", _viewMode);
+    if (params.dandiset) sp.set("dandiset", params.dandiset);
+    if (params.subject) sp.set("subject", params.subject);
+    if (params.session) sp.set("session", params.session);
+    if (params.pipelineVersion) sp.set("version", params.pipelineVersion);
+    if (params.paramsType) sp.set("params", params.paramsType);
+    if (params.configType) sp.set("config", params.configType);
+    if (params.dandiCodebaseVersion) sp.set("codebaseVersion", params.dandiCodebaseVersion);
+    if (params.assetSize) sp.set("assetSize", params.assetSize);
+    if (params.failureStep) sp.set("failureStep", params.failureStep);
+    if (params.status) sp.set("status", params.status);
+    const qs = sp.toString();
+    return qs ? `?${qs}` : "./";
+}
+
+const FILTER_VALUE_COLLATOR = new Intl.Collator();
+const uniqueSortedValues = (items) => [...new Set(items.filter(Boolean))].sort(FILTER_VALUE_COLLATOR.compare);
+const FAILURE_STEP_FILTER_OPTIONS = ["exclude-job-dispatch", "pre-processing", "post-processing"];
+const STATUS_LABELS = {
+    success: "Successful",
+    failed: "Failed",
+    queued: "Queued",
+    running: "Running",
+
+    stalled: "Stalled",
+};
+const DECIMAL_DATA_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+const DATA_SIZE_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+
+function normalizeByteCount(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+    return Math.round(numericValue);
+}
+
+function runByteCount(run) {
+    return normalizeByteCount(run?.assetSizeBytes);
+}
+
+// Asset-size filter expression. The user types one or more comparison clauses
+// (combined with AND), comma-separated, with values in GB (decimal, 1 GB = 1e9
+// bytes). The "GB" unit and surrounding whitespace are optional, so all of
+// "> 10", ">10 GB", and ">50 GB, <100 GB" are accepted. Operators: > >= < <= =.
+const ASSET_SIZE_GB = 1e9;
+const ASSET_SIZE_SUGGESTIONS = ["> 10", "> 50", "< 10", "> 50, < 100", ">= 100"];
+const ASSET_SIZE_CLAUSE_PATTERN = /^(>=|<=|==|=|>|<)\s*([0-9]*\.?[0-9]+)\s*(?:gb?)?$/i;
+
+// Parse an expression into [{ op, bytes }] clauses, or null when empty/invalid
+// (any malformed clause invalidates the whole expression).
+function parseAssetSizeExpr(expr) {
+    if (!expr) return null;
+    const clauses = String(expr)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (clauses.length === 0) return null;
+    const parsed = [];
+    for (const clause of clauses) {
+        const m = clause.match(ASSET_SIZE_CLAUSE_PATTERN);
+        if (!m) return null;
+        const gb = parseFloat(m[2]);
+        if (!Number.isFinite(gb)) return null;
+        parsed.push({ op: m[1] === "==" ? "=" : m[1], bytes: gb * ASSET_SIZE_GB });
+    }
+    return parsed;
+}
+
+// Whether a run's asset size satisfies the expression. An empty/invalid
+// expression imposes no constraint; a run with unknown size never matches a
+// (valid) size filter.
+function matchesAssetSizeExpr(run, expr) {
+    const clauses = parseAssetSizeExpr(expr);
+    if (!clauses) return true;
+    const bytes = runByteCount(run);
+    if (bytes === null) return false;
+    return clauses.every(({ op, bytes: threshold }) => {
+        switch (op) {
+            case ">":
+                return bytes > threshold;
+            case ">=":
+                return bytes >= threshold;
+            case "<":
+                return bytes < threshold;
+            case "<=":
+                return bytes <= threshold;
+            case "=":
+                return Math.round(bytes / ASSET_SIZE_GB) === Math.round(threshold / ASSET_SIZE_GB);
+            default:
+                return true;
+        }
+    });
+}
+
+// Build the params object for narrowUrl from the full current filter, omitting
+// the given filter keys. Used for each filter input's "clear" link so it drops
+// only its own dimension (with the dandiset→subject→session cascade) while
+// preserving every other active filter.
+function filterNarrowParams(filter, omit = []) {
+    const all = {
+        dandiset: filter.dandisetId,
+        subject: filter.subject,
+        session: filter.session,
+        pipelineVersion: filter.pipelineVersion,
+        paramsType: filter.paramsType,
+        configType: filter.configType,
+        dandiCodebaseVersion: filter.dandiCodebaseVersion,
+        assetSize: filter.assetSize,
+        failureStep: filter.failureStep,
+        status: filter.status,
+    };
+    for (const key of omit) delete all[key];
+    return all;
+}
+
+function sumRunByteCounts(runs) {
+    return runs.reduce((sum, run) => {
+        const bytes = runByteCount(run);
+        return bytes === null ? sum : sum + bytes;
+    }, 0);
+}
+
+function formatByteCount(value) {
+    if (!Number.isFinite(value) || value < 0) return "0 B";
+    let scaledValue = value;
+    let unitIndex = 0;
+    while (scaledValue >= 1000 && unitIndex < DECIMAL_DATA_SIZE_UNITS.length - 1) {
+        scaledValue /= 1000;
+        unitIndex += 1;
+    }
+    return `${DATA_SIZE_FORMATTER.format(scaledValue)} ${DECIMAL_DATA_SIZE_UNITS[unitIndex]}`;
+}
+
+function renderFilterInput(name, label, value, suggestions, clearHref = null, placeholder = "") {
+    const listId = `filter-options-${name}`;
+    const options = suggestions.map((item) => `<option value="${e(item)}"></option>`).join("");
+    const clearBtn = clearHref
+        ? `<a class="filter-input-clear${value ? " filter-input-clear-active" : ""}" href="${e(clearHref)}" title="Clear ${label} filter" aria-label="Clear ${label} filter">×</a>`
+        : "";
+    const placeholderAttr = placeholder ? ` placeholder="${e(placeholder)}"` : "";
+    return `
+<label class="filter-input-wrap">
+    <span class="filter-input-label">${label}</span>
+    <span class="filter-input-row">
+        <input class="filter-input" name="${name}" value="${e(value ?? "")}" list="${listId}" autocomplete="off"${placeholderAttr}>
+        ${clearBtn}
+    </span>
+    <datalist id="${listId}">${options}</datalist>
+</label>`;
+}
+
+function renderFilterBanner(filter, availableRuns = []) {
+    const banner = document.getElementById("filter-banner");
+    const layoutMode = parseLayoutMode();
+    const sortMode = parseSortMode();
+    const sortDirection = parseSortDirection();
+    const isFiltered = !!(
+        filter.dandisetId ||
+        filter.subject ||
+        filter.session ||
+        filter.pipelineVersion ||
+        filter.paramsType ||
+        filter.configType ||
+        filter.dandiCodebaseVersion ||
+        filter.assetSize ||
+        filter.failureStep ||
+        filter.status
+    );
+
+    const crumbs = [];
+    if (filter.dandisetId) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId })}">Dandiset&nbsp;${e(filter.dandisetId)}</a>`
+        );
+    }
+    if (filter.subject) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject })}">Sub:&nbsp;${e(filter.subject)}</a>`
+        );
+    }
+    if (filter.session) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${narrowUrl({ dandiset: filter.dandisetId, subject: filter.subject, session: filter.session })}">Ses:&nbsp;${e(filter.session)}</a>`
+        );
+    }
+    if (filter.pipelineVersion) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ pipelineVersion: filter.pipelineVersion }))}">Ver:&nbsp;${e(filter.pipelineVersion)}</a>`
+        );
+    }
+    if (filter.paramsType) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ paramsType: filter.paramsType }))}">Params:&nbsp;${e(filter.paramsType)}</a>`
+        );
+    }
+    if (filter.configType) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ configType: filter.configType }))}">Config:&nbsp;${e(filter.configType)}</a>`
+        );
+    }
+    if (filter.dandiCodebaseVersion) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ dandiCodebaseVersion: filter.dandiCodebaseVersion }))}">Compute&nbsp;ver:&nbsp;${e(filter.dandiCodebaseVersion)}</a>`
+        );
+    }
+    if (filter.assetSize) {
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ assetSize: filter.assetSize }))}">Size:&nbsp;${e(filter.assetSize)}</a>`
+        );
+    }
+    if (filter.failureStep) {
+        const failureStepLabel =
+            filter.failureStep === "exclude-job-dispatch"
+                ? "Failed (except dispatch)"
+                : filter.failureStep === "pre-processing"
+                  ? "Failed in pre-processing"
+                  : filter.failureStep === "post-processing"
+                    ? "Failed in post-processing"
+                    : `Failed in ${filter.failureStep}`;
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ failureStep: filter.failureStep }))}">${e(failureStepLabel)}</a>`
+        );
+    }
+    if (filter.status) {
+        const statusLabel = normalizeStatus(filter.status);
+        const summaryStatusLabel = STATUS_LABELS[statusLabel] ?? `Status: ${filter.status}`;
+        crumbs.push(
+            `<a class="filter-crumb" href="${e(narrowUrl({ status: filter.status }))}">${e(summaryStatusLabel)}</a>`
+        );
+    }
+
+    const runsMatchingDandiset = filter.dandisetId
+        ? availableRuns.filter((run) => run.dandisetId === filter.dandisetId)
+        : availableRuns;
+    const runsMatchingSubject = filter.subject
+        ? runsMatchingDandiset.filter((run) => run.subject === filter.subject)
+        : runsMatchingDandiset;
+    const dandisets = uniqueSortedValues(availableRuns.map((r) => r.dandisetId));
+    const subjects = uniqueSortedValues(runsMatchingDandiset.map((r) => r.subject));
+    const sessions = uniqueSortedValues(runsMatchingSubject.map((r) => r.session));
+    const versions = uniqueSortedValues(availableRuns.map((r) => r.pipelineVersion));
+    const paramsTypes = uniqueSortedValues(availableRuns.map(runParamsType));
+    const configTypes = uniqueSortedValues(availableRuns.map(runConfigType));
+    const dandiCodebaseVersions = uniqueSortedValues(availableRuns.map((r) => r.codebase));
+    const failureSteps = uniqueSortedValues([
+        ...FAILURE_STEP_FILTER_OPTIONS,
+        ...availableRuns
+            .filter((run) => isFailedStatus(run.status))
+            .map((run) => run.failureStep)
+            .filter((step) => step !== "other"),
+    ]);
+    const filteredViewHtml = isFiltered
+        ? `<div class="filter-banner-active">
+    <span class="filter-banner-label">Filtered view:</span>
+    <span class="filter-crumbs">${crumbs.join('<span class="filter-sep">/</span>')}</span>
+</div>`
+        : "";
+
+    const scopedPageBanners = {
+        tests: {
+            label: "🧪 Tests",
+            desc: "Showing internal test runs only (Dandiset 001849)",
+        },
+        archive: {
+            label: "🗄️ Archive",
+            desc: "Showing archived failing runs only (separate from the main queue)",
+        },
+    };
+    const scopedBanner = scopedPageBanners[_viewMode];
+    const testsPageHtml = scopedBanner
+        ? `<div class="tests-page-banner">
+    <span class="tests-page-label">${scopedBanner.label}</span>
+    <span class="tests-page-desc">${scopedBanner.desc}</span>
+    <a class="tests-back-link" href="./">← Back to main</a>
+</div>`
+        : "";
+
+    const viewHiddenInput = scopedBanner ? `<input type="hidden" name="view" value="${_viewMode}">` : "";
+    const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
+    const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
+    const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
+    const statuses = Object.keys(STATUS_LABELS);
+    const clearAllParams = new URLSearchParams();
+    clearAllParams.set("layout", layoutMode);
+    clearAllParams.set("sort", sortMode);
+    clearAllParams.set("sortDir", sortDirection);
+    if (_viewMode === "tests" || _viewMode === "archive") clearAllParams.set("view", _viewMode);
+    const clearAllHref = `?${clearAllParams.toString()}`;
+
+    banner.innerHTML = `
+${testsPageHtml}<div class="filter-banner-main">
+    <span class="filter-banner-label">Filter runs:</span>
+    <form class="filter-form" method="get" action="">
+        ${viewHiddenInput}
+        ${layoutHiddenInput}
+        ${sortHiddenInput}
+        ${sortDirectionHiddenInput}
+        ${renderFilterInput("dandiset", "Dandiset", filter.dandisetId, dandisets, narrowUrl(filterNarrowParams(filter, ["dandiset", "subject", "session"])))}
+        ${renderFilterInput("subject", "Subject", filter.subject, subjects, narrowUrl(filterNarrowParams(filter, ["subject", "session"])))}
+        ${renderFilterInput("session", "Session", filter.session, sessions, narrowUrl(filterNarrowParams(filter, ["session"])))}
+        ${renderFilterInput("assetSize", "Asset Size (GB)", filter.assetSize, ASSET_SIZE_SUGGESTIONS, narrowUrl(filterNarrowParams(filter, ["assetSize"])), "e.g. >10  or  >50, <100")}
+        ${renderFilterInput("params", "Params Type", filter.paramsType, paramsTypes, narrowUrl(filterNarrowParams(filter, ["paramsType"])))}
+        ${renderFilterInput("config", "Config Type", filter.configType, configTypes, narrowUrl(filterNarrowParams(filter, ["configType"])))}
+        ${renderFilterInput("version", "Pipeline Version", filter.pipelineVersion, versions, narrowUrl(filterNarrowParams(filter, ["pipelineVersion"])))}
+        ${renderFilterInput("codebaseVersion", "Compute Codebase Version", filter.dandiCodebaseVersion, dandiCodebaseVersions, narrowUrl(filterNarrowParams(filter, ["dandiCodebaseVersion"])))}
+        ${renderFilterInput("status", "Status", filter.status, statuses, narrowUrl(filterNarrowParams(filter, ["status"])))}
+        ${renderFilterInput("failureStep", "Failure Step", filter.failureStep, failureSteps, narrowUrl(filterNarrowParams(filter, ["failureStep"])))}
+        <div class="filter-actions">
+            <a class="filter-clear" href="${clearAllHref}">× View all runs</a>
+            <button class="filter-apply" type="submit">Apply</button>
+        </div>
+    </form>
+</div>
+${filteredViewHtml}`;
+
+    const form = banner.querySelector(".filter-form");
+    const dandisetInput = form?.querySelector('input[name="dandiset"]');
+    const subjectInput = form?.querySelector('input[name="subject"]');
+    const sessionInput = form?.querySelector('input[name="session"]');
+    const subjectDatalist = banner.querySelector("#filter-options-subject");
+    const sessionDatalist = banner.querySelector("#filter-options-session");
+    const renderDatalistOptions = (datalist, values) => {
+        if (!datalist) return;
+        datalist.innerHTML = values.map((item) => `<option value="${e(item)}"></option>`).join("");
+    };
+    const refreshDependentFilterOptions = () => {
+        const selectedDandiset = dandisetInput?.value ?? "";
+        const nextRunsMatchingDandiset = selectedDandiset
+            ? availableRuns.filter((run) => run.dandisetId === selectedDandiset)
+            : availableRuns;
+        const nextSubjects = uniqueSortedValues(nextRunsMatchingDandiset.map((run) => run.subject));
+        renderDatalistOptions(subjectDatalist, nextSubjects);
+        if (subjectInput && subjectInput.value && !nextSubjects.includes(subjectInput.value)) {
+            subjectInput.value = "";
+        }
+
+        const selectedSubject = subjectInput?.value ?? "";
+        const nextRunsMatchingSubject = selectedSubject
+            ? nextRunsMatchingDandiset.filter((run) => run.subject === selectedSubject)
+            : nextRunsMatchingDandiset;
+        const nextSessions = uniqueSortedValues(nextRunsMatchingSubject.map((run) => run.session));
+        renderDatalistOptions(sessionDatalist, nextSessions);
+        if (sessionInput && sessionInput.value && !nextSessions.includes(sessionInput.value)) {
+            sessionInput.value = "";
+        }
+    };
+    if (dandisetInput) {
+        dandisetInput.addEventListener("input", refreshDependentFilterOptions);
+    }
+    if (subjectInput) {
+        subjectInput.addEventListener("input", refreshDependentFilterOptions);
+    }
+
+    banner.style.display = "";
+}
+
+function setPageCopy(title, subtitleHtml) {
+    const titleEl = document.querySelector("h1");
+    const subtitleEl = document.querySelector(".page-subtitle");
+    if (titleEl) titleEl.textContent = title;
+    if (subtitleEl) subtitleEl.innerHTML = subtitleHtml;
+}
+
+/* ─── Theme toggle ──────────────────────────────────────────── */
+function initTheme() {
+    const btn = document.getElementById("theme_toggle_btn");
+    const stored = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const isDark = stored ? stored === "dark" : prefersDark;
+    applyTheme(isDark ? "dark" : "light", btn);
+    btn.addEventListener("click", () => {
+        const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+        applyTheme(next, btn);
+        localStorage.setItem("theme", next);
+    });
+}
+
+function applyTheme(theme, btn) {
+    if (theme === "light") {
+        document.documentElement.dataset.theme = "light";
+        btn.setAttribute("aria-label", "Switch to dark mode");
+        btn.title = "Switch to dark mode";
+        btn.innerHTML = SUN_ICON;
+    } else {
+        delete document.documentElement.dataset.theme;
+        btn.setAttribute("aria-label", "Switch to light mode");
+        btn.title = "Switch to light mode";
+        btn.innerHTML = MOON_ICON;
+    }
+}
+
+const MOON_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>`;
+const SUN_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.22 3.22l1.42 1.42M15.36 15.36l1.42 1.42M3.22 16.78l1.42-1.42M15.36 4.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`;
+
+/* ─── ETag-aware fetch cache ────────────────────────────────── */
+// Caches response bodies in sessionStorage keyed by URL together with the
+// server's ETag.  Subsequent requests send "If-None-Match" so the server can
+// respond with 304 Not Modified, avoiding a redundant download.  Storage
+// errors (quota exceeded, private-browsing restrictions) are silently ignored
+// so that a failed cache write never prevents the fetch from succeeding.
+const ETAG_CACHE_PREFIX = "aind_etag:";
+
+async function cachedFetch(url, init = {}) {
+    const cacheKey = ETAG_CACHE_PREFIX + url;
+    let cached = null;
+    try {
+        const raw = sessionStorage.getItem(cacheKey);
+        if (raw) cached = JSON.parse(raw);
+    } catch {
+        /* sessionStorage unavailable or parse error; proceed without cache */
+    }
+
+    const headers = new Headers(init.headers ?? {});
+    if (cached?.etag) {
+        headers.set("If-None-Match", cached.etag);
+    }
+
+    const resp = await fetch(url, { ...init, headers });
+
+    if (resp.status === 304 && cached) {
+        return new Response(cached.body, {
+            status: cached.status ?? 200,
+            headers: { "Content-Type": cached.contentType ?? "" },
+        });
+    }
+
+    if (!resp.ok) return resp;
+
+    const body = await resp.text();
+    const etag = resp.headers.get("ETag");
+    const contentType = resp.headers.get("Content-Type") ?? "";
+
+    if (etag) {
+        try {
+            sessionStorage.setItem(cacheKey, JSON.stringify({ etag, body, contentType, status: resp.status }));
+        } catch {
+            /* Ignore storage errors (e.g., quota exceeded) */
+        }
+    }
+
+    return new Response(body, { status: resp.status, headers: { "Content-Type": contentType } });
+}
+
+function normalizeRegistryEntries(registryEntries) {
+    if (!registryEntries || typeof registryEntries !== "object" || Array.isArray(registryEntries)) return [];
+    return Object.entries(registryEntries).flatMap(([alias, entry]) => {
+        if (typeof alias !== "string" || !alias.trim()) return [];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+        if (typeof entry.path !== "string" || !entry.path.trim()) return [];
+        if (typeof entry.md5 !== "string" || !entry.md5.trim()) return [];
+        return [
+            {
+                alias,
+                md5: entry.md5.toLowerCase(),
+                path: entry.path,
+                priority: alias === "default" ? 0 : REGISTRY_FALLBACK_ALIAS_PRIORITY,
+            },
+        ];
+    });
+}
+
+async function fetchRegistryEntries(path, kindLabel) {
+    const response = await cachedFetch(codeRepoRawUrl(path));
+    if (!response.ok) {
+        throw new Error(`Failed to load ${kindLabel} registry (HTTP ${response.status}).`);
+    }
+    const entries = normalizeRegistryEntries(await response.json());
+    if (entries.length === 0) {
+        throw new Error(`Loaded ${kindLabel} registry is empty or invalid.`);
+    }
+    return entries;
+}
+
+async function loadAindPipelineRegistries() {
+    const [paramsResult, configResult] = await Promise.allSettled([
+        fetchRegistryEntries(REGISTERED_PARAMS_PATH, "params"),
+        fetchRegistryEntries(REGISTERED_CONFIGS_PATH, "config"),
+    ]);
+    if (paramsResult.status === "fulfilled") {
+        PARAMS_REGISTRY = paramsResult.value;
+    } else {
+        console.warn(paramsResult.reason?.message ?? "Failed to load params registry.");
+    }
+    if (configResult.status === "fulfilled") {
+        CONFIG_REGISTRY = configResult.value;
+    } else {
+        console.warn(configResult.reason?.message ?? "Failed to load config registry.");
+    }
+    return { paramsRegistry: PARAMS_REGISTRY, configRegistry: CONFIG_REGISTRY };
+}
+
+/* ─── Data fetching ─────────────────────────────────────────── */
+function queueStateCacheKey() {
+    return ETAG_CACHE_PREFIX + `${QUEUE_CDN_BASE}/state.jsonl.gz`;
+}
+
+function archiveStateCacheKey() {
+    return ETAG_CACHE_PREFIX + ARCHIVE_STATE_URL;
+}
+
+// Fetch and parse a JSONL queue state file with ETag-based session caching.
+// Defaults to the gzip-compressed main queue state; pass { url, compressed,
+// cacheKey } to fetch a different source (e.g. the uncompressed archive state).
+async function fetchQueueState(options = {}) {
+    const { url = `${QUEUE_CDN_BASE}/state.jsonl.gz`, compressed = true, cacheKey = queueStateCacheKey() } = options;
+
+    let cached = null;
+    try {
+        const raw = sessionStorage.getItem(cacheKey);
+        if (raw) cached = JSON.parse(raw);
+    } catch {
+        /* sessionStorage unavailable or parse error; proceed without cache */
+    }
+
+    const headers = new Headers();
+    if (cached?.etag) {
+        headers.set("If-None-Match", cached.etag);
+    }
+
+    const resp = await fetch(url, { headers });
+
+    let text;
+    if (resp.status === 304 && cached) {
+        text = cached.body;
+    } else if (resp.ok) {
+        if (compressed) {
+            if (typeof DecompressionStream === "undefined") {
+                throw new Error(
+                    "Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+)."
+                );
+            }
+            const ds = new DecompressionStream("gzip");
+            const decompressed = resp.body.pipeThrough(ds);
+            text = await new Response(decompressed).text();
+        } else {
+            text = await resp.text();
+        }
+
+        const etag = resp.headers.get("ETag");
+        if (etag) {
+            try {
+                sessionStorage.setItem(cacheKey, JSON.stringify({ etag, body: text }));
+            } catch {
+                /* Ignore storage errors (e.g., quota exceeded) */
+            }
+        }
+    } else {
+        if (resp.status === 403 || resp.status === 429) {
+            throw new Error("GitHub CDN rate limit exceeded. Please try again in a few minutes.");
+        }
+        throw new Error(`Failed to load queue state (HTTP ${resp.status}).`);
+    }
+
+    return text
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+}
+
+// Fetch the archived failing runs from the queue repo's uncompressed
+// archive_state.jsonl (shares the same JSONL schema as the main queue state).
+async function fetchArchiveState() {
+    return fetchQueueState({
+        url: ARCHIVE_STATE_URL,
+        compressed: false,
+        cacheKey: archiveStateCacheKey(),
+    });
+}
+
+function clearQueueStateCache() {
+    try {
+        sessionStorage.removeItem(queueStateCacheKey());
+        sessionStorage.removeItem(archiveStateCacheKey());
+    } catch {
+        /* sessionStorage unavailable; nothing to clear */
+    }
+}
+
+async function fetchTraceText(run) {
+    const url = resolveBlobUrl(run, `${run.path}/logs/trace.txt`);
+    if (!url) return null;
+    try {
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return null;
+        return resp.text();
+    } catch {
+        return null;
+    }
+}
+
+// List the log file basenames present for a run, sourced from its S3 blob map.
+// Only direct children of "{run.path}/logs/" are returned (e.g. trace.txt,
+// report.html, timeline.html, dag.html, nextflow.log, *_slurm.log).
+function runLogFiles(run) {
+    const outputPaths = run?.outputPaths;
+    if (!outputPaths) return [];
+    const prefix = `${run.path}/logs/`;
+    const names = new Set();
+    for (const repoPath of Object.keys(outputPaths)) {
+        if (!repoPath.startsWith(prefix)) continue;
+        const relative = repoPath.slice(prefix.length);
+        if (!relative || relative.includes("/")) continue; // direct children only
+        names.add(relative);
+    }
+    return Array.from(names);
+}
+
+// SLURM job log basenames for a run, sourced from its S3 blob map.
+async function fetchSlurmLogs(run) {
+    return runLogFiles(run)
+        .filter((name) => name.endsWith("_slurm.log"))
+        .sort((a, b) => a.localeCompare(b));
+}
+
+async function fetchDatasetDescription(run) {
+    // dataset_description.json's blob is provided in the entry's
+    // `dataset_description_path` map (merged into the run's lookup), so resolve it
+    // straight from the S3 blob bucket like every other artifact.
+    const path = run.datasetDescriptionPath ?? `${run.path}/dataset_description.json`;
+    const url = resolveBlobUrl(run, path);
+    if (!url) return null;
+    try {
+        const resp = await cachedFetch(url);
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch {
+        return null;
+    }
+}
+
+// Build the visualization recording groups for a run from its S3 blob map.
+// PNGs live under "{run.path}/derivatives/visualization/..." (or the legacy
+// "{run.path}/visualization/..."). Images inside a recording subdirectory are
+// grouped under that subdirectory's name; images directly under visualization/
+// are grouped under a synthetic "summary" recording. Sourced entirely from the
+// per-entry output_paths map — no directory listing required.
+function fetchVisualizationData(run) {
+    const outputPaths = run?.outputPaths;
+    if (!outputPaths) return null;
+    const prefixes = [`${run.path}/derivatives/visualization/`, `${run.path}/visualization/`];
+
+    const groups = new Map();
+    for (const [repoPath, blobId] of Object.entries(outputPaths)) {
+        if (!/\.png$/i.test(repoPath)) continue;
+        const prefix = prefixes.find((p) => repoPath.startsWith(p));
+        if (!prefix) continue;
+        const relative = repoPath.slice(prefix.length); // e.g. "rec1/drift_map.png" or "psd.png"
+        const slashIndex = relative.indexOf("/");
+        const groupName = slashIndex === -1 ? "summary" : relative.slice(0, slashIndex);
+        const baseName = relative.slice(relative.lastIndexOf("/") + 1);
+        const url = blobUrl(blobId);
+        if (!url) continue;
+        if (!groups.has(groupName)) groups.set(groupName, []);
+        groups.get(groupName).push({ name: baseName, url });
+    }
+    if (groups.size === 0) return null;
+
+    // Order: the top-level "summary" group first, then recordings alphabetically.
+    const orderedNames = Array.from(groups.keys()).sort((a, b) => {
+        if (a === "summary") return -1;
+        if (b === "summary") return 1;
+        return a.localeCompare(b);
+    });
+    const recordings = orderedNames.map((name) => ({
+        name,
+        images: groups.get(name).sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+    return recordings.length > 0 ? recordings : null;
+}
+
+// Fetch and parse a JSON artifact that lives alongside the visualization images
+// under "{run.path}/derivatives/visualization/<name>" (or the legacy
+// "{run.path}/visualization/<name>"), resolving its blob from the S3 map.
+async function fetchVizArtifactJson(run, fileName) {
+    if (!run?.outputPaths) return null;
+    const candidates = [`${run.path}/derivatives/visualization/${fileName}`, `${run.path}/visualization/${fileName}`];
+    for (const repoPath of candidates) {
+        const url = resolveBlobUrl(run, repoPath);
+        if (!url) continue;
+        try {
+            const resp = await cachedFetch(url);
+            if (resp.ok) return await resp.json();
+        } catch {
+            /* try the next candidate */
+        }
+    }
+    return null;
+}
+
+// quality_control.json — QC metrics for a successful run.
+async function fetchQualityControl(run) {
+    return fetchVizArtifactJson(run, "quality_control.json");
+}
+
+// visualization_output.json — interactive Kachery/figurl view links, keyed by
+// recording: { "<recording>": { "<view>": "<figurl url>", ... }, ... }.
+async function fetchVisualizationOutput(run) {
+    return fetchVizArtifactJson(run, "visualization_output.json");
+}
+
+// Returns subject, falling back to a per-dandiset default when subject is null.
+function resolveSubject(dandisetId, subject) {
+    if (subject != null) return subject;
+    return DANDISET_SUBJECT_DEFAULTS.get(String(dandisetId)) ?? null;
+}
+
+function parseDandiPath(dandiPath) {
+    const pathParts = String(dandiPath ?? "")
+        .split("/")
+        .filter(Boolean);
+    const subjectIndex = pathParts.findIndex((part) => part.startsWith("sub-"));
+    const subjectPart = subjectIndex >= 0 ? pathParts[subjectIndex] : "";
+    const searchAfterSubject = subjectIndex >= 0 ? pathParts.slice(subjectIndex + 1) : pathParts;
+
+    // Prefer an explicit ses-{session} directory component...
+    const sessionPart = searchAfterSubject.find((part) => part.startsWith("ses-")) ?? "";
+    let session = sessionPart ? sessionPart.replace(/^ses-/, "") : null;
+
+    // ...fall back to extracting session from the NWB filename (sub-{sub}_ses-{ses}_{rest}.nwb)
+    if (!session) {
+        const filename = pathParts[pathParts.length - 1] ?? "";
+        const sesMatch = filename.match(/_ses-([^_]+)/);
+        if (sesMatch) session = sesMatch[1];
+    }
+
+    return {
+        subject: subjectPart ? subjectPart.replace(/^sub-/, "") : null,
+        session,
+    };
+}
+
+function dandiPathDirectoryParts(dandiPath) {
+    const pathParts = String(dandiPath ?? "")
+        .split("/")
+        .filter(Boolean);
+    if (pathParts.length === 0) return [];
+    const terminalPart = pathParts[pathParts.length - 1] ?? "";
+    if (!terminalPart.toLowerCase().endsWith(".nwb")) return pathParts;
+    const directoryParts = pathParts.slice(0, -1);
+    const nwbStem = terminalPart.slice(0, -4);
+    directoryParts.push(nwbStem);
+    return directoryParts;
+}
+
+// Build a run directory path from a JSONL queue entry.
+// With session:    derivatives/dandiset-{id}/sub-{subject}/ses-{session}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
+// Without session: derivatives/dandiset-{id}/sub-{subject}/pipeline-{pipeline}/version-{version}_params-{params}_config-{config}[_date-{date}]_attempt-{attempt}
+function buildRunPath(entry) {
+    const parsed = parseDandiPath(entry.dandi_path);
+    const subject = resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject);
+    const session = entry.session ?? parsed.session;
+    const dandiPathParts = dandiPathDirectoryParts(entry.dandi_path);
+    const parts = ["derivatives", `dandiset-${entry.dandiset_id}`];
+    if (dandiPathParts.length > 0) {
+        parts.push(...dandiPathParts);
+    } else {
+        parts.push(`sub-${subject}`);
+        if (session !== null && session !== undefined) {
+            parts.push(`ses-${session}`);
+        }
+    }
+    parts.push(`pipeline-${entry.pipeline}`);
+    let capsule = `version-${entry.version}`;
+    if (entry.codebase) {
+        capsule += `_codebase-${entry.codebase}`;
+    }
+    capsule += `_params-${entry.params}_config-${entry.config}_attempt-${entry.attempt}`;
+    parts.push(capsule);
+    return parts.join("/");
+}
+
+/* ─── Queue entry parsing ───────────────────────────────────── */
+// Merge the per-entry output/log path → blob-id maps into a single lookup.
+// Keys are repo-relative paths within the 001697 derivatives dandiset; values
+// are DANDI S3 content blob IDs. Both `output_paths` and an optional separate
+// `log_paths` map are supported and merged into one object.
+function normalizeOutputPaths(entry) {
+    const merged = {};
+    for (const key of ["output_paths", "log_paths", "dataset_description_path"]) {
+        const map = entry?.[key];
+        if (map && typeof map === "object" && !Array.isArray(map)) {
+            Object.assign(merged, map);
+        }
+    }
+    return merged;
+}
+
+// Extract the dataset_description.json repo path from an entry. Newer entries
+// provide `dataset_description_path` as a { path: blob-id } map (its blob is then
+// merged into the run's lookup by normalizeOutputPaths); older entries used a
+// bare path string.
+function datasetDescriptionPathOf(entry) {
+    const dd = entry?.dataset_description_path;
+    if (typeof dd === "string") return dd;
+    if (dd && typeof dd === "object" && !Array.isArray(dd)) {
+        const keys = Object.keys(dd);
+        return keys.length > 0 ? keys[0] : null;
+    }
+    return null;
+}
+
+// Convert raw JSONL entries from the queue state file into run objects.
+function parseQueueEntries(entries) {
+    return entries.map((entry) => {
+        const parsed = parseDandiPath(entry.dandi_path);
+        const createdAt = entry.created_at ?? null;
+        return {
+            path: buildRunPath(entry),
+            dandisetId: entry.dandiset_id,
+            dandiPath: entry.dandi_path ?? null,
+            subject: resolveSubject(entry.dandiset_id, entry.subject ?? parsed.subject),
+            session: entry.session ?? parsed.session,
+            pipelineName: entry.pipeline,
+            pipelineVersion: entry.version,
+            paramsProfile: entry.params,
+            configHash: normalizeConfigHash(entry.config),
+            attempt: entry.attempt,
+            codebase: entry.codebase ?? null,
+            hasCode: entry.has_code,
+            hasBeenSubmitted: entry.has_been_submitted ?? false,
+            hasOutput: entry.has_output,
+            hasLogs: entry.has_logs,
+            contentHash: entry.content_id ?? null,
+            outputPaths: normalizeOutputPaths(entry),
+            datasetDescriptionPath: datasetDescriptionPathOf(entry),
+            // Whether the source asset lives under sourcedata/ in its dandiset —
+            // derived directly from the dandi_path (no DANDI API lookup needed).
+            inSourcedata: String(entry.dandi_path ?? "").startsWith("sourcedata/"),
+            assetSizeBytes: normalizeByteCount(entry.asset_size_bytes ?? entry.asset_bytes ?? entry.bytes),
+            createdAt,
+            runDate: createdAt ?? entry.date ?? null,
+        };
+    });
+}
+
+// Strip _date-{...} suffix from a raw config field value so that the short
+// commit hash can be resolved against the registry independently of whether
+// the date was embedded in the same token (e.g. "0d4bf36_date-2026+05+21" → "0d4bf36").
+function normalizeConfigHash(config) {
+    if (!config) return config;
+    const dateIndex = String(config).indexOf("_date-");
+    return dateIndex !== -1 ? config.slice(0, dateIndex) : config;
+}
+
+/* ─── Path parsing ──────────────────────────────────────────── */
+// Run paths are one of:
+// - derivatives/{dandiset}/{subject}/{session?}/{pipeline}/version-{version}/{runId}
+// - derivatives/{dandiset}/{subject}/{session?}/{pipeline}/version-{version}_{runId}
+function parseRunPath(runPath) {
+    const parts = runPath.split("/");
+
+    const dandisetPart = parts.find((part) => part.startsWith("dandiset-")) ?? "";
+    const subjectPart = parts.find((part) => part.startsWith("sub-")) ?? "";
+    const pipelineIndex = parts.findIndex((part) => part.startsWith("pipeline-"));
+
+    const dandisetId = dandisetPart.replace(/^dandiset-/, "");
+    const subject = subjectPart.replace(/^sub-/, "");
+
+    const sessionPart = pipelineIndex > 0 ? parts[pipelineIndex - 1] : "";
+    const sesMatch = sessionPart?.match(/^ses-(.+)$/);
+    const session = sesMatch ? sesMatch[1] : null;
+
+    const pipelineName = pipelineIndex >= 0 ? parts[pipelineIndex].replace(/^pipeline-/, "") : "";
+    const versionPart = pipelineIndex >= 0 ? (parts[pipelineIndex + 1] ?? "") : "";
+    const runPart = pipelineIndex >= 0 ? (parts[pipelineIndex + 2] ?? "") : "";
+
+    let pipelineVersion = versionPart.startsWith("version-") ? versionPart.slice("version-".length) : versionPart;
+    let capsulePart = runPart;
+    if (versionPart.startsWith("version-")) {
+        const versionBody = versionPart.slice("version-".length);
+        const flattenedMarker = "_params-";
+        const flattenedIndex = versionBody.indexOf(flattenedMarker);
+        if (flattenedIndex !== -1) {
+            pipelineVersion = versionBody.slice(0, flattenedIndex);
+            capsulePart = `params-${versionBody.slice(flattenedIndex + flattenedMarker.length)}`;
+        }
+    }
+
+    let paramsProfile = capsulePart;
+    let configHash = "";
+    let attempt = 1;
+    if (capsulePart.startsWith("params-")) {
+        const capsuleBody = capsulePart.slice("params-".length);
+        const attemptMarker = "_attempt-";
+        const attemptIndex = capsuleBody.lastIndexOf(attemptMarker);
+        if (attemptIndex !== -1) {
+            const attemptText = capsuleBody.slice(attemptIndex + attemptMarker.length);
+            if (/^\d+$/.test(attemptText)) {
+                attempt = parseInt(attemptText, 10);
+                const beforeAttempt = capsuleBody.slice(0, attemptIndex);
+                const configMarker = "_config-";
+                const configIndex = beforeAttempt.indexOf(configMarker);
+                if (configIndex !== -1) {
+                    paramsProfile = beforeAttempt.slice(0, configIndex);
+                    configHash = normalizeConfigHash(beforeAttempt.slice(configIndex + configMarker.length));
+                } else {
+                    paramsProfile = beforeAttempt;
+                }
+            }
+        }
+    }
+
+    return {
+        path: runPath,
+        dandisetId,
+        subject,
+        session,
+        pipelineName,
+        pipelineVersion,
+        paramsProfile,
+        configHash,
+        createdAt: null,
+        runDate: null,
+        attempt,
+    };
+}
+
+function sortRuns(runs, sortMode = _sortMode, sortDirection = _sortDirection) {
+    return [...runs].sort((a, b) => {
+        if (sortMode === "created_at") {
+            const createdCompare = String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""));
+            if (createdCompare !== 0) return sortDirection === "asc" ? -createdCompare : createdCompare;
+        }
+        if (sortMode === "dandiset_id") {
+            const dandisetCompare = String(a.dandisetId ?? "").localeCompare(String(b.dandisetId ?? ""));
+            if (dandisetCompare !== 0) return sortDirection === "asc" ? dandisetCompare : -dandisetCompare;
+        }
+        const attemptCompare = (b.attempt ?? 0) - (a.attempt ?? 0);
+        if (attemptCompare !== 0) return sortDirection === "asc" ? -attemptCompare : attemptCompare;
+        const pathCompare = String(a.path ?? "").localeCompare(String(b.path ?? ""));
+        return sortDirection === "asc" ? pathCompare : -pathCompare;
+    });
+}
+
+/* ─── Trace parsing ─────────────────────────────────────────── */
+function parseTrace(text) {
+    if (!text) return { status: "unknown", tasks: [] };
+    const lines = text.trim().split("\n").filter(Boolean);
+    if (lines.length < 2) return { status: "unknown", tasks: [] };
+
+    const headers = lines[0].split("\t");
+    const idx = (h) => headers.indexOf(h);
+
+    const tasks = lines.slice(1).map((line) => {
+        const cols = line.split("\t");
+        return {
+            name: cols[idx("name")] ?? "",
+            status: cols[idx("status")] ?? "",
+            exit: cols[idx("exit")] ?? "",
+            duration: cols[idx("duration")] ?? "",
+            realtime: cols[idx("realtime")] ?? "",
+            nativeId: cols[idx("native_id")] ?? "",
+        };
+    });
+
+    const anyFailed = tasks.some((t) => t.status === "FAILED");
+    const allCompleted = tasks.every((t) => t.status === "COMPLETED");
+    const status = anyFailed ? "failed" : allCompleted ? "success" : "running";
+    return { status, tasks };
+}
+
+/* ─── Rendering ─────────────────────────────────────────────── */
+function renderSummary(runs) {
+    const total = runs.length;
+    const success = runs.filter((r) => r.status === "success").length;
+    const failed = runs.filter((r) => r.status === "failed").length;
+    const queued = runs.filter((r) => r.status === "queued").length;
+    const running = runs.filter((r) => r.status === "running").length;
+    const stalled = runs.filter(isStalled).length;
+    const unknown = total - success - failed - queued - running;
+    const successfulRuns = runs.filter((run) => run.status === "success");
+    const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
+    const totalBytes = sumRunByteCounts(successfulRuns);
+    const filter = parseFilter();
+    const successHref = narrowUrl({ ...filterNarrowParams(filter, ["failureStep", "status"]), status: "success" });
+    const failedHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "failed" });
+    const runningHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "running" });
+    const stalledHref = narrowUrl({ ...filterNarrowParams(filter, ["status"]), status: "stalled" });
+
+    document.getElementById("summary").innerHTML = `
+        <div class="summary-stats">
+            <div class="stat-item">
+                <span class="stat-value">${total}</span>
+                <span class="stat-label">Total Runs</span>
+            </div>
+            <a class="stat-item stat-running" href="${e(runningHref)}" title="Show only running runs">
+                <span class="stat-value">${running}</span>
+                <span class="stat-label">Running</span>
+            </a>
+            ${
+                stalled
+                    ? `<a class="stat-item stat-stalled" href="${e(stalledHref)}" title="Show only stalled runs (running for more than 24 hours)">
+                <span class="stat-value">⚠ ${stalled}</span>
+                <span class="stat-label">Stalled</span>
+            </a>`
+                    : ""
+            }
+            <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
+                <span class="stat-value">${success}</span>
+                <span class="stat-label">Successful</span>
+            </a>
+            <a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
+                <span class="stat-value">${failed}</span>
+                <span class="stat-label">Failed</span>
+            </a>
+            ${
+                queued
+                    ? `<div class="stat-item stat-queued">
+                <span class="stat-value">${queued}</span>
+                <span class="stat-label">Queued</span>
+            </div>`
+                    : ""
+            }
+            ${
+                unknown
+                    ? `<div class="stat-item">
+                <span class="stat-value">${unknown}</span>
+                <span class="stat-label">Unknown</span>
+            </div>`
+                    : ""
+            }
+            ${
+                runsWithKnownByteCounts
+                    ? `<div class="stat-item stat-bytes">
+               <span class="stat-value">${formatByteCount(totalBytes)}</span>
+               <span class="stat-label">DATA PROCESSED</span>
+           </div>`
+                    : ""
+            }
+        </div>`;
+}
+
+/* ─── Queue priorities (top display) ─────────────────────────────
+   Fetches dandi-compute/queue's queue_config.json from the raw GitHub CDN and
+   renders the current scheduling priorities at the top of the dashboard. The
+   config schema isn't fixed here, so rendering adapts: an ordered priority list
+   (with any scalar settings) when one can be detected, otherwise a generic
+   key/value view. Dandiset-id entries link into the filtered dashboard.       */
+async function fetchQueueConfig() {
+    try {
+        const resp = await fetch(QUEUE_CONFIG_URL, { cache: "no-cache" });
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch {
+        return null;
+    }
+}
+
+function isDandisetId(value) {
+    return /^\d{6}$/.test(String(value));
+}
+
+// Detect an ordered priority list within the config. Returns { list, key }
+// where key is the source property (or null for a root array / numeric map).
+function extractQueuePriorityList(config) {
+    if (Array.isArray(config)) return { list: config, key: null };
+    if (config && typeof config === "object") {
+        for (const key of ["priorities", "priority", "order", "queue", "ranking", "dandisets", "dandiset_priorities"]) {
+            if (Array.isArray(config[key])) return { list: config[key], key };
+        }
+        // A flat { "<dandiset>": <priority number> } map → sort ascending.
+        const keys = Object.keys(config);
+        const numeric = Object.entries(config).filter(([, v]) => typeof v === "number");
+        if (keys.length > 0 && numeric.length === keys.length) {
+            const list = numeric.sort((a, b) => a[1] - b[1]).map(([name, priority]) => ({ name, priority }));
+            return { list, key: null };
+        }
+    }
+    return { list: null, key: null };
+}
+
+const QUEUE_ITEM_LABEL_KEYS = ["dandiset_id", "dandiset", "id", "name", "key", "label"];
+const QUEUE_ITEM_PRIORITY_KEYS = ["priority", "weight", "rank", "score"];
+
+function normalizeQueuePriorityItem(item) {
+    if (item === null || item === undefined) return null;
+    if (typeof item === "string" || typeof item === "number") {
+        return { label: String(item), priority: null, extra: [] };
+    }
+    if (typeof item === "object") {
+        let label = null;
+        for (const k of QUEUE_ITEM_LABEL_KEYS) {
+            if (item[k] !== undefined && item[k] !== null) {
+                label = String(item[k]);
+                break;
+            }
+        }
+        let priority = null;
+        for (const k of QUEUE_ITEM_PRIORITY_KEYS) {
+            if (item[k] !== undefined && item[k] !== null) {
+                priority = item[k];
+                break;
+            }
+        }
+        const skip = new Set([...QUEUE_ITEM_LABEL_KEYS, ...QUEUE_ITEM_PRIORITY_KEYS]);
+        const extra = Object.entries(item)
+            .filter(
+                ([k, v]) => !skip.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+            )
+            .map(([k, v]) => ({ key: k, value: v }));
+        return { label: label ?? JSON.stringify(item), priority, extra };
+    }
+    return null;
+}
+
+// Scalar top-level config entries shown as a "settings" strip (excluding the
+// property that supplied the priority list).
+function queueConfigSettings(config, usedKey) {
+    if (!config || typeof config !== "object" || Array.isArray(config)) return [];
+    return Object.entries(config)
+        .filter(([k, v]) => k !== usedKey && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+        .map(([key, value]) => ({ key, value }));
+}
+
+function renderQueueSettingsStrip(settings) {
+    if (!settings.length) return "";
+    const chips = settings
+        .map(
+            (s) =>
+                `<span class="qp-setting"><span class="qp-setting-key"${fieldTipAttrs(s.key)}>${e(prettyKey(s.key))}</span><span class="qp-setting-val">${e(String(s.value))}</span></span>`
+        )
+        .join("");
+    return `<div class="qp-settings">${chips}</div>`;
+}
+
+// Generic fallback when no ordered list can be detected.
+function renderQueueConfigGeneric(config) {
+    if (config === null || typeof config !== "object") {
+        return `<div class="qp-generic"><span class="qp-setting-val">${e(String(config))}</span></div>`;
+    }
+    const rows = Object.entries(config)
+        .map(([k, v]) => {
+            let valHtml;
+            if (Array.isArray(v)) {
+                valHtml = `<span class="qp-setting-val">${e(v.map((x) => (x && typeof x === "object" ? JSON.stringify(x) : String(x))).join(", "))}</span>`;
+            } else if (v && typeof v === "object") {
+                valHtml = `<span class="qp-setting-val qp-mono">${e(JSON.stringify(v))}</span>`;
+            } else {
+                valHtml = `<span class="qp-setting-val">${e(String(v))}</span>`;
+            }
+            return `<div class="qp-generic-row"><span class="qp-setting-key">${e(prettyKey(k))}</span>${valHtml}</div>`;
+        })
+        .join("");
+    return `<div class="qp-generic">${rows}</div>`;
+}
+
+// Field descriptions from the queue_config LinkML schema (dandi-compute/code),
+// surfaced as hover tooltips via small info icons.
+const QUEUE_CONFIG_DESCRIPTION =
+    "A configuration structure for DANDI Compute pipelines, including version priorities, parameter priorities, attempt limits, and asset overrides.";
+const QUEUE_FIELD_DESCRIPTIONS = {
+    version_priority: "An ordered list of pipeline versions, in priority order (highest priority first).",
+    params_priority: "An ordered list of parameter set names, in priority order (highest priority first).",
+    max_attempts_per_asset: "The maximum number of times the pipeline should be retried on a single asset.",
+    asset_overrides:
+        "A mapping of asset identifiers (e.g. UUIDs) to an override value. A null value means there is no limit on the number of failures for that asset.",
+    max_fail_per_dandiset:
+        "The maximum number of failures permitted per dandiset before the pipeline is considered failed.",
+};
+const QUEUE_OVERRIDE_NULL_DESCRIPTION = "No limit on the number of failures for this asset.";
+
+function tipAttrs(description) {
+    if (!description) return "";
+    return ` tabindex="0" role="note" aria-label="${e(description)}" data-tip="${e(description)}"`;
+}
+function fieldTipAttrs(field) {
+    return tipAttrs(QUEUE_FIELD_DESCRIPTIONS[field]);
+}
+
+// Ordered priority chips (rank + value), optionally linking each value into the
+// dashboard filter named by linkKey (e.g. "pipelineVersion" → ?version=…).
+function renderQueuePriorityChips(values, linkKey) {
+    const items = (Array.isArray(values) ? values : []).filter((v) => v !== null && v !== undefined);
+    if (!items.length) return `<span class="qp-empty">—</span>`;
+    const chips = items
+        .map((v, i) => {
+            const label = e(String(v));
+            const inner = linkKey
+                ? `<a class="qp-chip-link" href="${e(narrowUrl({ [linkKey]: String(v) }))}" title="Filter dashboard to ${label}">${label}</a>`
+                : `<span class="qp-chip-label">${label}</span>`;
+            return `<li class="qp-chip"><span class="qp-rank">${i + 1}</span>${inner}</li>`;
+        })
+        .join("");
+    return `<ol class="qp-chips">${chips}</ol>`;
+}
+
+function renderQueuePriorityRow(label, values, linkKey, fieldKey) {
+    return `<div class="qp-row"><span class="qp-row-label"${fieldTipAttrs(fieldKey)}>${e(label)}</span>${renderQueuePriorityChips(values, linkKey)}</div>`;
+}
+
+const QUEUE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Per-asset overrides as a small collapsible list. Asset keys are content ids,
+// so they link into Neurosift like the rest of the app.
+function renderQueueAssetOverrides(overrides) {
+    const entries =
+        overrides && typeof overrides === "object" && !Array.isArray(overrides) ? Object.entries(overrides) : [];
+    if (!entries.length) return "";
+    const rows = entries
+        .map(([assetId, val]) => {
+            const idShort = assetId.length > 16 ? `${assetId.slice(0, 8)}…${assetId.slice(-4)}` : assetId;
+            const idHtml = QUEUE_UUID_PATTERN.test(assetId)
+                ? `<a class="qp-asset qp-asset-link" href="${e(neurosiftBlobUrl(assetId))}" target="_blank" rel="noopener" title="${e(assetId)} — open in Neurosift">${e(idShort)}</a>`
+                : `<code class="qp-asset" title="${e(assetId)}">${e(idShort)}</code>`;
+            const valHtml =
+                val === null || val === undefined
+                    ? `<span class="qp-override-val qp-override-unlimited"${tipAttrs(QUEUE_OVERRIDE_NULL_DESCRIPTION)}>no failure limit</span>`
+                    : `<span class="qp-override-val">${e(typeof val === "object" ? JSON.stringify(val) : String(val))}</span>`;
+            return `<div class="qp-override-row">${idHtml}<span class="qp-override-arrow">→</span>${valHtml}</div>`;
+        })
+        .join("");
+    return `<details class="qp-overrides">
+        <summary class="qp-overrides-summary"><span class="qp-overrides-term"${fieldTipAttrs("asset_overrides")}>Asset overrides</span> <span class="count-badge">${entries.length}</span></summary>
+        <div class="qp-overrides-body">${rows}</div>
+    </details>`;
+}
+
+// Tailored renderer for the { pipelines: { "<name>": {…} } } schema.
+function renderQueuePipelines(pipelines) {
+    const names = Object.keys(pipelines);
+    if (!names.length) return "";
+    const known = new Set(["version_priority", "params_priority", "asset_overrides"]);
+    return names
+        .map((name) => {
+            const p = pipelines[name];
+            if (!p || typeof p !== "object" || Array.isArray(p)) {
+                return `<div class="qp-pipeline"><div class="qp-pipeline-name">${e(name)}</div>${renderQueueConfigGeneric(p)}</div>`;
+            }
+            const rows = [];
+            if ("version_priority" in p)
+                rows.push(
+                    renderQueuePriorityRow(
+                        "Version priority",
+                        p.version_priority,
+                        "pipelineVersion",
+                        "version_priority"
+                    )
+                );
+            if ("params_priority" in p)
+                rows.push(renderQueuePriorityRow("Params priority", p.params_priority, null, "params_priority"));
+            const settings = Object.entries(p)
+                .filter(
+                    ([k, v]) =>
+                        !known.has(k) && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+                )
+                .map(([key, value]) => ({ key, value }));
+            return `<div class="qp-pipeline">
+        <div class="qp-pipeline-name">${e(name)}</div>
+        <div class="qp-rows">${rows.join("")}</div>
+        ${renderQueueSettingsStrip(settings)}
+        ${renderQueueAssetOverrides(p.asset_overrides)}
+    </div>`;
+        })
+        .join("");
+}
+
+// Adaptive fallback body for configs that don't match the pipelines schema.
+function renderQueueAdaptiveBody(config) {
+    const { list, key } = extractQueuePriorityList(config);
+    if (Array.isArray(list) && list.length > 0) {
+        const items = list.map(normalizeQueuePriorityItem).filter(Boolean);
+        const itemsHtml = items
+            .map((it, i) => {
+                const labelHtml = isDandisetId(it.label)
+                    ? `<a class="qp-label qp-label-link" href="${e(narrowUrl({ dandiset: it.label }))}" title="Filter dashboard to Dandiset ${e(it.label)}">${e(it.label)}</a>`
+                    : `<span class="qp-label">${e(it.label)}</span>`;
+                const prio =
+                    it.priority !== null
+                        ? `<span class="qp-priority" title="Priority">${e(String(it.priority))}</span>`
+                        : "";
+                const extra = it.extra.length
+                    ? `<span class="qp-item-meta">${it.extra.map((x) => `${e(prettyKey(x.key))}:&nbsp;${e(String(x.value))}`).join(" · ")}</span>`
+                    : "";
+                return `<li class="qp-item">
+            <span class="qp-rank">${i + 1}</span>
+            <span class="qp-item-body">
+                <span class="qp-item-head">${labelHtml}${prio}</span>
+                ${extra}
+            </span>
+        </li>`;
+            })
+            .join("");
+        return `<ol class="qp-list">${itemsHtml}</ol>${renderQueueSettingsStrip(queueConfigSettings(config, key))}`;
+    }
+    return renderQueueConfigGeneric(config);
+}
+
+function renderQueuePriorities(config) {
+    if (config === null || config === undefined) return "";
+    const source = `<a class="qp-source" href="${e(QUEUE_CONFIG_SOURCE_URL)}" target="_blank" rel="noopener">queue_config.json ↗</a>`;
+
+    const body =
+        config.pipelines && typeof config.pipelines === "object" && !Array.isArray(config.pipelines)
+            ? renderQueuePipelines(config.pipelines)
+            : renderQueueAdaptiveBody(config);
+    if (!body) return "";
+
+    return `
+<div class="queue-priorities-header">
+    <span class="queue-priorities-title"${tipAttrs(QUEUE_CONFIG_DESCRIPTION)}>Queue priorities</span>
+    ${source}
+</div>
+${body}`;
+}
+
+// Insert the queue-priorities container at the top of the page content (once).
+function mountQueuePriorities() {
+    let el = document.getElementById("queue-priorities");
+    if (el) return el;
+    const pageContent = document.querySelector(".page-content");
+    if (!pageContent) return null;
+    el = document.createElement("section");
+    el.id = "queue-priorities";
+    el.className = "queue-priorities";
+    el.style.display = "none";
+    const banner = document.getElementById("filter-banner");
+    pageContent.insertBefore(el, banner ?? pageContent.firstChild);
+    return el;
+}
+
+async function initQueuePriorities() {
+    const el = mountQueuePriorities();
+    if (!el) return;
+    const config = await fetchQueueConfig();
+    const html = renderQueuePriorities(config);
+    if (!html) {
+        el.style.display = "none";
+        return;
+    }
+    el.innerHTML = html;
+    el.style.display = "";
+}
+
+/* Log files rendered as always-open inline iframes (not modal buttons) */
+const INLINE_REPORT_FILES = new Set(["report.html", "timeline.html"]);
+const INLINE_REPORT_ORDER = ["timeline.html", "report.html"];
+
+/* Standard log files present whenever has_logs is true (Nextflow output) */
+const STANDARD_LOG_FILES = ["dag.html", "nextflow.log", "report.html", "timeline.html", "trace.txt"];
+
+/* Pretty-print a log file name */
+const LOG_LABELS = {
+    "dag.html": "Pipeline DAG",
+    "nextflow.log": "Nextflow Log",
+    "report.html": "Execution Report",
+    "timeline.html": "Execution Timeline",
+    "trace.txt": "Task Trace",
+};
+// Matches rotated Nextflow logs such as "nextflow.log.1", "nextflow.log.2".
+const ROTATED_NEXTFLOW_LOG_PATTERN = /^nextflow\.log\.\d+$/;
+
+function logLabel(fileName) {
+    if (LOG_LABELS[fileName]) return LOG_LABELS[fileName];
+    if (ROTATED_NEXTFLOW_LOG_PATTERN.test(fileName)) {
+        return `Nextflow Log (${fileName.slice("nextflow.log.".length)})`;
+    }
+    if (fileName.includes("_slurm.log")) return "SLURM Job Log";
+    return fileName;
+}
+
+// Split a run's discovered log files (run.logFiles, sourced from the S3 blob
+// map) into inline reports (rendered as iframes) and button logs (opened in the
+// modal). Standard Nextflow logs are ordered first (rotated nextflow.log.N files
+// cluster with nextflow.log), with remaining files (e.g. SLURM job logs)
+// following alphabetically.
+function splitRunLogFiles(run) {
+    const logFiles = run.logFiles ?? [];
+    const orderIndex = (f) => {
+        // Treat rotated nextflow.log.N like nextflow.log for primary ordering so
+        // the rotations sit next to the base log rather than at the end.
+        const key = ROTATED_NEXTFLOW_LOG_PATTERN.test(f) ? "nextflow.log" : f;
+        const i = STANDARD_LOG_FILES.indexOf(key);
+        return i === -1 ? STANDARD_LOG_FILES.length : i;
+    };
+    const sorted = [...logFiles].sort((a, b) => orderIndex(a) - orderIndex(b) || a.localeCompare(b));
+    const inlineLogs = sorted
+        .filter((f) => INLINE_REPORT_FILES.has(f))
+        .sort((a, b) => {
+            const ai = INLINE_REPORT_ORDER.indexOf(a);
+            const bi = INLINE_REPORT_ORDER.indexOf(b);
+            return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
+        });
+    const buttonLogs = sorted.filter((f) => !INLINE_REPORT_FILES.has(f));
+    return { inlineLogs, buttonLogs };
+}
+
+/* Build a raw CDN URL for a repo file path (legacy; retained for non-001697 repos) */
+function cdnUrl(filePath) {
+    return `${CDN_BASE}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/* ─── DANDI S3 blob helpers ─────────────────────────────────────
+   The retired dandi-compute/001697 GitHub mirror has been replaced by direct
+   reads from the DANDI S3 bucket. Each successful queue entry carries an
+   output_paths map whose keys are repo-relative paths within the 001697
+   derivatives dandiset and whose values are the content blob IDs used to locate
+   the object in S3. Blobs are nested under the first two length-3 segments of
+   the hash: blobs/abc/def/abcdef123...                                       */
+const S3_BLOB_BASE = "https://dandiarchive.s3.amazonaws.com/blobs";
+
+function blobUrl(blobId) {
+    const id = String(blobId ?? "");
+    if (id.length < 6) return null;
+    return `${S3_BLOB_BASE}/${id.slice(0, 3)}/${id.slice(3, 6)}/${id}`;
+}
+
+/* Resolve a repo-relative file path within a run to its S3 blob URL using the
+   run's output_paths → blob-id map. Returns null when the path is unknown. */
+function resolveBlobUrl(run, repoPath) {
+    const id = run?.outputPaths?.[repoPath];
+    return id ? blobUrl(id) : null;
+}
+
+/* Build a GitHub tree URL for a repo directory path */
+function treeUrl(filePath) {
+    return `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${filePath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/* Build a DANDI derivatives URL for a run capsule path */
+function derivativesUrl(filePath) {
+    const baseUrl = dandiBaseUrl(DERIVATIVES_DANDISET_ID);
+    const location = String(filePath ?? "")
+        .split("/")
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join("/");
+    return `${baseUrl}/dandiset/${DERIVATIVES_DANDISET_ID}/draft/files?location=${location}&page=1`;
+}
+
+/* Build a Neurosift NWB URL from a DANDI S3 content hash */
+function neurosiftBlobUrl(contentHash) {
+    const blobFileUrl = blobUrl(contentHash);
+    return `https://neurosift.app/nwb?url=${encodeURIComponent(blobFileUrl)}`;
+}
+
+/* Build a Neurosift NWB URL from the run's S3 content hash (no API call needed) */
+function neurosiftSessionUrl(dandisetId, contentHash) {
+    if (contentHash) {
+        return neurosiftBlobUrl(contentHash);
+    }
+    return null;
+}
+
+/* Build a Neurosift dandiset URL */
+function neurosiftDandisetUrl(dandisetId) {
+    return `https://neurosift.app/dandiset/${encodeURIComponent(dandisetId)}`;
+}
+
+function renderRunEntry(run) {
+    const stalled = isStalled(run);
+    const sc =
+        run.status === "success"
+            ? "status-success"
+            : run.status === "failed"
+              ? "status-failed"
+              : stalled
+                ? "status-stalled"
+                : run.status === "running"
+                  ? "status-running"
+                  : run.status === "queued"
+                    ? "status-queued"
+                    : "status-unknown";
+    const slbl =
+        run.status === "success"
+            ? "✓ Success"
+            : run.status === "failed"
+              ? "✗ Failed"
+              : stalled
+                ? "⚠ Stalled"
+                : run.status === "running"
+                  ? "▶ Running"
+                  : run.status === "queued"
+                    ? "⧗ Queued"
+                    : "? Unknown";
+
+    // Log files present for this run, sourced from the S3 blob map (run.logFiles).
+    const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
+    const hasLogs = buttonLogs.length > 0;
+    const hasInline = inlineLogs.length > 0;
+    const hasTasks = run.tasks && run.tasks.length > 0;
+    const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
+    const hasViz = (run.vizData && run.vizData.length > 0) || (run.vizLinks && Object.keys(run.vizLinks).length > 0);
+    const bytes = runByteCount(run);
+    const bytesHtml =
+        bytes === null
+            ? ""
+            : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
+
+    return `
+<div class="run-entry ${sc}">
+    <div class="run-entry-header">
+        <span class="status-badge ${sc}">${slbl}</span>
+        ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
+        ${run.paramsProfile ? `<span class="run-sep">·</span><span class="run-params">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>` : ""}
+        ${run.configHash ? `<span class="run-sep">·</span><span class="run-config">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
+        ${bytesHtml}
+        <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+    </div>
+
+    ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
+    ${hasTasks ? renderTraceSection(run.tasks) : ""}
+    ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
+    ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
+    ${hasInline ? renderReportSection(run, inlineLogs) : ""}
+</div>`;
+}
+
+function renderPipelineInfo(pipelineName, pipelineVersion) {
+    const commitHash = pipelineCompareRef(pipelineVersion);
+    const hasCommit = commitHash !== pipelineVersion;
+
+    const displayName = e(pipelineName.replace(/\+/g, "-"));
+
+    if (hasCommit) {
+        const displayVer = e(pipelineVersion.replace(/\+/g, "-"));
+        const url = e(`${PIPELINE_REPO_URL}/commit/${commitHash}`);
+        return (
+            `<a class="pipeline-link" href="${url}" target="_blank" rel="noopener">` +
+            `<span class="pipeline-name">${displayName}</span>` +
+            `<span class="pipeline-version">${displayVer}</span>` +
+            `</a>`
+        );
+    }
+
+    const displayVer = e(pipelineVersion.replace(/\+/g, "-"));
+    return `<span class="pipeline-name">${displayName}</span>` + `<span class="pipeline-version">${displayVer}</span>`;
+}
+
+// Canonicalize known pipeline repo forks to their upstream organization so links
+// point at the canonical source (e.g. a CodyCBakerPhD fork of aind-ephys-pipeline
+// → AllenNeuralDynamics). Any trailing path (e.g. /tree/v1.2.2) is preserved.
+function canonicalizeCodeUrl(url) {
+    if (!url) return url;
+    return url.replace(/(https?:\/\/github\.com\/)[^/]+(\/aind-ephys-pipeline)(?=$|[/?#])/i, "$1AllenNeuralDynamics$2");
+}
+
+function resolveCodeUrl(codeUrl, version) {
+    codeUrl = canonicalizeCodeUrl(codeUrl);
+    if (!codeUrl) return null;
+
+    // For the AIND ephys pipeline, a /tree/v<semver> CodeURL should link to the
+    // matching GitHub release page; the upstream release tags omit the leading "v"
+    // (e.g. /tree/v1.2.2 → /releases/tag/1.2.2).
+    const releaseMatch = codeUrl.match(/^(https?:\/\/github\.com\/[^/]+\/aind-ephys-pipeline)\/tree\/v(.+)$/i);
+    if (releaseMatch) return `${releaseMatch[1]}/releases/tag/${releaseMatch[2]}`;
+
+    if (!version) return codeUrl;
+    // If the version looks like a bare commit hash and the CodeURL doesn't already
+    // point to a specific commit/tree/tag, append /tree/<hash> so the link goes
+    // directly to the commit rather than the repository root.
+    const isCommitHash = /^[0-9a-f]{6,40}$/i.test(version);
+    const alreadySpecific = /\/(commit|tree|blob|releases\/tag)\//i.test(codeUrl);
+    if (isCommitHash && !alreadySpecific) {
+        let end = codeUrl.length;
+        while (end > 0 && codeUrl.charCodeAt(end - 1) === 47 /* "/" */) end--;
+        return codeUrl.slice(0, end) + "/tree/" + version;
+    }
+    return codeUrl;
+}
+
+// Extract a full/abbreviated git commit hash from a Version string. The pipeline
+// records versions as "<tag-or-shortsha>+<full-commit-hash>" (e.g.
+// "v1.2.2+d2b6aef…"), so prefer the segment after the last "+"; also accept a
+// bare hash. Returns null when no hash-like token is present.
+function extractCommitHash(version) {
+    if (!version) return null;
+    const v = String(version);
+    const candidate = v.includes("+") ? v.slice(v.lastIndexOf("+") + 1) : v;
+    return /^[0-9a-f]{7,40}$/i.test(candidate) ? candidate : null;
+}
+
+// Build a link to a GitHub repo at a specific commit state
+// (https://github.com/<owner>/<repo>/tree/<hash>) from a CodeURL + Version.
+// Owner is canonicalized like resolveCodeUrl. Returns null when no GitHub repo or
+// commit hash can be determined.
+function resolveCommitUrl(codeUrl, version) {
+    const url = canonicalizeCodeUrl(codeUrl);
+    const hash = extractCommitHash(version);
+    if (!url || !hash) return null;
+    const repoBase = url.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+?)(?:\.git)?(?:[/?#]|$)/i);
+    if (!repoBase) return null;
+    return `${repoBase[1]}/tree/${hash}`;
+}
+
+function renderSourceVersionsSection(generatedBy) {
+    const items = generatedBy
+        .map((entry) => {
+            const name = e(entry.Name ?? "");
+            const version = e(entry.Version ?? "");
+            const rawUrl = entry.CodeURL ?? null;
+            const resolvedUrl = resolveCodeUrl(rawUrl, entry.Version ?? "");
+            const codeUrl = resolvedUrl ? e(resolvedUrl) : null;
+            const commitUrl = resolveCommitUrl(rawUrl, entry.Version ?? "");
+            const versionHtml = version
+                ? commitUrl
+                    ? `<a class="src-version src-version-link" href="${e(commitUrl)}" target="_blank" rel="noopener" title="Open repository at this commit">${version}</a>`
+                    : `<span class="src-version">${version}</span>`
+                : "";
+            const nameHtml = codeUrl
+                ? `<a class="src-link" href="${codeUrl}" target="_blank" rel="noopener">${name}</a>`
+                : `<span class="src-name">${name}</span>`;
+            return `<span class="src-entry">${nameHtml}${versionHtml}</span>`;
+        })
+        .join("");
+
+    return `
+<div class="source-versions">
+    <span class="source-versions-label">Source versions:</span>
+    <span class="source-versions-list">${items}</span>
+</div>`;
+}
+
+/* ─── Provenance (dataset_description.json) ─────────────────────
+   Surfaces the fuller content of dataset_description.json: top-level metadata,
+   each GeneratedBy pipeline step with its version hash / description / container,
+   and any SourceDatasets. Resilient to missing/extra fields.                   */
+function prettyKey(key) {
+    return String(key)
+        .replace(/_/g, " ")
+        .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/^./, (c) => c.toUpperCase());
+}
+
+function renderProvenanceGeneratedBy(entry) {
+    if (entry == null) return "";
+    if (typeof entry !== "object")
+        return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    const name = entry.Name ?? entry.name ?? "Step";
+    const version = entry.Version ?? entry.version ?? null;
+    const rawUrl = entry.CodeURL ?? entry.codeURL ?? entry.url ?? null;
+    const codeUrl = resolveCodeUrl(rawUrl, version ?? "");
+    const description = entry.Description ?? entry.description ?? null;
+    const nameHtml = codeUrl
+        ? `<a class="prov-name src-link" href="${e(codeUrl)}" target="_blank" rel="noopener">${e(name)}</a>`
+        : `<span class="prov-name">${e(name)}</span>`;
+    const commitUrl = resolveCommitUrl(rawUrl, version ?? "");
+    const versionHtml = version
+        ? commitUrl
+            ? `<a class="prov-hash prov-hash-link" href="${e(commitUrl)}" target="_blank" rel="noopener" title="Open repository at this commit">${e(String(version))}</a>`
+            : `<code class="prov-hash">${e(String(version))}</code>`
+        : "";
+    const descHtml = description ? `<p class="prov-card-desc">${e(String(description))}</p>` : "";
+
+    // Container/image details (e.g. BIDS GeneratedBy[].Container { Type, Tag, URI }).
+    const container = entry.Container ?? entry.container ?? null;
+    let containerHtml = "";
+    if (container && typeof container === "object") {
+        const parts = Object.entries(container)
+            .filter(([, v]) => v != null && typeof v !== "object")
+            .map(([k, v]) => `${prettyKey(k)}: ${v}`);
+        if (parts.length) containerHtml = `<p class="prov-card-meta">${e(parts.join(" · "))}</p>`;
+    } else if (typeof container === "string") {
+        containerHtml = `<p class="prov-card-meta">${e(container)}</p>`;
+    }
+
+    return `<div class="prov-card">
+    <div class="prov-card-head">${nameHtml}${versionHtml}</div>
+    ${descHtml}
+    ${containerHtml}
+</div>`;
+}
+
+function renderProvenanceSource(entry) {
+    if (entry == null) return "";
+    if (typeof entry !== "object")
+        return `<div class="prov-card"><span class="prov-name">${e(String(entry))}</span></div>`;
+    const url = entry.URL ?? entry.url ?? null;
+    const doi = entry.DOI ?? entry.doi ?? null;
+    const version = entry.Version ?? entry.version ?? null;
+    const head = url
+        ? `<a class="prov-name src-link" href="${e(url)}" target="_blank" rel="noopener">${e(url)}</a>`
+        : `<span class="prov-name">${e(url ?? doi ?? "Source")}</span>`;
+    const versionHtml = version ? `<code class="prov-hash">${e(String(version))}</code>` : "";
+    const doiHtml = doi && doi !== url ? `<p class="prov-card-meta">DOI: ${e(String(doi))}</p>` : "";
+    return `<div class="prov-card"><div class="prov-card-head">${head}${versionHtml}</div>${doiHtml}</div>`;
+}
+
+function renderProvenanceSection(desc) {
+    if (!desc || typeof desc !== "object") return "";
+
+    // 1) Top-level scalar metadata: a curated order first, then any other
+    //    primitive fields so nothing useful is hidden.
+    const preferred = ["Name", "DatasetType", "BIDSVersion", "schema_version", "schemaVersion", "License", "license"];
+    const skip = new Set(["GeneratedBy", "SourceDatasets", "describedBy", "object_type"]);
+    const metaRows = [];
+    const seen = new Set();
+    const addRow = (key) => {
+        const v = desc[key];
+        if (seen.has(key) || v == null || typeof v === "object") return;
+        seen.add(key);
+        metaRows.push([key, String(v)]);
+    };
+    for (const k of preferred) if (k in desc) addRow(k);
+    for (const k of Object.keys(desc)) if (!skip.has(k)) addRow(k);
+
+    const metaHtml = metaRows.length
+        ? `<dl class="prov-meta">${metaRows
+              .map(([k, v]) => `<div class="prov-row"><dt>${e(prettyKey(k))}</dt><dd>${e(v)}</dd></div>`)
+              .join("")}</dl>`
+        : "";
+
+    const gb = Array.isArray(desc.GeneratedBy) ? desc.GeneratedBy : [];
+    const gbHtml = gb.length
+        ? `<div class="prov-group">
+        <div class="prov-group-title">Generated by</div>
+        <div class="prov-cards">${gb.map(renderProvenanceGeneratedBy).join("")}</div>
+    </div>`
+        : "";
+
+    const sd = Array.isArray(desc.SourceDatasets) ? desc.SourceDatasets : [];
+    const sdHtml = sd.length
+        ? `<div class="prov-group">
+        <div class="prov-group-title">Source datasets</div>
+        <div class="prov-cards">${sd.map(renderProvenanceSource).join("")}</div>
+    </div>`
+        : "";
+
+    if (!metaHtml && !gbHtml && !sdHtml) return "";
+    const count = metaRows.length + gb.length + sd.length;
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Provenance
+        <span class="count-badge">${count}</span>
+    </summary>
+    <div class="prov-body">
+        ${metaHtml}
+        ${gbHtml}
+        ${sdHtml}
+    </div>
+</details>`;
+}
+
+function renderTraceSection(tasks) {
+    const rows = tasks
+        .map((t) => {
+            const sc = t.status === "COMPLETED" ? "task-ok" : t.status === "FAILED" ? "task-fail" : "task-other";
+            return `<tr>
+            <td>${e(t.name)}</td>
+            <td><span class="task-status ${sc}">${e(t.status)}</span></td>
+            <td class="mono">${e(t.exit)}</td>
+            <td class="mono">${e(t.duration)}</td>
+            <td class="mono">${e(t.realtime)}</td>
+        </tr>`;
+        })
+        .join("");
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Pipeline Steps
+        <span class="count-badge">${tasks.length}</span>
+    </summary>
+    <div class="trace-table-wrap">
+        <table class="trace-table">
+            <thead><tr>
+                <th>Step</th><th>Status</th><th>Exit</th><th>Wall time</th><th>CPU time</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </div>
+</details>`;
+}
+
+function renderLogSection(run, logFiles) {
+    const buttons = logFiles
+        .map((fname) => {
+            const url = resolveBlobUrl(run, `${run.path}/logs/${fname}`);
+            if (!url) return "";
+            const isHtml = fname.endsWith(".html");
+            const isTsv = fname === "trace.txt";
+            const label = logLabel(fname);
+            return `<button class="log-link"
+            data-log-url="${e(url)}"
+            data-log-label="${e(label)}"
+            data-log-html="${isHtml}"
+            data-log-table="${isTsv}"
+            data-log-external="${e(url)}">${e(label)}</button>`;
+        })
+        .filter(Boolean)
+        .join("");
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Logs
+        <span class="count-badge">${logFiles.length}</span>
+    </summary>
+    <div class="log-links">${buttons}</div>
+</details>`;
+}
+
+function renderReportSection(run, reportFiles) {
+    const frames = reportFiles
+        .map((fname) => {
+            const url = resolveBlobUrl(run, `${run.path}/logs/${fname}`);
+            if (!url) return "";
+            const label = logLabel(fname);
+            return `<div class="inline-report-wrap">
+            <div class="inline-report-header">
+                <span class="inline-report-label">${e(label)}</span>
+            </div>
+            <iframe class="inline-report-iframe"
+                data-srcdoc-url="${e(url)}"
+                data-srcdoc-name="${e(fname)}"
+                sandbox="allow-scripts"
+                title="${e(label)}"></iframe>
+        </div>`;
+        })
+        .filter(Boolean)
+        .join("");
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Reports
+        <span class="count-badge">${reportFiles.length}</span>
+    </summary>
+    <div class="inline-reports">${frames}</div>
+</details>`;
+}
+
+// Friendly labels for the interactive views in visualization_output.json.
+const KACHERY_VIEW_LABELS = { timeseries: "Timeseries", sorting_summary: "Sorting Summary" };
+function kacheryViewLabel(name) {
+    return (
+        KACHERY_VIEW_LABELS[name] ??
+        String(name)
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase())
+    );
+}
+
+// recordings: [{ name, images: [{name, url}] }] (static PNGs)
+// vizLinks:   { "<recording>": { "<view>": "<figurl/kachery url>" } } (interactive)
+function renderVisualizationSection(recordings, vizLinks) {
+    const recs = Array.isArray(recordings) ? recordings : [];
+    const links = vizLinks && typeof vizLinks === "object" && !Array.isArray(vizLinks) ? vizLinks : {};
+    const imagesByRec = new Map(recs.map((r) => [r.name, r.images]));
+
+    // Merge recording names: image groups first (their order), then any
+    // recordings that only have interactive links.
+    const order = [];
+    const seen = new Set();
+    for (const r of recs) if (!seen.has(r.name)) (seen.add(r.name), order.push(r.name));
+    for (const name of Object.keys(links)) if (!seen.has(name)) (seen.add(name), order.push(name));
+
+    let totalImages = 0;
+    let totalLinks = 0;
+
+    const recordingHtml = order
+        .map((name) => {
+            const images = imagesByRec.get(name) ?? [];
+            totalImages += images.length;
+            const imgHtml = images
+                .map((img) => {
+                    const href = e(img.url);
+                    const caption = e(img.name.replace(/\.png$/i, "").replace(/_/g, " "));
+                    return `<figure class="viz-figure">
+                <a class="viz-link" data-viz-url="${href}" data-viz-label="${caption}" href="${href}" rel="noopener" aria-haspopup="dialog">
+                    <img class="viz-img" src="${href}" loading="lazy" alt="${e(img.name)}">
+                </a>
+                <figcaption>${caption}</figcaption>
+            </figure>`;
+                })
+                .join("");
+            const gridHtml = imgHtml ? `<div class="viz-grid">${imgHtml}</div>` : "";
+
+            const recLinks = links[name] && typeof links[name] === "object" ? links[name] : null;
+            let linksHtml = "";
+            if (recLinks) {
+                const buttons = Object.entries(recLinks)
+                    .filter(([, url]) => typeof url === "string" && /^https?:\/\//i.test(url))
+                    .map(([view, url]) => {
+                        totalLinks += 1;
+                        return `<a class="viz-kachery-link" href="${e(url)}" target="_blank" rel="noopener"
+                    title="Open interactive view in Figurl">↗ ${e(kacheryViewLabel(view))}</a>`;
+                    })
+                    .join("");
+                if (buttons) linksHtml = `<div class="viz-kachery-links">${buttons}</div>`;
+            }
+
+            if (!gridHtml && !linksHtml) return "";
+            return `<div class="viz-recording">
+        <div class="viz-recording-label">${e(name)}</div>
+        ${gridHtml}
+        ${linksHtml}
+    </div>`;
+        })
+        .filter(Boolean)
+        .join("");
+
+    if (!recordingHtml) return "";
+    const count = totalImages + totalLinks;
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Visualizations
+        <span class="count-badge">${count}</span>
+    </summary>
+    ${recordingHtml}
+</details>`;
+}
+
+/* ─── Quality control rendering ─────────────────────────────────
+   Renders the aind-data-schema QualityControl object (quality_control.json) as a
+   collapsible panel: an overall status summary plus per-metric cards grouped by
+   processing stage, each showing the latest status, modality, description (with
+   any markdown links), the dropdown option → Pass/Fail legend, and a link to the
+   referenced visualization image when it can be matched to a known PNG.        */
+const QC_STATUS_CLASS = {
+    pass: "status-success",
+    fail: "status-failed",
+    pending: "status-queued",
+};
+
+function qcStatusClass(status) {
+    return QC_STATUS_CLASS[String(status ?? "").toLowerCase()] ?? "status-unknown";
+}
+
+// Latest status from a metric's status_history (the last recorded entry).
+function qcLatestStatus(metric) {
+    const history = Array.isArray(metric?.status_history) ? metric.status_history : [];
+    const last = history[history.length - 1];
+    return last?.status ?? null;
+}
+
+// Convert a description containing markdown links into safe HTML: escape first,
+// then turn [label](http…) into anchors.
+function qcLinkifyDescription(text) {
+    if (!text) return "";
+    return e(text).replace(
+        /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        (_match, label, url) => `<a href="${url}" target="_blank" rel="noopener">${label}</a>`
+    );
+}
+
+// Best-effort match of a metric "reference" (e.g.
+// "quality_control/<probe>/traces_raw.png") to one of the run's known viz images,
+// preferring an image whose recording group matches the probe segment.
+function qcResolveReference(reference, vizData) {
+    if (!reference || !Array.isArray(vizData)) return null;
+    const segments = reference.split("/").filter(Boolean);
+    const fileName = segments[segments.length - 1];
+    const probe = segments.length >= 2 ? segments[segments.length - 2] : null;
+    const candidates = [];
+    for (const rec of vizData) {
+        for (const img of rec.images) {
+            if (img.name === fileName) candidates.push({ recording: rec.name, ...img });
+        }
+    }
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1 || !probe) return candidates[0];
+    const preferred = candidates.find((c) => c.recording.includes(probe) || probe.includes(c.recording));
+    return preferred ?? candidates[0];
+}
+
+// Partition QC plots out of the visualization set: resolve each metric's
+// referenced image against the full viz data, attach it to the metric as
+// `.plot`, and return a filtered vizData with those plots removed. Removal is by
+// file name, so a duplicate copy of a QC plot living elsewhere in the gallery
+// (e.g. a top-level "summary" drift_map alongside the per-probe one) is dropped
+// too — each plot then appears only in its QC card. Empty recording groups are
+// dropped; returns null if nothing remains for the visualization section.
+function partitionQcPlots(qc, vizData) {
+    const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
+    const claimedNames = new Set();
+    for (const metric of metrics) {
+        const img = qcResolveReference(metric?.reference, vizData);
+        metric.plot = img ? { name: img.name, url: img.url } : null;
+        if (img) claimedNames.add(img.name);
+    }
+    if (!Array.isArray(vizData) || claimedNames.size === 0) return vizData;
+    const filtered = vizData
+        .map((rec) => ({ name: rec.name, images: rec.images.filter((img) => !claimedNames.has(img.name)) }))
+        .filter((rec) => rec.images.length > 0);
+    return filtered.length > 0 ? filtered : null;
+}
+
+function renderQcMetric(metric) {
+    const status = qcLatestStatus(metric);
+    const statusBadge = status ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>` : "";
+    const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
+    const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
+    const descHtml = metric?.description
+        ? `<p class="qc-metric-desc">${qcLinkifyDescription(metric.description)}</p>`
+        : "";
+
+    // Embedded plot (clickable to open full size in the image modal).
+    const plot = metric?.plot;
+    const label = metric?.name ?? plot?.name ?? "Plot";
+    const plotHtml = plot
+        ? `<a class="viz-link qc-plot" data-viz-url="${e(plot.url)}" data-viz-label="${e(label)}" href="${e(plot.url)}" rel="noopener" aria-haspopup="dialog">
+        <img class="qc-plot-img" src="${e(plot.url)}" loading="lazy" alt="${e(label)}">
+    </a>`
+        : "";
+
+    // Dropdown option → Pass/Fail legend.
+    let optionsHtml = "";
+    const value = metric?.value;
+    if (value && Array.isArray(value.options)) {
+        const statuses = Array.isArray(value.status) ? value.status : [];
+        optionsHtml = `<div class="qc-options">${value.options
+            .map((opt, i) => {
+                const verdict = String(statuses[i] ?? "").toLowerCase();
+                const cls = verdict === "pass" ? "qc-option-pass" : verdict === "fail" ? "qc-option-fail" : "";
+                const suffix = statuses[i] ? ` · ${e(statuses[i])}` : "";
+                return `<span class="qc-option ${cls}">${e(opt)}${suffix}</span>`;
+            })
+            .join("")}</div>`;
+    }
+
+    return `<div class="qc-metric">
+    <div class="qc-metric-head">
+        ${statusBadge}
+        <span class="qc-metric-name">${e(metric?.name ?? "Metric")}</span>
+        ${modalityHtml}
+    </div>
+    ${descHtml}
+    ${plotHtml}
+    ${optionsHtml}
+</div>`;
+}
+
+function renderQualityControlSection(qc) {
+    const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
+    if (metrics.length === 0) return "";
+
+    // Overall status summary (top-level `status` map: grouping key → status).
+    const summaryEntries = qc?.status && typeof qc.status === "object" ? Object.entries(qc.status) : [];
+    const summaryHtml = summaryEntries.length
+        ? `<div class="qc-status-summary">${summaryEntries
+              .map(([key, value]) => {
+                  const label = key.includes(":") ? key.slice(key.indexOf(":") + 1) : key;
+                  return `<span class="status-badge ${qcStatusClass(value)}" title="${e(key)}">${e(label)}: ${e(value)}</span>`;
+              })
+              .join("")}</div>`
+        : "";
+
+    // Group metrics by processing stage, preserving first-seen order.
+    const byStage = groupBy(metrics, (m) => m.stage || "Other");
+    const stagesHtml = Array.from(byStage.entries())
+        .map(([stage, stageMetrics]) => {
+            const cards = stageMetrics.map((m) => renderQcMetric(m)).join("");
+            return `<div class="qc-stage">
+        <div class="qc-stage-title">${e(stage)}</div>
+        <div class="qc-metrics">${cards}</div>
+    </div>`;
+        })
+        .join("");
+
+    return `
+<details class="run-section">
+    <summary class="run-section-title">
+        Quality Control
+        <span class="count-badge">${metrics.length}</span>
+    </summary>
+    ${summaryHtml}
+    ${stagesHtml}
+</details>`;
+}
+
+/* ─── Grouping helpers ──────────────────────────────────────── */
+function groupBy(arr, keyFn) {
+    const map = new Map();
+    for (const item of arr) {
+        const key = keyFn(item);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(item);
+    }
+    return map;
+}
+
+function renderGroupBadges(runs) {
+    const s = runs.filter((r) => r.status === "success").length;
+    const f = runs.filter((r) => r.status === "failed").length;
+    const q = runs.filter((r) => r.status === "queued").length;
+    const u = runs.length - s - f - q;
+    const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
+    const totalBytes = sumRunByteCounts(runs);
+    const parts = [];
+    if (s)
+        parts.push(
+            `<span class="gbadge gbadge-success" title="${s} successful run${s !== 1 ? "s" : ""}">${s}&thinsp;✓</span>`
+        );
+    if (f)
+        parts.push(
+            `<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
+        );
+    if (q)
+        parts.push(
+            `<span class="gbadge gbadge-queued" title="${q} queued run${q !== 1 ? "s" : ""}">${q}&thinsp;⧗</span>`
+        );
+    if (u)
+        parts.push(
+            `<span class="gbadge gbadge-unknown" title="${u} unknown run${u !== 1 ? "s" : ""}">${u}&thinsp;?</span>`
+        );
+    if (runsWithKnownByteCounts) {
+        const totalBytesLabel = formatByteCount(totalBytes);
+        parts.push(
+            `<span class="gbadge gbadge-bytes" title="DATA PROCESSED: ${totalBytesLabel}">DATA PROCESSED:&nbsp;${totalBytesLabel}</span>`
+        );
+    }
+    return parts.join("");
+}
+
+function resolveRegistryAlias(hash, registry) {
+    if (!hash) return null;
+    const normalizedHash = String(hash).toLowerCase();
+    const exactHashMatches = [];
+    const prefixHashMatches = [];
+    for (const entry of registry) {
+        if (entry.md5 === normalizedHash) {
+            exactHashMatches.push(entry);
+        } else if (entry.md5.startsWith(normalizedHash)) {
+            prefixHashMatches.push(entry);
+        }
+    }
+    const candidates = exactHashMatches.length > 0 ? exactHashMatches : prefixHashMatches;
+    const FALLBACK_ALIAS_PRIORITY = 1;
+    const aliasPriority = (entry) => entry.priority ?? FALLBACK_ALIAS_PRIORITY;
+    candidates.sort((a, b) => aliasPriority(b) - aliasPriority(a) || a.alias.localeCompare(b.alias));
+    return candidates[0] ?? null;
+}
+
+function renderRegistryLink(prefix, hash, registry, subdir) {
+    if (!hash) return "";
+    const match = resolveRegistryAlias(hash, registry);
+    if (!match) return `${prefix}:&nbsp;${e(String(hash))}`;
+    const sourceUrl = e(`${AIND_EPHYS_PIPELINE_CODE_URL}/${subdir}/${match.path}`);
+    return `${prefix}:&nbsp;<a class="src-link" href="${sourceUrl}" target="_blank" rel="noopener">${e(match.alias)}</a>`;
+}
+
+function uniqueRegistryEntries(registry) {
+    const entriesByHash = new Map();
+    for (const entry of registry) {
+        const key = `${entry.md5}\x00${entry.path}`;
+        const existing = entriesByHash.get(key);
+        const storedPriority = existing?.priority ?? REGISTRY_FALLBACK_ALIAS_PRIORITY;
+        const candidatePriority = entry.priority ?? REGISTRY_FALLBACK_ALIAS_PRIORITY;
+        if (
+            !existing ||
+            candidatePriority > storedPriority ||
+            (candidatePriority === storedPriority && entry.alias.localeCompare(existing.alias) < 0)
+        ) {
+            entriesByHash.set(key, entry);
+        }
+    }
+    return [...entriesByHash.values()].sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+function buildParamsCompareEntries() {
+    return [...PARAMS_REGISTRY]
+        .sort((a, b) => a.alias.localeCompare(b.alias))
+        .map((entry) => ({
+            key: entry.alias,
+            alias: entry.alias,
+            path: entry.path,
+            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/params/${entry.path}`),
+        }));
+}
+
+function buildPairwiseComparisons(items) {
+    const pairs = [];
+    for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+            pairs.push([items[i], items[j]]);
+        }
+    }
+    return pairs;
+}
+
+function uniquePipelineEntries(runs) {
+    return [...groupBy(runs, (run) => run.pipelineVersion).values()]
+        .map((versions) => versions[0])
+        .sort((a, b) => FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion))
+        .map((run) => ({
+            key: run.pipelineVersion,
+            pipelineName: run.pipelineName,
+            pipelineVersion: run.pipelineVersion,
+        }));
+}
+
+function pipelineCompareRef(version) {
+    const versionText = String(version ?? "");
+    const hashPart = pipelineCompareRefCandidates(versionText)[0];
+    if (hashPart) {
+        return hashPart;
+    }
+    return versionText;
+}
+
+function pipelineCompareRefCandidates(version) {
+    return String(version ?? "")
+        .split("+")
+        .slice(1)
+        .filter((part) => COMMIT_HASH_PATTERN.test(part));
+}
+
+const _pipelineCompareRefCache = new Map();
+
+async function resolvePipelineCompareRef(version) {
+    const versionText = String(version ?? "");
+    const refs = pipelineCompareRefCandidates(versionText);
+    if (refs.length === 0) {
+        return versionText;
+    }
+    for (const ref of refs) {
+        if (ref.length === FULL_COMMIT_HASH_LENGTH) {
+            return ref;
+        }
+        if (_pipelineCompareRefCache.has(ref)) {
+            const cachedResolved = await _pipelineCompareRefCache.get(ref);
+            if (cachedResolved) {
+                return cachedResolved;
+            }
+            continue;
+        }
+        const request = (async () => {
+            try {
+                const resp = await cachedFetch(`${PIPELINE_API_BASE}/commits/${encodeURIComponent(ref)}`, {
+                    headers: { Accept: "application/vnd.github+json" },
+                });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                return typeof data?.sha === "string" && data.sha ? data.sha : null;
+            } catch {
+                return null;
+            }
+        })();
+        _pipelineCompareRefCache.set(ref, request);
+        const resolved = await request;
+        if (resolved) {
+            return resolved;
+        }
+    }
+    return refs[0] ?? versionText;
+}
+
+async function buildPipelineCompareEntries(runs) {
+    const uniqueVersions = uniquePipelineEntries(runs);
+    const resolvedEntries = await Promise.all(
+        uniqueVersions.map(async (entry) => ({
+            ...entry,
+            compareRef: await resolvePipelineCompareRef(entry.pipelineVersion),
+        }))
+    );
+    return Array.from(groupBy(resolvedEntries, (entry) => entry.compareRef).values())
+        .map(
+            (entriesForRef) =>
+                [...entriesForRef].sort(
+                    (a, b) =>
+                        a.pipelineVersion.split("+").length - b.pipelineVersion.split("+").length ||
+                        FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion)
+                )[0]
+        )
+        .sort((a, b) => FILTER_VALUE_COLLATOR.compare(a.pipelineVersion, b.pipelineVersion));
+}
+
+async function fetchPipelineCompareSummary(baseRef, headRef) {
+    if (!baseRef || !headRef || baseRef === headRef) {
+        return { kind: "same-ref" };
+    }
+    try {
+        const resp = await cachedFetch(
+            `${PIPELINE_API_BASE}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headRef)}`,
+            {
+                headers: { Accept: "application/vnd.github+json" },
+            }
+        );
+        if (!resp.ok) {
+            return { kind: "error", message: `Unable to load pipeline compare details (HTTP ${resp.status}).` };
+        }
+        const data = await resp.json();
+        return {
+            kind: "compare",
+            aheadBy: Number(data?.ahead_by ?? 0),
+            behindBy: Number(data?.behind_by ?? 0),
+            totalCommits: Number(data?.total_commits ?? 0),
+            files: Array.isArray(data?.files) ? data.files : [],
+            commits: Array.isArray(data?.commits) ? data.commits : [],
+        };
+    } catch {
+        return { kind: "error", message: "Unable to load pipeline compare details." };
+    }
+}
+
+function renderNamedPairTable(
+    rowLabel,
+    leftColumnLabel,
+    rightColumnLabel,
+    leftCellHtml,
+    rightCellHtml,
+    leftColumnHtml = null,
+    rightColumnHtml = null
+) {
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table diff-detail-table-pair">
+            <thead>
+                <tr>
+                    <th class="diff-detail-corner" aria-hidden="true"></th>
+                    <th scope="col">${leftColumnHtml ?? e(leftColumnLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightColumnLabel)}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th scope="row" class="diff-detail-key">${e(rowLabel)}</th>
+                    <td>${leftCellHtml}</td>
+                    <td>${rightCellHtml}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>`;
+}
+
+function renderTextPairTable(rowLabel, leftLabel, rightLabel) {
+    const leftCellText = e(leftLabel);
+    const rightCellText = e(rightLabel);
+    return renderNamedPairTable(rowLabel, leftLabel, rightLabel, leftCellText, rightCellText);
+}
+
+function renderKeyValueTable(rows) {
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">Metric</th>
+                    <th scope="col">Value</th>
+                </tr>
+            </thead>
+            <tbody>${rows
+                .map(
+                    (row) => `<tr>
+                    <th scope="row" class="diff-detail-key">${e(row.label)}</th>
+                    <td>${row.valueHtml}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderTwoColumnTable(headers, rows) {
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">${e(headers[0])}</th>
+                    <th scope="col">${e(headers[1])}</th>
+                </tr>
+            </thead>
+            <tbody>${rows
+                .map(
+                    (row) => `<tr>
+                    <td>${row[0]}</td>
+                    <td>${row[1]}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderDiffInlineLink(url, label) {
+    return `<a class="diff-inline-link" href="${e(url)}" target="_blank" rel="noopener">${e(label)}</a>`;
+}
+
+function renderNamedDiffTable(
+    parameterLabel,
+    leftLabel,
+    rightLabel,
+    changes,
+    leftColumnHtml = null,
+    rightColumnHtml = null
+) {
+    if (changes.length === 0) {
+        return '<p class="diff-empty-state diff-empty-state-inline">No JSON differences detected.</p>';
+    }
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">${e(parameterLabel)}</th>
+                    <th scope="col">${leftColumnHtml ?? e(leftLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightLabel)}</th>
+                </tr>
+            </thead>
+            <tbody>${changes
+                .map(
+                    (change) => `<tr>
+                    <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
+                    <td>${renderDiffCellValue(change.left, "diff-change-before")}</td>
+                    <td>${renderDiffCellValue(change.right, "diff-change-after")}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderDiffCellValue(value, sideClass) {
+    if (isPlainObject(value)) {
+        return `<pre class="diff-detail-chip ${sideClass} diff-detail-chip-pretty">${e(JSON.stringify(value, null, 2))}</pre>`;
+    }
+
+    const compactRenderedValue = renderDiffValue(value);
+    const shouldPrettyPrintJson = Array.isArray(value) && compactRenderedValue.length > 60;
+    const renderedValue = shouldPrettyPrintJson ? JSON.stringify(value, null, 2) : compactRenderedValue;
+    const tagName = shouldPrettyPrintJson ? "pre" : "span";
+    const prettyClass = shouldPrettyPrintJson ? " diff-detail-chip-pretty" : "";
+    return `<${tagName} class="diff-detail-chip ${sideClass}${prettyClass}">${e(renderedValue)}</${tagName}>`;
+}
+
+function renderConfigDiffTable(leftLabel, rightLabel, changes, leftColumnHtml = null, rightColumnHtml = null) {
+    if (changes.length === 0) {
+        return '<p class="diff-empty-state diff-empty-state-inline">No config differences detected.</p>';
+    }
+    return `<div class="diff-detail-table-wrap">
+        <table class="diff-detail-table">
+            <thead>
+                <tr>
+                    <th scope="col">Config snippet</th>
+                    <th scope="col">${leftColumnHtml ?? e(leftLabel)}</th>
+                    <th scope="col">${rightColumnHtml ?? e(rightLabel)}</th>
+                </tr>
+            </thead>
+            <tbody>${changes
+                .map(
+                    (change) => `<tr>
+                    <th scope="row" class="diff-detail-key diff-change-path">${e(change.path || ROOT_DIFF_PATH_LABEL)}</th>
+                    <td>${renderConfigSnippet(change.left, "before")}</td>
+                    <td>${renderConfigSnippet(change.right, "after")}</td>
+                </tr>`
+                )
+                .join("")}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderConfigSnippet(snippetText, side) {
+    const lines = (snippetText ?? "").split("\n");
+    return `<code class="diff-config-snippet diff-config-snippet-${e(side)}">${lines
+        .map((line) => {
+            const match = line.match(/^(\s*\d+)\s*([ +-])(.*)$/);
+            const lineNumber = match ? match[1] : "";
+            const marker = match ? match[2] : " ";
+            const content = match ? match[3].replace(/^ /, "") : line;
+            const isChanged = marker === "+" || marker === "-";
+            return `<span class="diff-config-line${isChanged ? " diff-config-line-changed" : ""}">
+                <span class="diff-config-line-number">${e(lineNumber)}</span>
+                <span class="diff-config-line-marker">${e(marker === " " ? "·" : marker)}</span>
+                <span class="diff-config-line-content">${e(content)}</span>
+            </span>`;
+        })
+        .join("")}</code>`;
+}
+
+function renderPipelineCompareBody(baseVersion, headVersion, summary) {
+    if (summary?.kind === "same-ref") {
+        return '<p class="diff-empty-state diff-empty-state-inline">No distinct pipeline repository commit comparison is available for this version pair.</p>';
+    }
+    if (summary?.kind === "error") {
+        return `<p class="diff-empty-state diff-empty-state-inline">${e(summary.message)}</p>`;
+    }
+    const summaryRows = [
+        {
+            label: "Commits",
+            valueHtml: e(`${summary.totalCommits} commit${summary.totalCommits !== 1 ? "s" : ""}`),
+        },
+        {
+            label: "Files",
+            valueHtml: e(`${summary.files.length} file${summary.files.length !== 1 ? "s" : ""}`),
+        },
+    ];
+    if (summary.aheadBy) {
+        summaryRows.push({
+            label: "Ahead",
+            valueHtml: e(`${summary.aheadBy} commit${summary.aheadBy !== 1 ? "s" : ""} ahead in comparison`),
+        });
+    }
+    if (summary.behindBy) {
+        summaryRows.push({
+            label: "Behind",
+            valueHtml: e(`${summary.behindBy} commit${summary.behindBy !== 1 ? "s" : ""} behind in comparison`),
+        });
+    }
+    const summaryTable = renderKeyValueTable(summaryRows);
+    const commitItems =
+        summary.commits.length > 0
+            ? renderTwoColumnTable(
+                  ["Commit", "Message"],
+                  summary.commits.map((commit) => {
+                      const message = String(commit?.commit?.message ?? "").split("\n")[0] || "(no commit message)";
+                      return [
+                          `<span class="diff-change-path">${e(String(commit?.sha ?? "").slice(0, 7) || "commit")}</span>`,
+                          e(message),
+                      ];
+                  })
+              )
+            : '<p class="diff-empty-state diff-empty-state-inline">No commit metadata returned.</p>';
+    const fileItems =
+        summary.files.length > 0
+            ? renderTwoColumnTable(
+                  ["File", "Status"],
+                  summary.files.map((file) => [
+                      `<span class="diff-change-path">${e(file.filename ?? "(unknown file)")}</span>`,
+                      e(file.status ?? "changed"),
+                  ])
+              )
+            : '<p class="diff-empty-state diff-empty-state-inline">No changed files were returned.</p>';
+    const baseLabel = baseVersion.replace(/\+/g, "-");
+    const headLabel = headVersion.replace(/\+/g, "-");
+    return `<div class="diff-pair-card">
+        ${renderTextPairTable("Pipeline version", baseLabel, headLabel)}
+        ${summaryTable}
+        ${commitItems}
+        ${fileItems}
+    </div>`;
+}
+
+async function buildPipelineDiffPairs(runs) {
+    const compareEntries = await buildPipelineCompareEntries(runs);
+    return Promise.all(
+        buildPairwiseComparisons(compareEntries).map(async ([base, head]) => {
+            const compareUrl = `${PIPELINE_REPO_URL}/compare/${encodeURIComponent(base.compareRef)}...${encodeURIComponent(head.compareRef)}`;
+            return {
+                pipelineName: base.pipelineName,
+                baseVersion: base.pipelineVersion,
+                headVersion: head.pipelineVersion,
+                compareUrl,
+                modalHtml: renderPipelineCompareBody(
+                    base.pipelineVersion,
+                    head.pipelineVersion,
+                    await fetchPipelineCompareSummary(base.compareRef, head.compareRef)
+                ),
+            };
+        })
+    );
+}
+
+function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === "[object Object]";
+}
+
+function collectJsonDiffs(left, right, path = []) {
+    if (Array.isArray(left) && Array.isArray(right)) {
+        const maxLength = Math.max(left.length, right.length);
+        return Array.from({ length: maxLength }, (_, index) =>
+            collectJsonDiffs(left[index], right[index], [...path, index])
+        )
+            .flat()
+            .filter(Boolean);
+    }
+    if (isPlainObject(left) && isPlainObject(right)) {
+        return [...new Set([...Object.keys(left), ...Object.keys(right)])]
+            .sort(FILTER_VALUE_COLLATOR.compare)
+            .flatMap((key) => collectJsonDiffs(left[key], right[key], [...path, key]))
+            .filter(Boolean);
+    }
+    const leftText = JSON.stringify(left);
+    const rightText = JSON.stringify(right);
+    if (leftText === rightText) return [];
+    return [{ path: path.join("."), left, right }];
+}
+
+function renderDiffValue(value) {
+    return value === undefined ? "undefined" : JSON.stringify(value);
+}
+
+async function fetchRegistryFile(path, subdir, kindLabel) {
+    const resp = await cachedFetch(codeRepoRawUrl(`src/dandi_compute_code/aind_ephys_pipeline/${subdir}/${path}`));
+    if (!resp.ok) {
+        throw new Error(`Failed to load registered ${kindLabel} file ${path} (HTTP ${resp.status}).`);
+    }
+    return resp;
+}
+
+async function buildParamsDiffPairs() {
+    const paramsEntries = buildParamsCompareEntries();
+    const paramsWithJson = await Promise.all(
+        paramsEntries.map(async (entry) => ({
+            ...entry,
+            json: await (await fetchRegistryFile(entry.path, "params", "params")).json(),
+        }))
+    );
+    return buildPairwiseComparisons(paramsWithJson).map(([base, head]) => ({
+        baseAlias: base.alias,
+        headAlias: head.alias,
+        baseSourceUrl: base.sourceUrl,
+        headSourceUrl: head.sourceUrl,
+        changes: collectJsonDiffs(base.json, head.json),
+    }));
+}
+
+function collectTextDiffs(leftText, rightText) {
+    const leftLines = (leftText ?? "").split("\n");
+    const rightLines = (rightText ?? "").split("\n");
+    const maxLength = Math.max(leftLines.length, rightLines.length);
+    const changedLineIndexes = [];
+    for (let index = 0; index < maxLength; index += 1) {
+        if (leftLines[index] !== rightLines[index]) {
+            changedLineIndexes.push(index);
+        }
+    }
+    if (changedLineIndexes.length === 0) return [];
+    const contextWindows = changedLineIndexes
+        .map((changedLineIndex) => ({
+            start: Math.max(0, changedLineIndex - 3),
+            end: Math.min(maxLength - 1, changedLineIndex + 3),
+        }))
+        .sort((a, b) => a.start - b.start);
+    const mergedWindows = [];
+    for (const window of contextWindows) {
+        const previous = mergedWindows[mergedWindows.length - 1];
+        if (!previous || window.start > previous.end + 1) {
+            mergedWindows.push({ ...window });
+            continue;
+        }
+        previous.end = Math.max(previous.end, window.end);
+    }
+    return mergedWindows.map(({ start, end }) => {
+        const lineNumberWidth = String(end + 1).length;
+        const leftSnippet = [];
+        const rightSnippet = [];
+        for (let index = start; index <= end; index += 1) {
+            const left = leftLines[index] ?? "";
+            const right = rightLines[index] ?? "";
+            const lineNumber = String(index + 1).padStart(lineNumberWidth, " ");
+            const isChanged = leftLines[index] !== rightLines[index];
+            leftSnippet.push(`${lineNumber} ${isChanged ? "-" : " "} ${left}`);
+            rightSnippet.push(`${lineNumber} ${isChanged ? "+" : " "} ${right}`);
+        }
+        return {
+            path: start === end ? `line ${start + 1}` : `lines ${start + 1}-${end + 1}`,
+            left: leftSnippet.join("\n"),
+            right: rightSnippet.join("\n"),
+        };
+    });
+}
+
+async function buildConfigDiffPairs() {
+    const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY);
+    const configWithText = await Promise.all(
+        configEntries.map(async (entry) => ({
+            ...entry,
+            sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            text: await (await fetchRegistryFile(entry.path, "configs", "config")).text(),
+        }))
+    );
+    return buildPairwiseComparisons(configWithText).map(([base, head]) => ({
+        baseAlias: base.alias,
+        headAlias: head.alias,
+        baseSourceUrl: base.sourceUrl,
+        headSourceUrl: head.sourceUrl,
+        changes: collectTextDiffs(base.text, head.text),
+    }));
+}
+
+function renderDiffMatrix(entries, renderHeaderCell, renderBodyCell) {
+    if (entries.length < 2) return "";
+    const columnEntries = entries.slice(0, -1);
+    const columnHeaders = columnEntries
+        .map((entry) => `<th scope="col" class="diff-matrix-col-header">${renderHeaderCell(entry)}</th>`)
+        .join("");
+    const bodyRows = entries
+        .map((rowEntry, rowIndex) => {
+            const cells = columnEntries
+                .map((columnEntry, columnIndex) => {
+                    if (rowIndex <= columnIndex) {
+                        return '<td class="diff-matrix-cell diff-matrix-cell-empty" aria-hidden="true"></td>';
+                    }
+                    return `<td class="diff-matrix-cell">${renderBodyCell(columnEntry, rowEntry)}</td>`;
+                })
+                .join("");
+            return `<tr>
+                <th scope="row" class="diff-matrix-row-header">${renderHeaderCell(rowEntry)}</th>
+                ${cells}
+            </tr>`;
+        })
+        .join("");
+    return `<div class="diff-matrix-wrap">
+        <table class="diff-matrix">
+            <thead>
+                <tr>
+                    <th class="diff-matrix-corner" aria-hidden="true"></th>
+                    ${columnHeaders}
+                </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderDiffModalTrigger(label, bodyHtml, title = null) {
+    const titleAttr = title ? ` data-modal-title="${e(title)}"` : "";
+    return `<button type="button" class="diff-cell-trigger" aria-haspopup="dialog" data-modal-html="${e(bodyHtml)}"${titleAttr}>
+        <span class="diff-cell-trigger-label">${e(label)}</span>
+    </button>`;
+}
+
+function renderDiffPage(data) {
+    const configEntries = data.configEntries ?? [];
+    const configPairMap = data.configPairMap ?? new Map();
+    const pipelineHtml =
+        data.pipelineEntries.length > 1
+            ? renderDiffMatrix(
+                  data.pipelineEntries,
+                  (entry) => renderPipelineInfo(entry.pipelineName, entry.pipelineVersion),
+                  (baseEntry, headEntry) => {
+                      const pair = data.pipelinePairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      if (!pair) return "";
+                      return renderDiffModalTrigger("View compare", pair.modalHtml);
+                  }
+              )
+            : '<p class="diff-empty-state">Only one distinct pipeline repository revision is currently present, so there are no pipeline comparisons to show.</p>';
+    const paramsHtml =
+        data.paramsEntries.length > 1
+            ? renderDiffMatrix(
+                  data.paramsEntries,
+                  (entry) => renderDiffInlineLink(entry.sourceUrl, entry.alias),
+                  (baseEntry, headEntry) => {
+                      const pair = data.paramsPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      const pairChanges = pair?.changes ?? [];
+                      const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
+                      const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
+                      const bodyHtml = `<div class="diff-pair-card">
+                            ${renderNamedDiffTable(
+                                "Parameter",
+                                baseEntry.alias,
+                                headEntry.alias,
+                                pairChanges,
+                                baseLinkHtml,
+                                headLinkHtml
+                            )}
+                        </div>`;
+                      const buttonLabel =
+                          pairChanges.length > 0
+                              ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
+                              : "View diff";
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
+                  }
+              )
+            : '<p class="diff-empty-state">No registered params files were found.</p>';
+    const configHtml =
+        configEntries.length > 1
+            ? renderDiffMatrix(
+                  configEntries,
+                  (entry) => renderDiffInlineLink(entry.sourceUrl, entry.alias),
+                  (baseEntry, headEntry) => {
+                      const pair = configPairMap.get(`${baseEntry.key}\x00${headEntry.key}`);
+                      const pairChanges = pair?.changes ?? [];
+                      const baseLinkHtml = renderDiffInlineLink(baseEntry.sourceUrl, baseEntry.alias);
+                      const headLinkHtml = renderDiffInlineLink(headEntry.sourceUrl, headEntry.alias);
+                      const bodyHtml = `<div class="diff-pair-card">
+                            ${renderConfigDiffTable(
+                                baseEntry.alias,
+                                headEntry.alias,
+                                pairChanges,
+                                baseLinkHtml,
+                                headLinkHtml
+                            )}
+                        </div>`;
+                      const buttonLabel =
+                          pairChanges.length > 0
+                              ? `View ${pairChanges.length} change${pairChanges.length !== 1 ? "s" : ""}`
+                              : "View diff";
+                      return renderDiffModalTrigger(buttonLabel, bodyHtml);
+                  }
+              )
+            : '<p class="diff-empty-state">No registered config files were found.</p>';
+
+    return `<div class="diff-page">
+    <section class="diff-section">
+        <div class="diff-section-banner">
+            Pipeline GitHub compares
+        </div>
+        ${pipelineHtml}
+    </section>
+    <section class="diff-section">
+        <div class="diff-section-banner">
+            Registered params JSON diffs
+        </div>
+        ${paramsHtml}
+    </section>
+    <section class="diff-section">
+        <div class="diff-section-banner">
+            Registered config diffs
+        </div>
+        ${configHtml}
+    </section>
+</div>`;
+}
+
+/* ─── Nested rendering ──────────────────────────────────────── */
+function renderDandisets(runs) {
+    const byDandiset = groupBy(runs, (r) => r.dandisetId);
+    const dandisetIds = [...byDandiset.keys()].sort((a, b) => {
+        if (_sortMode === "dandiset_id") {
+            const dandisetCompare = String(a ?? "").localeCompare(String(b ?? ""));
+            return _sortDirection === "asc" ? dandisetCompare : -dandisetCompare;
+        }
+        // Sort dandisets by most recent run (runs are already sorted newest-first)
+        const aDate = byDandiset.get(a)[0]?.runDate ?? "";
+        const bDate = byDandiset.get(b)[0]?.runDate ?? "";
+        return bDate.localeCompare(aDate);
+    });
+    const autoExpand = dandisetIds.length === 1;
+    return dandisetIds.map((id) => renderDandisetGroup(id, byDandiset.get(id), autoExpand)).join("");
+}
+
+function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
+    const bySubject = groupBy(runs, (r) => r.subject);
+    const subjects = [...bySubject.keys()].sort();
+    const autoExpandSubject = autoExpand && subjects.length === 1;
+    const subjectHtml = subjects
+        .map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s), autoExpandSubject))
+        .join("");
+
+    return `
+<details class="dandiset-group"${autoExpand ? " open" : ""}>
+    <summary class="dandiset-summary">
+        <span class="dandiset-summary-inner">
+            <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
+            <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">Sourcedata&nbsp;↖</a>
+            <span class="group-meta">
+                <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? "s" : ""}</span>
+                <span class="run-sep">·</span>
+                <span class="group-count">${runs.length}&nbsp;run${runs.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId })}"
+               title="Narrow view to Dandiset ${e(dandisetId)}" onclick="event.stopPropagation()">⊕ Narrow</a>
+        </span>
+    </summary>
+    <div class="dandiset-body">
+        ${subjectHtml}
+    </div>
+</details>`;
+}
+
+function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
+    // Whether the subject lives under sourcedata/ (derived from each run's dandi_path).
+    const inSourcedata = runs.some((r) => r.inSourcedata);
+    const location = inSourcedata ? `sourcedata/sub-${subject}` : `sub-${subject}`;
+    const subjectUrl = `${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}/draft/files?location=${e(location)}`;
+
+    const bySession = groupBy(runs, (r) => r.session);
+    // Sort sessions; null (no session) sorts last
+    const sessions = [...bySession.keys()].sort((a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return String(a).localeCompare(String(b));
+    });
+    const autoExpandSession = autoExpand && sessions.length === 1;
+    const sessionHtml = sessions
+        .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
+        .join("");
+
+    return `
+<details class="subject-group"${autoExpand ? " open" : ""}>
+    <summary class="subject-summary">
+        <span class="group-summary-inner">
+            <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
+               onclick="event.stopPropagation()">Sub:&nbsp;<strong>${e(subject)}</strong></a>
+            <span class="group-meta">
+                <span class="group-count">${sessions.length}&nbsp;session${sessions.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId, subject })}"
+               title="Narrow view to Sub: ${e(subject)}" onclick="event.stopPropagation()">⊕ Narrow</a>
+        </span>
+    </summary>
+    <div class="subject-body">
+        ${sessionHtml}
+    </div>
+</details>`;
+}
+
+function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
+    const rep = runs.find((r) => r.contentHash) ?? runs[0];
+    const sessionLabel = session !== null ? session : "—";
+    const sessionHref = neurosiftSessionUrl(dandisetId, rep.contentHash);
+    const sessionLinkHtml = sessionHref
+        ? `<a class="group-link" href="${e(sessionHref)}"
+              target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
+        : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
+
+    const runsHtml = runs.map(renderRunEntry).join("");
+
+    return `
+<details class="session-group"${autoExpand ? " open" : ""}>
+    <summary class="session-summary">
+        <span class="group-summary-inner">
+            ${sessionLinkHtml}
+            <span class="group-meta">
+                <span class="group-count">${runs.length}&nbsp;job${runs.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${narrowUrl({ dandiset: dandisetId, subject, session })}"
+               title="Narrow view to Ses: ${e(session)}" onclick="event.stopPropagation()">⊕ Narrow</a>
+        </span>
+    </summary>
+    <div class="session-body">
+        ${runsHtml}
+    </div>
+</details>`;
+}
+
+function renderPipelineVersionGroup(dandisetId, subject, session, pipelineName, pipelineVersion, runs) {
+    const byParams = groupBy(runs, (r) => `${r.paramsProfile}\x00${r.configHash}`);
+    const paramKeys = [...byParams.keys()].sort();
+    const paramsHtml = paramKeys
+        .map((key) => {
+            const sep = key.indexOf("\x00");
+            const paramsProfile = key.slice(0, sep);
+            const configHash = key.slice(sep + 1);
+            return renderParamsGroup(paramsProfile, configHash, byParams.get(key));
+        })
+        .join("");
+
+    return `
+<details class="pipeline-version-group">
+    <summary class="pipeline-version-summary">
+        <span class="group-summary-inner">
+            <span class="group-pipeline">${renderPipelineInfo(pipelineName, pipelineVersion)}</span>
+            <span class="group-meta">
+                <span class="group-count">${paramKeys.length}&nbsp;configuration${paramKeys.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+            <a class="narrow-link" href="${e(narrowUrl({ dandiset: dandisetId, subject, session, pipelineVersion }))}"
+               title="Narrow view to version: ${e(pipelineVersion)}" onclick="event.stopPropagation()">⊕ Narrow</a>
+        </span>
+    </summary>
+    <div class="pipeline-version-body">
+        ${paramsHtml}
+    </div>
+</details>`;
+}
+
+function renderParamsGroup(paramsProfile, configHash, runs) {
+    const runsHtml = runs.map(renderRunEntry).join("");
+    const paramsLabel = renderRegistryLink("Params", paramsProfile, PARAMS_REGISTRY, "params");
+    const configLabel = configHash
+        ? `&nbsp;·&nbsp;${renderRegistryLink("Config", configHash, CONFIG_REGISTRY, "configs")}`
+        : "";
+
+    return `
+<details class="params-group">
+    <summary class="params-summary">
+        <span class="group-summary-inner">
+            <span class="group-label">${paramsLabel}${configLabel}</span>
+            <span class="group-meta">
+                <span class="group-count">${runs.length}&nbsp;run${runs.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span class="group-badges">${renderGroupBadges(runs)}</span>
+        </span>
+    </summary>
+    <div class="params-body">
+        ${runsHtml}
+    </div>
+</details>`;
+}
+
+/* ─── Flat view rendering ───────────────────────────────────── */
+function renderFlatRunEntry(run) {
+    const stalled = isStalled(run);
+    const sc =
+        run.status === "success"
+            ? "status-success"
+            : run.status === "failed"
+              ? "status-failed"
+              : stalled
+                ? "status-stalled"
+                : run.status === "running"
+                  ? "status-running"
+                  : run.status === "queued"
+                    ? "status-queued"
+                    : "status-unknown";
+    const slbl =
+        run.status === "success"
+            ? "✓ Success"
+            : run.status === "failed"
+              ? "✗ Failed"
+              : stalled
+                ? "⚠ Stalled"
+                : run.status === "running"
+                  ? "▶ Running"
+                  : run.status === "queued"
+                    ? "⧗ Queued"
+                    : "? Unknown";
+
+    const { inlineLogs, buttonLogs } = splitRunLogFiles(run);
+    const hasLogs = buttonLogs.length > 0;
+    const hasInline = inlineLogs.length > 0;
+    const hasTasks = run.tasks && run.tasks.length > 0;
+    const hasSourceVersions = run.generatedBy && run.generatedBy.length > 0;
+    const hasViz = (run.vizData && run.vizData.length > 0) || (run.vizLinks && Object.keys(run.vizLinks).length > 0);
+    const bytes = runByteCount(run);
+    const bytesHtml =
+        bytes === null
+            ? ""
+            : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
+
+    const dandiPath = String(run.dandiPath ?? "").trim();
+    const dandiPathParts = String(dandiPath).split("/").filter(Boolean);
+    const terminalPart = dandiPathParts[dandiPathParts.length - 1] ?? "";
+    const dandiDirectoryParts = terminalPart.toLowerCase().endsWith(".nwb")
+        ? dandiPathParts.slice(0, -1)
+        : dandiPathParts;
+    const dandiDirectory = dandiDirectoryParts.join("/");
+    const fallbackLocation = run.inSourcedata ? `sourcedata/sub-${run.subject}` : `sub-${run.subject}`;
+    const location = dandiDirectory ? `${dandiDirectory}/` : fallbackLocation;
+    const dandiPathLabel = dandiPath || location;
+    const dandiPathUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${encodeURIComponent(location)}`;
+
+    return `
+<div class="run-entry flat-run-entry ${sc}">
+    <div class="run-entry-header flat-run-header">
+        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
+        <span class="status-badge ${sc}">${slbl}</span>
+        <span class="flat-run-context">
+            <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
+            <span class="run-sep">·</span>
+            <a class="flat-ctx-link flat-ctx-path" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
+            ${run.runDate ? `<span class="flat-ctx-break"></span><span class="flat-ctx-text flat-ctx-date">${e(run.runDate)}</span>` : ""}
+            <span class="run-sep">·</span>
+            <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
+            ${run.configHash ? `<span class="run-sep">·</span><span class="flat-ctx-text">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
+        </span>
+        ${bytesHtml}
+        <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+    </div>
+
+    ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
+    ${hasTasks ? renderTraceSection(run.tasks) : ""}
+    ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
+    ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
+    ${hasInline ? renderReportSection(run, inlineLogs) : ""}
+</div>`;
+}
+
+function renderFlatList(runs) {
+    return `<div class="flat-list">${sortRuns(runs).map(renderFlatRunEntry).join("")}</div>`;
+}
+
+/* ─── Layout toggle ─────────────────────────────────────────── */
+function renderLayoutBar() {
+    const isFlat = _layoutMode === "flat";
+    const isAscending = _sortDirection === "asc";
+    return `<div class="layout-bar">
+    <div class="layout-bar-group">
+        <span class="layout-bar-label">View:</span>
+        <button class="layout-btn${!isFlat ? " layout-btn-active" : ""}" data-layout="tree" aria-pressed="${!isFlat}">Tree</button>
+        <button class="layout-btn${isFlat ? " layout-btn-active" : ""}" data-layout="flat" aria-pressed="${isFlat}">Flat</button>
+    </div>
+    <div class="layout-bar-group layout-bar-group-sort">
+        <label class="layout-sort-wrap">
+            <span class="layout-bar-label">Sort by:</span>
+            <select class="layout-sort-select" data-sort-mode aria-label="Sort runs">
+                <option value="attempt"${_sortMode === "attempt" ? " selected" : ""}>Attempt</option>
+                <option value="created_at"${_sortMode === "created_at" ? " selected" : ""}>Created</option>
+                <option value="dandiset_id"${_sortMode === "dandiset_id" ? " selected" : ""}>Dandiset ID</option>
+            </select>
+        </label>
+        <button
+            class="layout-btn layout-sort-direction-btn"
+            type="button"
+            data-sort-direction
+            aria-label="${isAscending ? "Sort ascending" : "Sort descending"}"
+            aria-pressed="${isAscending}"
+            title="${isAscending ? "Sort ascending" : "Sort descending"}"
+        >${isAscending ? "↑" : "↓"}</button>
+    </div>
+    <button
+        class="layout-btn layout-btn-refresh"
+        type="button"
+        data-refresh-queue
+        aria-label="Refresh queue state"
+        title="Clear cache and reload queue state"
+    >↺ Refresh</button>
+</div>`;
+}
+
+function rerenderRuns() {
+    const sortedRuns = sortRuns(_filteredRuns);
+    document.getElementById("runs").innerHTML =
+        _layoutMode === "flat" ? renderFlatList(sortedRuns) : renderDandisets(sortedRuns);
+    initInlineHtmlFrames();
+}
+
+function initLayoutToggle() {
+    const bar = document.getElementById("layout-bar");
+    if (!bar) return;
+    // Always sync the bar HTML with the current layout/sort state (e.g. after a data reload).
+    bar.innerHTML = renderLayoutBar();
+    // Attach event listeners only once per element; subsequent calls only need the HTML update above.
+    if (bar.dataset.initialized) return;
+    bar.dataset.initialized = "1";
+    bar.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-layout]");
+        if (btn) {
+            const mode = btn.dataset.layout;
+            if (mode === _layoutMode) return;
+            _layoutMode = mode;
+            localStorage.setItem("layoutMode", mode);
+            updateLayoutModeUrl(mode);
+            bar.innerHTML = renderLayoutBar();
+            rerenderRuns();
+            return;
+        }
+        const directionBtn = ev.target.closest("[data-sort-direction]");
+        if (directionBtn) {
+            _sortDirection = _sortDirection === "desc" ? "asc" : "desc";
+            localStorage.setItem("sortDirection", _sortDirection);
+            updateSortDirectionUrl(_sortDirection);
+            bar.innerHTML = renderLayoutBar();
+            rerenderRuns();
+            return;
+        }
+        const refreshBtn = ev.target.closest("[data-refresh-queue]");
+        if (!refreshBtn) return;
+        clearQueueStateCache();
+        loadQueueData();
+    });
+    bar.addEventListener("change", (ev) => {
+        const select = ev.target.closest("[data-sort-mode]");
+        if (!select) return;
+        const mode = select.value;
+        if (mode === _sortMode) return;
+        _sortMode = mode;
+        localStorage.setItem("sortMode", mode);
+        updateSortModeUrl(mode);
+        bar.innerHTML = renderLayoutBar();
+        rerenderRuns();
+    });
+}
+/* ─── Log modal ─────────────────────────────────────────────── */
+let _modalGeneration = 0;
+
+/* ─── Inline "Open" object URLs ─────────────────────────────────
+   S3 blob objects are content-addressed and extension-less, so linking the
+   "↗ Open" button directly at the blob URL makes the browser download the file
+   instead of rendering it. Instead we wrap the already-fetched bytes in a Blob
+   with an explicit MIME type and point "Open" at the resulting object URL, which
+   opens inline in a new tab. Tracked URLs are revoked when the next modal opens
+   (an already-opened tab keeps its loaded copy).                              */
+let _modalObjectUrls = [];
+
+function makeObjectUrl(parts, type) {
+    try {
+        const blob = new Blob(parts, type ? { type } : undefined);
+        const objUrl = URL.createObjectURL(blob);
+        _modalObjectUrls.push(objUrl);
+        return objUrl;
+    } catch {
+        return null;
+    }
+}
+
+function revokeModalObjectUrls() {
+    for (const objUrl of _modalObjectUrls) {
+        try {
+            URL.revokeObjectURL(objUrl);
+        } catch {
+            /* already revoked or unsupported */
+        }
+    }
+    _modalObjectUrls = [];
+}
+
+// Build a tiny self-contained HTML document that embeds an image by URL, and
+// return it as an object URL. Opening this in a new tab renders the image inline
+// (an <img> element displays a resource regardless of its content-disposition,
+// unlike a top-level navigation to the raw blob, which S3 serves as a download).
+// No fetch of the image bytes is required, so this works even without CORS.
+function makeImageViewerObjectUrl(url, label) {
+    const safeUrl = e(url);
+    const safeLabel = e(label || "Image");
+    const viewerHtml =
+        `<!doctype html><html><head><meta charset="utf-8">` +
+        `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<title>${safeLabel}</title></head>` +
+        `<body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh">` +
+        `<img src="${safeUrl}" alt="${e(label || "")}" style="max-width:100%;max-height:100vh;object-fit:contain"></body></html>`;
+    return makeObjectUrl([viewerHtml], "text/html");
+}
+
+function initModal() {
+    document.getElementById("log-modal-close").addEventListener("click", closeLogModal);
+    document.getElementById("log-modal").addEventListener("click", (evt) => {
+        if (evt.target === document.getElementById("log-modal")) closeLogModal();
+    });
+    document.addEventListener("keydown", (evt) => {
+        if (evt.key === "Escape" && !document.getElementById("log-modal").hidden) closeLogModal();
+    });
+
+    document.getElementById("runs").addEventListener("click", (evt) => {
+        const btn = evt.target.closest(".log-link");
+        if (!btn) return;
+        openLogModal(
+            btn.dataset.logUrl,
+            btn.dataset.logLabel,
+            btn.dataset.logHtml === "true",
+            btn.dataset.logExternal,
+            btn.dataset.logTable === "true"
+        );
+    });
+
+    const runsEl = document.getElementById("runs");
+    if (runsEl) {
+        runsEl.addEventListener("click", (evt) => {
+            const diffTrigger = evt.target.closest(".diff-cell-trigger");
+            if (diffTrigger) {
+                evt.preventDefault();
+                openHtmlModal(
+                    diffTrigger.dataset.modalTitle,
+                    diffTrigger.dataset.modalHtml,
+                    diffTrigger.dataset.modalExternal || null,
+                    diffTrigger.dataset.modalExternalLabel || "↗ Open"
+                );
+                return;
+            }
+            const link = evt.target.closest(".viz-link");
+            if (!link) return;
+            evt.preventDefault();
+            openVizModal(link.dataset.vizUrl, link.dataset.vizLabel);
+        });
+    }
+}
+
+function setModalExternalLink(externalHref, externalLabel = "↗ Open") {
+    const extLink = document.getElementById("log-modal-external");
+    extLink.textContent = externalLabel;
+    if (externalHref) {
+        extLink.href = externalHref;
+        extLink.hidden = false;
+    } else {
+        extLink.hidden = true;
+        extLink.removeAttribute("href");
+    }
+}
+
+function setModalTitle(title) {
+    const modalBox = document.querySelector("#log-modal .log-modal-box");
+    const titleEl = document.getElementById("log-modal-title");
+    titleEl.textContent = title ?? "";
+    titleEl.hidden = !title;
+    if (title) {
+        modalBox?.setAttribute("aria-labelledby", "log-modal-title");
+        modalBox?.removeAttribute("aria-label");
+    } else {
+        modalBox?.removeAttribute("aria-labelledby");
+        modalBox?.setAttribute("aria-label", "Details");
+    }
+}
+
+function openLogModal(fileUrl, label, isHtml, externalHref, asTable) {
+    const overlay = document.getElementById("log-modal");
+    const bodyEl = document.getElementById("log-modal-body");
+
+    const generation = ++_modalGeneration;
+    revokeModalObjectUrls();
+
+    setModalTitle(label);
+    // Hide "Open" until the content is loaded; we then point it at an inline
+    // object URL so the browser renders the file instead of downloading it.
+    setModalExternalLink(null);
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+
+    bodyEl.innerHTML = `<div class="log-modal-loading"><div class="spinner"></div> Loading…</div>`;
+    fetchLogText(fileUrl).then((content) => {
+        if (_modalGeneration !== generation) return;
+        if (content === null) {
+            // Fall back to the raw URL so the user can still try to retrieve it.
+            setModalExternalLink(externalHref);
+            bodyEl.innerHTML = `<p class="log-modal-error">Failed to load log file.</p>`;
+            return;
+        }
+        setModalExternalLink(makeObjectUrl([content], isHtml ? "text/html" : "text/plain") ?? externalHref);
+        bodyEl.innerHTML = "";
+        if (isHtml) {
+            // Use srcdoc so the report renders inline regardless of the source
+            // host's framing headers.
+            const iframe = document.createElement("iframe");
+            iframe.className = "log-modal-iframe";
+            iframe.setAttribute("sandbox", "allow-scripts");
+            iframe.setAttribute("title", label);
+            iframe.srcdoc = content;
+            bodyEl.appendChild(iframe);
+        } else if (asTable) {
+            // Render tab-separated content (e.g. Nextflow trace.txt) as a table,
+            // falling back to plain text if it doesn't parse into rows.
+            const tableHtml = tsvToTableHtml(content);
+            if (tableHtml) {
+                bodyEl.innerHTML = tableHtml;
+            } else {
+                const pre = document.createElement("pre");
+                pre.className = "log-modal-text";
+                pre.textContent = content;
+                bodyEl.appendChild(pre);
+            }
+        } else {
+            const pre = document.createElement("pre");
+            pre.className = "log-modal-text";
+            pre.textContent = content;
+            bodyEl.appendChild(pre);
+        }
+    });
+}
+
+// Convert tab-separated text into a themed table. Returns null when there isn't
+// at least a header plus one data row.
+function tsvToTableHtml(text) {
+    const rows = String(text)
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => line.split("\t"));
+    if (rows.length < 2) return null;
+    const [header, ...body] = rows;
+    const thead = `<thead><tr>${header.map((c) => `<th>${e(c)}</th>`).join("")}</tr></thead>`;
+    const tbody = `<tbody>${body
+        .map((cells) => `<tr>${cells.map((c) => `<td>${e(c)}</td>`).join("")}</tr>`)
+        .join("")}</tbody>`;
+    return `<div class="log-modal-table-wrap"><table class="trace-table log-modal-table">${thead}${tbody}</table></div>`;
+}
+
+function closeLogModal() {
+    _modalGeneration++;
+    const overlay = document.getElementById("log-modal");
+    overlay.hidden = true;
+    document.body.style.overflow = "";
+    document.getElementById("log-modal-body").innerHTML = "";
+}
+
+function openHtmlModal(title, html, externalHref = null, externalLabel = "↗ Open") {
+    const overlay = document.getElementById("log-modal");
+    const bodyEl = document.getElementById("log-modal-body");
+
+    _modalGeneration++;
+    revokeModalObjectUrls();
+
+    setModalTitle(title);
+    setModalExternalLink(externalHref, externalLabel);
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+    bodyEl.innerHTML = html;
+}
+
+function openVizModal(url, label) {
+    const overlay = document.getElementById("log-modal");
+    const bodyEl = document.getElementById("log-modal-body");
+
+    _modalGeneration++;
+    revokeModalObjectUrls();
+
+    setModalTitle(label);
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+
+    // The image itself loads from the direct S3 URL: <img> renders a resource
+    // inline regardless of its content-disposition.
+    bodyEl.innerHTML = "";
+    const img = document.createElement("img");
+    img.className = "viz-modal-img";
+    img.src = url;
+    img.alt = label;
+    bodyEl.appendChild(img);
+
+    // "Open" points at a self-contained HTML viewer (not the raw blob), so the
+    // new tab renders the image inline instead of downloading it.
+    setModalExternalLink(makeImageViewerObjectUrl(url, label) ?? url);
+}
+
+async function fetchLogText(fileUrl) {
+    if (!fileUrl) return null;
+    try {
+        const resp = await cachedFetch(fileUrl);
+        if (!resp.ok) return null;
+        return resp.text();
+    } catch {
+        return null;
+    }
+}
+
+/* Fetch and inject srcdoc for all inline report iframes in the page */
+function initInlineHtmlFrames() {
+    const frames = Array.from(document.querySelectorAll("iframe[data-srcdoc-url]"));
+    const frameSet = new Set(frames);
+
+    // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
+    // message from the parent. The parent re-requests when a collapsed <details> is opened,
+    // because the iframe layout is zero-height while the section is hidden.
+    // Sandboxed srcdoc iframes have opaque origin so evt.origin === 'null'; we also verify
+    // evt.source is one of our known iframe windows as an additional guard.
+    const heightScript = `<script>
+(function(){
+function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
+if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
+window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
+})();
+</script>`;
+
+    window.addEventListener("message", (evt) => {
+        if (typeof evt.origin !== "string" || (evt.origin !== "null" && evt.origin !== window.location.origin)) return;
+        if (!evt.data || evt.data.type !== "iframeHeight") return;
+        for (const iframe of frameSet) {
+            if (iframe.contentWindow === evt.source && evt.data.h > 0) {
+                iframe.style.height = evt.data.h + "px";
+            }
+        }
+    });
+
+    // patchedContent holds the fully-patched HTML for each iframe, populated asynchronously.
+    // injectedFrames tracks which iframes have already had their srcdoc set.
+    // srcdoc is set lazily: only once the iframe's parent <details> is open (visible), so
+    // that chart libraries (e.g. Highcharts in timeline.html) render in a non-zero container
+    // and avoid producing invalid negative <rect> widths in the browser console.
+    const patchedContent = new Map();
+    const injectedFrames = new Set();
+
+    function maybeInjectFrame(iframe) {
+        if (injectedFrames.has(iframe)) return;
+        if (!patchedContent.has(iframe)) return; // content not yet fetched
+        if (iframe.closest("details:not([open])")) return; // still inside a closed <details>
+        injectedFrames.add(iframe);
+        iframe.srcdoc = patchedContent.get(iframe);
+    }
+
+    // When a <details> containing inline frames is opened, inject any pending frames
+    // whose content is already available, and request a fresh height measurement from
+    // frames that are already loaded.
+    document.querySelectorAll("details").forEach((details) => {
+        if (!details.querySelector("iframe[data-srcdoc-url]")) return;
+        details.addEventListener("toggle", () => {
+            if (!details.open) return;
+            requestAnimationFrame(() => {
+                details.querySelectorAll("iframe[data-srcdoc-url]").forEach((iframe) => {
+                    if (injectedFrames.has(iframe)) {
+                        if (iframe.contentWindow) {
+                            // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
+                            // which is not a valid targetOrigin — only '*' reaches them.
+                            // The message contains no sensitive data ({type:'requestHeight'} only).
+                            iframe.contentWindow.postMessage({ type: "requestHeight" }, "*");
+                        }
+                    } else {
+                        maybeInjectFrame(iframe);
+                    }
+                });
+            });
+        });
+    });
+
+    // Injected into <head> for most reports: nudge the browser's default color-scheme to light
+    // so any unset colors pick up readable dark-on-white defaults.
+    const lightStyle = "<style>html{color-scheme:light;}</style>";
+    // timeline.html (Nextflow-generated) has an *explicit* dark navy background in its own CSS,
+    // so color-scheme alone cannot help — the dark background stays and light-scheme defaults
+    // produce dark text on dark background (invisible). Override background + text explicitly.
+    const timelineLightStyle =
+        "<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>";
+
+    Promise.all(
+        frames.map(async (iframe) => {
+            const content = await fetchLogText(iframe.dataset.srcdocUrl);
+            const html =
+                content !== null
+                    ? content
+                    : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
+            // Insert light-mode override and height-reporter into the document.
+            // Prefer inserting the style in <head> and the script before </body>.
+            const isTimeline = iframe.dataset.srcdocName === "timeline.html";
+            const styleToInject = isTimeline ? timelineLightStyle : lightStyle;
+            const lcHtml = html.toLowerCase();
+            const headClose = lcHtml.indexOf("</head>");
+            const bodyClose = lcHtml.lastIndexOf("</body>");
+            let patched =
+                headClose !== -1
+                    ? html.slice(0, headClose) + styleToInject + html.slice(headClose)
+                    : styleToInject + html;
+            // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
+            const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
+            patched =
+                adjustedBodyClose !== -1
+                    ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
+                    : patched + heightScript;
+            patchedContent.set(iframe, patched);
+            maybeInjectFrame(iframe);
+        })
+    );
+}
+
+/* ─── Params Editor ─────────────────────────────────────────── */
+
+/* Module-level params editor state */
+let _paramsSchema = null;
+let _paramsCurrentValues = null;
+let _paramsDefaultValues = null;
+
+/* Desired display order for top-level schema sections.
+   Sections not listed here appear after, in schema order. */
+const PARAMS_SECTION_ORDER = [
+    "job_dispatch",
+    "preprocessing",
+    "spikesorting",
+    "postprocessing",
+    "curation",
+    "visualization",
+    "nwb",
+];
+
+/* Strip trailing commas from JSON-like text so files authored with them
+   (e.g. default_params.json from the pipeline repo) can be parsed. */
+function stripTrailingCommas(text) {
+    return text.replace(/,\s*([}\]])/g, "$1");
+}
+
+function paramsResolveRef(node) {
+    if (!node || typeof node !== "object") return node;
+    if (node.$ref) {
+        const parts = node.$ref.replace(/^#\//, "").split("/");
+        let resolved = _paramsSchema;
+        for (const p of parts) resolved = resolved[p];
+        const { $ref: _, ...rest } = node;
+        return { ...paramsResolveRef(resolved), ...rest };
+    }
+    return node;
+}
+
+function paramsBuildDefaults(schemaNode) {
+    const node = paramsResolveRef(schemaNode);
+    if (!node) return undefined;
+    if (node.type === "object" && node.properties) {
+        const obj = {};
+        for (const [k, v] of Object.entries(node.properties)) {
+            const val = paramsBuildDefaults(v);
+            if (val !== undefined) obj[k] = val;
+        }
+        return Object.keys(obj).length ? obj : {};
+    }
+    if ("default" in node) return JSON.parse(JSON.stringify(node.default));
+    return undefined;
+}
+
+function paramsDeepGet(obj, path) {
+    let cur = obj;
+    for (const p of path) {
+        if (cur == null || typeof cur !== "object") return undefined;
+        cur = cur[p];
+    }
+    return cur;
+}
+
+function paramsDeepSet(obj, path, value) {
+    let cur = obj;
+    for (let i = 0; i < path.length - 1; i++) {
+        if (!(path[i] in cur) || typeof cur[path[i]] !== "object") cur[path[i]] = {};
+        cur = cur[path[i]];
+    }
+    cur[path[path.length - 1]] = value;
+}
+
+function paramsGetTypeDefault(type) {
+    if (type === "string") return "";
+    if (type === "number" || type === "integer") return 0;
+    if (type === "boolean") return false;
+    if (type === "array") return [];
+    if (type === "object") return {};
+    return null;
+}
+
+function paramsEl(tag, attrs, ...children) {
+    const elem = document.createElement(tag);
+    if (attrs) {
+        for (const [k, v] of Object.entries(attrs)) {
+            if (k === "class") {
+                elem.className = v;
+            } else if (k.startsWith("on")) {
+                elem.addEventListener(k.slice(2), v);
+            } else if (v === true) {
+                elem.setAttribute(k, "");
+            } else if (v !== false && v !== null && v !== undefined) {
+                elem.setAttribute(k, v);
+            }
+        }
+    }
+    for (const c of children) {
+        if (c == null) continue;
+        if (typeof c === "string") elem.appendChild(document.createTextNode(c));
+        else elem.appendChild(c);
+    }
+    return elem;
+}
+
+function updateParamsPreview() {
+    const output = document.getElementById("params-output");
+    if (output) output.textContent = JSON.stringify(_paramsCurrentValues, null, 4);
+}
+
+function paramsMarkChanged(field, path) {
+    const defVal = paramsDeepGet(_paramsDefaultValues, path);
+    const curVal = paramsDeepGet(_paramsCurrentValues, path);
+    field.classList.toggle("changed", JSON.stringify(curVal) !== JSON.stringify(defVal));
+    updateParamsPreview();
+}
+
+function buildParamsField(label, schemaNode, path) {
+    const node = paramsResolveRef(schemaNode);
+    const curVal = paramsDeepGet(_paramsCurrentValues, path);
+    const defVal = paramsDeepGet(_paramsDefaultValues, path);
+    const isChanged = JSON.stringify(curVal) !== JSON.stringify(defVal);
+
+    const field = paramsEl("div", { class: "params-field" + (isChanged ? " changed" : "") });
+    field.dataset.path = path.join(".");
+
+    const labelEl = paramsEl("div", { class: "params-field-label" }, label);
+    if (node.description) {
+        labelEl.appendChild(paramsEl("span", { class: "params-field-desc" }, node.description));
+    }
+    field.appendChild(labelEl);
+
+    const inputWrap = paramsEl("div", { class: "params-field-input" });
+
+    const nullable = Array.isArray(node.type) && node.type.includes("null");
+    const types = Array.isArray(node.type) ? node.type.filter((t) => t !== "null") : [node.type];
+    const primaryType = types[0] || "string";
+
+    if (nullable) {
+        const isNull = curVal === null || curVal === undefined;
+        const toggle = paramsEl(
+            "label",
+            { class: "params-null-toggle" },
+            paramsEl("input", {
+                type: "checkbox",
+                checked: isNull ? true : false,
+                onchange: function () {
+                    if (this.checked) {
+                        paramsDeepSet(_paramsCurrentValues, path, null);
+                    } else {
+                        const fallback =
+                            defVal !== null && defVal !== undefined ? defVal : paramsGetTypeDefault(primaryType);
+                        paramsDeepSet(_paramsCurrentValues, path, JSON.parse(JSON.stringify(fallback)));
+                    }
+                    buildParamsForm();
+                    updateParamsPreview();
+                },
+            }),
+            "null"
+        );
+        inputWrap.appendChild(toggle);
+        if (isNull) {
+            field.appendChild(inputWrap);
+            return field;
+        }
+    }
+
+    if (node.enum) {
+        const select = paramsEl("select", {
+            onchange: function () {
+                let v = this.value;
+                if (v === "__null__") v = null;
+                else if (primaryType === "number" || primaryType === "integer") v = Number(v);
+                paramsDeepSet(_paramsCurrentValues, path, v);
+                paramsMarkChanged(field, path);
+            },
+        });
+        if (nullable) select.appendChild(paramsEl("option", { value: "__null__" }, "(null)"));
+        for (const opt of node.enum) {
+            if (opt === null) continue;
+            const option = paramsEl("option", { value: String(opt) }, String(opt));
+            if (String(curVal) === String(opt)) option.selected = true;
+            select.appendChild(option);
+        }
+        inputWrap.appendChild(select);
+    } else if (primaryType === "boolean") {
+        const select = paramsEl("select", {
+            onchange: function () {
+                paramsDeepSet(_paramsCurrentValues, path, this.value === "true");
+                paramsMarkChanged(field, path);
+            },
+        });
+        [true, false].forEach((val) => {
+            const opt = paramsEl("option", { value: String(val) }, String(val));
+            if (curVal === val) opt.selected = true;
+            select.appendChild(opt);
+        });
+        inputWrap.appendChild(select);
+    } else if (primaryType === "array" || primaryType === "object") {
+        const ta = document.createElement("textarea");
+        ta.value = JSON.stringify(curVal ?? (primaryType === "array" ? [] : {}), null, 2);
+        ta.addEventListener("input", function () {
+            try {
+                const parsed = JSON.parse(this.value);
+                paramsDeepSet(_paramsCurrentValues, path, parsed);
+                this.style.borderColor = "";
+                paramsMarkChanged(field, path);
+            } catch {
+                this.style.borderColor = "var(--color-failed)";
+            }
+        });
+        inputWrap.appendChild(ta);
+    } else if (primaryType === "integer" || primaryType === "number") {
+        const attrs = {
+            type: "number",
+            value: curVal != null ? String(curVal) : "",
+            step: primaryType === "integer" ? "1" : "any",
+            oninput: function () {
+                const v = primaryType === "integer" ? parseInt(this.value, 10) : parseFloat(this.value);
+                if (!isNaN(v)) {
+                    paramsDeepSet(_paramsCurrentValues, path, v);
+                    paramsMarkChanged(field, path);
+                }
+            },
+        };
+        if (node.minimum != null) attrs.min = String(node.minimum);
+        if (node.maximum != null) attrs.max = String(node.maximum);
+        inputWrap.appendChild(paramsEl("input", attrs));
+    } else {
+        inputWrap.appendChild(
+            paramsEl("input", {
+                type: "text",
+                value: curVal != null ? String(curVal) : "",
+                oninput: function () {
+                    paramsDeepSet(_paramsCurrentValues, path, this.value);
+                    paramsMarkChanged(field, path);
+                },
+            })
+        );
+    }
+
+    field.appendChild(inputWrap);
+    return field;
+}
+
+function buildParamsSection(label, schemaNode, path) {
+    const node = paramsResolveRef(schemaNode);
+    const wrapper = paramsEl("div", { class: "params-section collapsed" });
+
+    const header = paramsEl(
+        "div",
+        { class: "params-section-header" },
+        paramsEl("span", { class: "params-section-arrow" }, "▼"),
+        document.createTextNode(label)
+    );
+    if (node.description) {
+        header.appendChild(paramsEl("span", { class: "params-section-desc" }, node.description));
+    }
+    header.addEventListener("click", () => wrapper.classList.toggle("collapsed"));
+    wrapper.appendChild(header);
+
+    const body = paramsEl("div", { class: "params-section-body" });
+    const nodeTypes = Array.isArray(node.type) ? node.type : [node.type];
+    if (nodeTypes.includes("object") && node.properties) {
+        for (const [k, v] of Object.entries(node.properties)) {
+            const resolved = paramsResolveRef(v);
+            const childPath = [...path, k];
+            const resolvedTypes = Array.isArray(resolved.type) ? resolved.type : [resolved.type];
+            if (resolvedTypes.includes("object") && resolved.properties) {
+                body.appendChild(buildParamsSection(k, resolved, childPath));
+            } else {
+                body.appendChild(buildParamsField(k, resolved, childPath));
+            }
+        }
+    }
+    wrapper.appendChild(body);
+    return wrapper;
+}
+
+function buildParamsForm() {
+    const formRoot = document.getElementById("params-form-root");
+    if (!formRoot) return;
+    formRoot.innerHTML = "";
+
+    const schemaEntries = Object.entries(_paramsSchema.properties);
+    const ordered = [
+        ...PARAMS_SECTION_ORDER.filter((k) => _paramsSchema.properties[k]).map((k) => [k, _paramsSchema.properties[k]]),
+        ...schemaEntries.filter(([k]) => !PARAMS_SECTION_ORDER.includes(k)),
+    ];
+    for (const [key, propSchema] of ordered) {
+        const resolved = paramsResolveRef(propSchema);
+        formRoot.appendChild(buildParamsSection(key, resolved, [key]));
+    }
+
+    const chk = document.getElementById("params-chk-only-changed");
+    if (chk && chk.checked) {
+        formRoot.querySelectorAll(".params-field").forEach((f) => {
+            f.style.display = f.classList.contains("changed") ? "" : "none";
+        });
+    }
+}
+
+function renderParamsEditorShell() {
+    const readmeUrl = "https://github.com/dandi-compute/code#contributing-non-code-files";
+    const codeRepoUrl = "https://github.com/dandi-compute/code";
+    const paramsDir = "src/dandi_compute_code/aind_ephys_pipeline/params/";
+    const registryFile = "src/dandi_compute_code/aind_ephys_pipeline/registries/registered_params.json";
+
+    return `<div class="params-editor">
+    <div class="params-editor-split">
+        <div class="params-editor-left">
+            <div class="params-toolbar">
+                <button class="params-toolbar-btn" id="params-btn-defaults">Restore</button>
+                <button class="params-toolbar-btn" id="params-btn-collapse">Collapse All</button>
+                <button class="params-toolbar-btn" id="params-btn-expand">Expand All</button>
+                <label class="params-toolbar-toggle">
+                    <input type="checkbox" id="params-chk-only-changed"> Show only changed
+                </label>
+            </div>
+            <div id="params-form-root"></div>
+        </div>
+        <div class="params-editor-right">
+            <div class="params-output-header">
+                <span class="params-output-title">Generated JSON</span>
+                <div class="params-toolbar">
+                    <button class="params-toolbar-btn" id="params-btn-download">Download</button>
+                    <button class="params-toolbar-btn" id="params-btn-copy">Copy</button>
+                    <label class="params-toolbar-file-label">Import…<input type="file" id="params-file-import" accept=".json"></label>
+                </div>
+            </div>
+            <pre id="params-output" class="params-output-pre"></pre>
+        </div>
+    </div>
+    <div class="params-instructions">
+        <div class="params-instructions-title">How to submit your params file</div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">2</span>
+            <span>Customize your parameters using the form above, then click <strong>Download</strong> and rename the file to a short descriptive name (e.g.&nbsp;<code>my-params.json</code>).</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">1</span>
+            <span>Login to GitHub (or <a href="https://github.com/join" target="_blank" rel="noopener">create a free account</a>).</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">3</span>
+            <span>Open the <a href="${e(codeRepoUrl)}" target="_blank" rel="noopener">dandi-compute/code</a> repository and click <strong>Fork</strong> to create your own copy.</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">4</span>
+            <span>In your fork, upload your JSON file to <code>${e(paramsDir)}</code> and register it in <code>${e(registryFile)}</code> following the <a href="${e(readmeUrl)}" target="_blank" rel="noopener">contributing instructions in the README</a>.</span>
+        </div>
+        <div class="params-instructions-step">
+            <span class="params-instructions-num">5</span>
+            <span>Open a Pull Request from your fork back to <code>dandi-compute/code</code>. A maintainer will review and merge your file.</span>
+        </div>
+    </div>
+</div>`;
+}
+
+function initParamsEditorUI() {
+    buildParamsForm();
+    updateParamsPreview();
+
+    document.getElementById("params-btn-defaults").addEventListener("click", () => {
+        _paramsCurrentValues = JSON.parse(JSON.stringify(_paramsDefaultValues));
+        buildParamsForm();
+        updateParamsPreview();
+    });
+
+    document.getElementById("params-btn-collapse").addEventListener("click", () => {
+        document
+            .getElementById("params-form-root")
+            .querySelectorAll(".params-section")
+            .forEach((s) => s.classList.add("collapsed"));
+    });
+
+    document.getElementById("params-btn-expand").addEventListener("click", () => {
+        document
+            .getElementById("params-form-root")
+            .querySelectorAll(".params-section")
+            .forEach((s) => s.classList.remove("collapsed"));
+    });
+
+    document.getElementById("params-chk-only-changed").addEventListener("change", function () {
+        document
+            .getElementById("params-form-root")
+            .querySelectorAll(".params-field")
+            .forEach((f) => {
+                f.style.display = this.checked ? (f.classList.contains("changed") ? "" : "none") : "";
+            });
+    });
+
+    document.getElementById("params-btn-download").addEventListener("click", () => {
+        const json = JSON.stringify(_paramsCurrentValues, null, 4);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "params.json";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("params-btn-copy").addEventListener("click", () => {
+        const json = JSON.stringify(_paramsCurrentValues, null, 4);
+        navigator.clipboard.writeText(json).then(() => {
+            const btn = document.getElementById("params-btn-copy");
+            btn.textContent = "Copied!";
+            setTimeout(() => (btn.textContent = "Copy"), 1500);
+        });
+    });
+
+    document.getElementById("params-file-import").addEventListener("change", function () {
+        const file = this.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const text = stripTrailingCommas(reader.result);
+                _paramsCurrentValues = JSON.parse(text);
+                buildParamsForm();
+                updateParamsPreview();
+            } catch (err) {
+                alert("Invalid JSON: " + err.message);
+            }
+        };
+        reader.readAsText(file);
+        this.value = "";
+    });
+}
+
+async function initParamsEditor() {
+    const schemaResp = await cachedFetch(PARAMS_SCHEMA_URL);
+    if (!schemaResp.ok) {
+        throw new Error(`Failed to load parameter schema (HTTP ${schemaResp.status}).`);
+    }
+    _paramsSchema = await schemaResp.json();
+
+    try {
+        const defResp = await cachedFetch(PARAMS_PLACEHOLDER_URL);
+        if (defResp.ok) {
+            const text = stripTrailingCommas(await defResp.text());
+            _paramsDefaultValues = JSON.parse(text);
+        } else {
+            _paramsDefaultValues = paramsBuildDefaults(_paramsSchema);
+        }
+    } catch {
+        _paramsDefaultValues = paramsBuildDefaults(_paramsSchema);
+    }
+
+    _paramsCurrentValues = JSON.parse(JSON.stringify(_paramsDefaultValues));
+
+    const pageContent = document.querySelector(".page-content");
+    if (pageContent) pageContent.classList.add("params-page");
+
+    document.getElementById("runs").innerHTML = renderParamsEditorShell();
+    showDiffResults();
+    initParamsEditorUI();
+}
+
+/* ─── Page state helpers ────────────────────────────────────── */
+function showLoading() {
+    document.getElementById("loading").style.display = "";
+    document.getElementById("error").style.display = "none";
+    document.getElementById("filter-banner").style.display = "none";
+    document.getElementById("summary").style.display = "none";
+    document.getElementById("runs").style.display = "none";
+}
+
+function showError(msg) {
+    document.getElementById("loading").style.display = "none";
+    const el = document.getElementById("error");
+    el.style.display = "";
+    el.innerHTML = `<p class="error-icon">⚠</p><p>${e(msg)}</p>`;
+}
+
+function showResults() {
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("summary").style.display = "";
+    document.getElementById("layout-bar").style.display = "";
+    document.getElementById("runs").style.display = "";
+}
+
+function showDiffResults() {
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("error").style.display = "none";
+    document.getElementById("filter-banner").style.display = "none";
+    document.getElementById("summary").style.display = "none";
+    document.getElementById("layout-bar").style.display = "none";
+    document.getElementById("runs").style.display = "";
+}
+
+/* ─── Utility ───────────────────────────────────────────────── */
+function e(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/* ─── Queue data loader ─────────────────────────────────────── */
+// Fetches, processes, and renders the queue state for the current view.
+// Only applies to the dashboard queue views ("main", "tests", and "archive");
+// the "compare" and "params" views are handled separately in init() and never
+// call this function.
+// Called on initial page load and when the user clicks the Refresh button.
+async function loadQueueData() {
+    showLoading();
+    renderFilterBanner(parseFilter(), []);
+
+    try {
+        const entries = _viewMode === "archive" ? await fetchArchiveState() : await fetchQueueState();
+        const runs = parseQueueEntries(entries);
+
+        if (runs.length === 0) {
+            renderFilterBanner(parseFilter(), []);
+            showError(_viewMode === "archive" ? "No archived runs found." : "No pipeline runs found in the queue.");
+            return;
+        }
+
+        // Fetch trace.txt and dataset_description.json content (from S3 blobs) and
+        // DANDI asset IDs for all runs in parallel. Skip trace/dataset fetching for
+        // queued runs (no logs yet). Visualization images and the log-file listing
+        // are derived synchronously from each entry's output_paths map.
+        const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
+        const runsWithStatus = await Promise.all(
+            runs.map(async (run) => {
+                const [text, datasetDesc, qualityControl, vizLinks] = await Promise.all([
+                    fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
+                    run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
+                    run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
+                    run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
+                ]);
+                const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
+                // Move QC-referenced plots into the QC cards and drop them from
+                // the visualization gallery so each plot appears in one place.
+                const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
+                const parsed = parseTrace(text);
+                const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
+                // Determine status from JSONL flags:
+                //   has_output=true            → success (use trace status for task detail)
+                //   has_been_submitted=true &&
+                //     has_output=false &&
+                //     has_logs=false            → running (submitted, awaiting output)
+                //   has_logs=false && has_code=true → queued (not yet started)
+                //   otherwise                  → failed
+                const status = run.hasOutput
+                    ? parsed.status !== "unknown"
+                        ? parsed.status
+                        : "success"
+                    : run.hasBeenSubmitted && !run.hasLogs
+                      ? "running"
+                      : !run.hasLogs && run.hasCode
+                        ? "queued"
+                        : "failed";
+                const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
+                return {
+                    ...run,
+                    ...parsed,
+                    generatedBy,
+                    datasetDescription: datasetDesc ?? null,
+                    vizData: vizForDisplay,
+                    vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
+                    qualityControl,
+                    status,
+                    failureStep,
+                    logFiles: runLogFiles(run),
+                };
+            })
+        );
+
+        const sortedRuns = sortRuns(runsWithStatus, parseSortMode());
+
+        // Scope runs by view mode:
+        //   tests page    → show only TEST_DANDISETS entries
+        //   archive page  → show every entry from the archive state file as-is
+        //   main page     → hide TEST_DANDISETS entries
+        const runsInScope =
+            _viewMode === "tests"
+                ? sortedRuns.filter((r) => TEST_DANDISETS.has(r.dandisetId))
+                : _viewMode === "archive"
+                  ? sortedRuns
+                  : sortedRuns.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
+
+        const filter = parseFilter();
+        const isFiltered = !!(
+            filter.dandisetId ||
+            filter.subject ||
+            filter.session ||
+            filter.pipelineVersion ||
+            filter.paramsType ||
+            filter.configType ||
+            filter.dandiCodebaseVersion ||
+            filter.assetSize ||
+            filter.failureStep ||
+            filter.status
+        );
+        const filteredRuns = applyFilter(runsInScope, filter);
+
+        if (isFiltered && filteredRuns.length === 0) {
+            renderFilterBanner(filter, runsInScope);
+            showError("No pipeline runs match the current filter.");
+            return;
+        }
+
+        // Show the full summary for the in-scope runs; when a specific filter is
+        // active show only the matching subset.
+        const runsForSummary = isFiltered ? filteredRuns : runsInScope;
+        renderSummary(runsForSummary);
+        renderFilterBanner(filter, runsInScope);
+        _filteredRuns = filteredRuns;
+        _layoutMode = parseLayoutMode();
+        _sortMode = parseSortMode();
+        _sortDirection = parseSortDirection();
+        updateLayoutModeUrl(_layoutMode);
+        updateSortModeUrl(_sortMode);
+        updateSortDirectionUrl(_sortDirection);
+        document.getElementById("runs").innerHTML =
+            _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(sortRuns(filteredRuns));
+        initInlineHtmlFrames();
+        initLayoutToggle();
+        showResults();
+    } catch (err) {
+        renderFilterBanner(parseFilter(), []);
+        showError(err.message || "An unexpected error occurred.");
+    }
+}
+
+/* ─── Main ──────────────────────────────────────────────────── */
+async function init() {
+    _viewMode = parseViewMode();
+    initTheme();
+    initModal();
+    syncTopNav(_viewMode);
+    if (_viewMode === "compare") {
+        setPageCopy(
+            "AIND Pipeline Diffs Index",
+            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions.'
+        );
+    }
+    if (_viewMode === "params") {
+        setPageCopy(
+            "Register New Params File",
+            'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
+        );
+    }
+    if (_viewMode === "archive") {
+        setPageCopy(
+            "Archived Pipeline Runs",
+            'Failing runs that have been archived from the main queue, sourced from <a href="https://github.com/dandi-compute/queue/blob/main/archive_state.jsonl" target="_blank" rel="noopener">archive_state.jsonl</a>.'
+        );
+    }
+
+    showLoading();
+    if (_viewMode !== "params") {
+        await loadAindPipelineRegistries();
+    }
+    if (_viewMode === "compare") {
+        try {
+            const entries = await fetchQueueState();
+            const runs = parseQueueEntries(entries);
+            const pipelineEntries = await buildPipelineCompareEntries(runs);
+            const pipelinePairs = await buildPipelineDiffPairs(runs);
+            const paramsEntries = buildParamsCompareEntries();
+            const paramsPairs = await buildParamsDiffPairs();
+            const configEntries = uniqueRegistryEntries(CONFIG_REGISTRY).map((entry) => ({
+                key: entry.alias,
+                alias: entry.alias,
+                sourceUrl: codeRepoBlobUrl(`src/dandi_compute_code/aind_ephys_pipeline/configs/${entry.path}`),
+            }));
+            const configPairs = await buildConfigDiffPairs();
+            const diffData = {
+                pipelineEntries,
+                pipelinePairs,
+                pipelinePairMap: new Map(
+                    pipelinePairs.map((pair) => [`${pair.baseVersion}\x00${pair.headVersion}`, pair.compareUrl])
+                ),
+                paramsEntries,
+                paramsPairs,
+                paramsPairMap: new Map(paramsPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
+                configEntries,
+                configPairs,
+                configPairMap: new Map(configPairs.map((pair) => [`${pair.baseAlias}\x00${pair.headAlias}`, pair])),
+            };
+            document.getElementById("runs").innerHTML = renderDiffPage(diffData);
+            showDiffResults();
+        } catch (err) {
+            showError(err.message || "An unexpected error occurred.");
+        }
+        return;
+    }
+    if (_viewMode === "params") {
+        try {
+            await initParamsEditor();
+        } catch (err) {
+            showError(err.message || "Failed to load the parameter schema.");
+        }
+        return;
+    }
+    // Top display of current queue scheduling priorities. Irrelevant to the
+    // archive page, which shows already-completed (failed) runs.
+    if (_viewMode !== "archive") initQueuePriorities();
+    await loadQueueData();
+}
+
+document.addEventListener("DOMContentLoaded", init);
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        applyFilter,
+        buildRunPath,
+        classifyFailedTaskStep,
+        clearQueueStateCache,
+        fetchQueueState,
+        fetchArchiveState,
+        archiveStateCacheKey,
+        fetchSlurmLogs,
+        fetchVisualizationData,
+        initModal,
+        initLayoutToggle,
+        loadQueueData,
+        openHtmlModal,
+        neurosiftBlobUrl,
+        neurosiftDandisetUrl,
+        neurosiftSessionUrl,
+        parseQueueEntries,
+        parseLayoutMode,
+        parseSortDirection,
+        parseSortMode,
+        parseRunPath,
+        parseTrace,
+        parseViewMode,
+        queueStateCacheKey,
+        syncTopNav,
+        renderDandisets,
+        buildPipelineDiffPairs,
+        collectJsonDiffs,
+        collectTextDiffs,
+        loadAindPipelineRegistries,
+        normalizeConfigHash,
+        normalizeRegistryEntries,
+        renderParamsGroup,
+        renderDiffPage,
+        renderFilterBanner,
+        renderSummary,
+        renderFlatList,
+        renderQueuePriorities,
+        buildParamsCompareEntries,
+        renderRegistryLink,
+        renderVisualizationSection,
+        runFailureStep,
+        sortRuns,
+        uniquePipelineEntries,
+        uniqueRegistryEntries,
+        showError,
+        showDiffResults,
+        showLoading,
+        showResults,
+        TEST_DANDISETS,
+        DANDISET_SUBJECT_DEFAULTS,
+        resolveSubject,
+        derivativesUrl,
+        treeUrl,
+    };
+}
