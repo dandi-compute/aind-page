@@ -1939,7 +1939,7 @@ describe("diff page helpers", () => {
                     baseVersion: "v1.0.1+20abeb6",
                     headVersion: "v1.1.1+b268fd2+5d20fd2",
                     compareUrl:
-                        "https://github.com/CodyCBakerPhD/aind-ephys-pipeline/compare/20abeb66850ec6ce0127c1489c22bd949d9bb642...b268fd207886905b40a956e7f6a839884ce9835f",
+                        "https://github.com/AllenNeuralDynamics/aind-ephys-pipeline/compare/20abeb66850ec6ce0127c1489c22bd949d9bb642...b268fd207886905b40a956e7f6a839884ce9835f",
                     modalHtml: expect.stringContaining("Pipeline version"),
                 },
             ]);

@@ -15,15 +15,15 @@ const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/mai
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
-const PIPELINE_REPO_URL = "https://github.com/CodyCBakerPhD/aind-ephys-pipeline";
-const PIPELINE_API_BASE = "https://api.github.com/repos/CodyCBakerPhD/aind-ephys-pipeline";
+const PIPELINE_REPO_URL = "https://github.com/AllenNeuralDynamics/aind-ephys-pipeline";
+const PIPELINE_API_BASE = "https://api.github.com/repos/AllenNeuralDynamics/aind-ephys-pipeline";
 const CODE_REPO_URL = "https://github.com/dandi-compute/code";
 const AIND_EPHYS_PIPELINE_CODE_URL =
     "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/aind_ephys_pipeline";
 const PARAMS_SCHEMA_URL =
-    "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params_schema.json";
+    "https://raw.githubusercontent.com/AllenNeuralDynamics/aind-ephys-pipeline/main/pipeline/default_params_schema.json";
 const PARAMS_PLACEHOLDER_URL =
-    "https://raw.githubusercontent.com/CodyCBakerPhD/aind-ephys-pipeline/main/pipeline/default_params.json";
+    "https://raw.githubusercontent.com/AllenNeuralDynamics/aind-ephys-pipeline/main/pipeline/default_params.json";
 const REGISTRY_FALLBACK_ALIAS_PRIORITY = 1;
 const MIN_SHORT_COMMIT_HASH_LENGTH = 6;
 const FULL_COMMIT_HASH_LENGTH = 40;
@@ -4390,13 +4390,13 @@ async function init() {
     if (_viewMode === "compare") {
         setPageCopy(
             "AIND Pipeline Diffs Index",
-            'Assembled comparison links for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions.'
+            'Assembled comparison links for the <a href="https://github.com/AllenNeuralDynamics/aind-ephys-pipeline" target="_blank" rel="noopener">pipeline repository</a> and registered parameter or configuration definitions.'
         );
     }
     if (_viewMode === "params") {
         setPageCopy(
             "Register New Params File",
-            'Create a custom parameter file for the <a href="https://github.com/CodyCBakerPhD/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
+            'Create a custom parameter file for the <a href="https://github.com/AllenNeuralDynamics/aind-ephys-pipeline" target="_blank" rel="noopener">AIND Ephys Pipeline</a> and submit it for use in the compute pipeline.'
         );
     }
     if (_viewMode === "archive") {
