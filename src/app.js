@@ -15,10 +15,8 @@ const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/mai
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
-/* Content sources for the landing page. The qualification conditions are
-   summarized from the qualifying content IDs repo and link back to it as the
-   authoritative source. */
-const QUALIFYING_CONTENT_IDS_REPO_URL = "https://github.com/dandi-cache/qualifying-aind-content-ids";
+/* Content source for the landing page qualification conditions, linked as the
+   authoritative reference. */
 const QUALIFYING_CONTENT_IDS_README_URL =
     "https://github.com/dandi-cache/qualifying-aind-content-ids#aind-ephys-qualification-conditions";
 
@@ -4273,31 +4271,24 @@ function renderLandingPage() {
         <h2 class="landing-heading">AIND Ephys pipeline qualification conditions</h2>
         <p>
             The AIND Ephys pipeline runs on electrophysiology assets drawn from the DANDI Archive. To qualify, an
-            asset must meet the following conditions, summarized from the
-            <a href="${e(QUALIFYING_CONTENT_IDS_REPO_URL)}" target="_blank" rel="noopener"
-                >qualifying AIND content IDs</a
-            >
-            reference:
+            asset must meet the following conditions:
         </p>
         <ol class="landing-conditions">
             <li>The asset must be listed within a public Dandiset.</li>
             <li>The asset must be an NWB file, either in HDF5 or Zarr format.</li>
-            <li>The NWB file must be valid (openable, satisfying DANDI upload requirements).</li>
+            <li>The NWB file must be openable and valid.</li>
             <li>
                 The NWB file must contain at least one <code>ElectricalSeries</code> data stream in the
-                <code>acquisition</code> group with a <code>rate</code> greater than 10&nbsp;kHz.
+                <code>acquisition</code> group with a <code>rate</code> greater than 10&nbsp;kHz; lower-rate series
+                (e.g. LFP) are ignored.
             </li>
         </ol>
-        <p>
-            Only acquisition <code>ElectricalSeries</code> above 10&nbsp;kHz are assessed further; lower-rate series
-            (e.g. LFP) are ignored. The pipeline processes <em>every</em> such series, so a single non-processable
-            series causes the whole asset to fail. Each qualifying series must additionally:
-        </p>
+        <p>Each qualifying series must additionally:</p>
         <ul class="landing-conditions landing-conditions-sub">
-            <li>have a total duration of more than 2 minutes; and</li>
+            <li>have a total duration of more than 2 minutes.</li>
             <li>
-                survive the pipeline's split-then-aggregate step — when a series spans more than one channel group, the
-                pipeline splits it by group and recombines the groups with
+                survive the pipeline's split-then-aggregate step: when a series spans more than one channel group, the
+                pipeline splits series by channel group and recombines them with
                 <code>spikeinterface.aggregate_channels</code>, which requires the relative channel locations to remain
                 unique once combined.
             </li>
@@ -4313,21 +4304,38 @@ function renderLandingPage() {
 
     <section class="landing-card landing-resources">
         <h2 class="landing-heading">Explore &amp; resources</h2>
-        <ul class="landing-links">
-            <li><a href="?view=dashboard">Pipeline Results dashboard</a> — browse processing runs across Dandisets.</li>
-            <li>
-                <a href="${e(PIPELINE_REPO_URL)}" target="_blank" rel="noopener">AIND Ephys pipeline</a> — the
-                electrophysiology processing pipeline itself.
-            </li>
-            <li>
-                <a href="${e(CODE_REPO_URL)}" target="_blank" rel="noopener">DANDI Compute code</a> — the compute
-                codebase driving these runs.
-            </li>
-            <li>
-                <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a> — the neural data
-                archive backing the project.
-            </li>
-        </ul>
+        <table class="landing-resources-table">
+            <thead>
+                <tr>
+                    <th scope="col">Resource</th>
+                    <th scope="col">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th scope="row"><a href="?view=dashboard">Pipeline Results dashboard</a></th>
+                    <td>Browse processing runs across Dandisets.</td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="${e(PIPELINE_REPO_URL)}" target="_blank" rel="noopener">AIND Ephys pipeline</a>
+                    </th>
+                    <td>The electrophysiology processing pipeline itself.</td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="${e(CODE_REPO_URL)}" target="_blank" rel="noopener">DANDI Compute code</a>
+                    </th>
+                    <td>The compute codebase driving these runs.</td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>
+                    </th>
+                    <td>The neural data archive backing the project.</td>
+                </tr>
+            </tbody>
+        </table>
     </section>
 </div>`;
 }
@@ -4477,7 +4485,7 @@ async function init() {
     // data or registries to load, so render it and return before the queue path.
     if (_viewMode === null) {
         setPageCopy(
-            "Welcome to DANDI Compute: AIND",
+            "Welcome to DANDI Compute: AIND Ephys",
             'An experiment in reproducible electrophysiology processing on the <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>.'
         );
         loadLandingPage();

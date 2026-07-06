@@ -2899,15 +2899,13 @@ a.prov-hash-link:hover {
     padding: 1px 5px;
 }
 
-.landing-conditions,
-.landing-links {
+.landing-conditions {
     margin: 0 0 12px;
     padding-left: 20px;
     color: var(--color-text-secondary);
 }
 
-.landing-conditions li,
-.landing-links li {
+.landing-conditions li {
     margin: 6px 0;
 }
 
@@ -2915,17 +2913,39 @@ a.prov-hash-link:hover {
     margin-top: -4px;
 }
 
-.landing-links {
-    list-style: none;
-    padding-left: 0;
+.landing-resources-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
 }
 
-.landing-links li {
-    padding: 8px 0;
+.landing-resources-table th,
+.landing-resources-table td {
+    text-align: left;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
 }
 
-.landing-links li:last-child {
+.landing-resources-table thead th {
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+}
+
+.landing-resources-table tbody th {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.landing-resources-table td {
+    color: var(--color-text-secondary);
+}
+
+.landing-resources-table tbody tr:last-child th,
+.landing-resources-table tbody tr:last-child td {
     border-bottom: none;
 }
 
