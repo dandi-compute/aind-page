@@ -15,11 +15,9 @@ const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/mai
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
-/* Content sources for the landing page. The project description is pulled live
-   from the org profile README so it stays deduplicated with the GitHub org
-   page; the qualification conditions are summarized from the qualifying content
-   IDs repo and link back to it as the authoritative source. */
-const ORG_PROFILE_README_URL = "https://raw.githubusercontent.com/dandi-compute/.github/main/profile/README.md";
+/* Content sources for the landing page. The qualification conditions are
+   summarized from the qualifying content IDs repo and link back to it as the
+   authoritative source. */
 const QUALIFYING_CONTENT_IDS_REPO_URL = "https://github.com/dandi-cache/qualifying-aind-content-ids";
 const QUALIFYING_CONTENT_IDS_README_URL =
     "https://github.com/dandi-cache/qualifying-aind-content-ids#aind-ephys-qualification-conditions";
@@ -64,7 +62,7 @@ let _filteredRuns = [];
 
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
-    const allowedViews = new Set(["compare", "params", "tests", "archive"]);
+    const allowedViews = new Set(["dashboard", "compare", "params", "tests", "archive"]);
     return allowedViews.has(rawView) ? rawView : null;
 }
 
@@ -4266,110 +4264,11 @@ function e(str) {
 }
 
 /* ─── Landing page ──────────────────────────────────────────── */
-// Render a safe subset of Markdown inline syntax used by the source READMEs:
-// links, bare URLs, inline code, bold/italic emphasis. GitHub emoji shortcodes
-// (e.g. :book:) are stripped since they don't render outside GitHub. All
-// literal text is HTML-escaped, and generated links are restricted to http(s).
-function renderInlineMarkdown(text) {
-    const tokens = [];
-    const placeholder = (html) => {
-        tokens.push(html);
-        return `\u0000${tokens.length - 1}\u0000`;
-    };
-    let s = String(text);
-    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
-        if (!/^https?:\/\//i.test(url)) return match;
-        return placeholder(`<a href="${e(url)}" target="_blank" rel="noopener">${e(label)}</a>`);
-    });
-    s = s.replace(/https?:\/\/[^\s)]+/g, (url) =>
-        placeholder(`<a href="${e(url)}" target="_blank" rel="noopener">${e(url)}</a>`)
-    );
-    s = s.replace(/`([^`]+)`/g, (match, code) => placeholder(`<code>${e(code)}</code>`));
-    s = s.replace(/:[a-z0-9_+-]+:/gi, "");
-    s = e(s);
-    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    s = s.replace(/\u0000(\d+)\u0000/g, (match, index) => tokens[Number(index)]);
-    return s.trim();
-}
-
-// Render a safe subset of block-level Markdown (headings, paragraphs, and
-// unordered lists) into HTML. Heading levels are offset by headingBaseLevel so
-// the pulled content nests below the page's own <h1>.
-function renderMarkdownSubset(md, { headingBaseLevel = 2 } = {}) {
-    const lines = String(md).replace(/\r\n/g, "\n").split("\n");
-    const html = [];
-    let paragraph = [];
-    let listItems = [];
-    const flushParagraph = () => {
-        if (paragraph.length) {
-            html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
-            paragraph = [];
-        }
-    };
-    const flushList = () => {
-        if (listItems.length) {
-            const items = listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("");
-            html.push(`<ul class="landing-list">${items}</ul>`);
-            listItems = [];
-        }
-    };
-    for (const rawLine of lines) {
-        const line = rawLine.trimEnd();
-        if (line.trim() === "") {
-            flushParagraph();
-            flushList();
-            continue;
-        }
-        const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
-        if (headingMatch) {
-            flushParagraph();
-            flushList();
-            const level = Math.min(6, headingBaseLevel + headingMatch[1].length - 1);
-            html.push(`<h${level} class="landing-heading">${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
-            continue;
-        }
-        const listMatch = /^\s*[-*]\s+(.*)$/.exec(line);
-        if (listMatch) {
-            flushParagraph();
-            listItems.push(listMatch[1]);
-            continue;
-        }
-        flushList();
-        paragraph.push(line.trim());
-    }
-    flushParagraph();
-    flushList();
-    return html.join("\n");
-}
-
-// Drop a single leading top-level (#) heading so the org README's own "Welcome"
-// title doesn't duplicate the page's <h1>.
-function stripLeadingH1(md) {
-    return String(md).replace(/^\s*#\s+.*(?:\n|$)/, "");
-}
-
-const LANDING_INTRO_FALLBACK = `<h2 class="landing-heading">Welcome to DANDI Compute!</h2>
-<p>This is an experiment in reproducible computing related to the DANDI Archive. Repositories in the
-<a href="https://github.com/dandi-compute" target="_blank" rel="noopener">DANDI Compute</a> organization
-provide convenient access to neural data stored in the BRAIN Initiative
-<a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>.</p>`;
-
-// Build the landing page HTML. The project description is rendered from the org
-// profile README when available (deduplicating the GitHub org page copy) and
-// falls back to a static summary otherwise. Qualification conditions are
-// summarized inline and link back to the authoritative source repo.
-function renderLandingPage(orgReadme) {
-    const introHtml =
-        orgReadme && orgReadme.trim()
-            ? renderMarkdownSubset(stripLeadingH1(orgReadme), { headingBaseLevel: 2 })
-            : LANDING_INTRO_FALLBACK;
-
+// Build the landing page HTML. Qualification conditions are summarized inline
+// and link back to the authoritative source repo; the brief project
+// description lives in the page subtitle set by init().
+function renderLandingPage() {
     return `<div class="landing-page">
-    <section class="landing-card landing-intro">
-        ${introHtml}
-    </section>
-
     <section class="landing-card landing-qualify">
         <h2 class="landing-heading">AIND Ephys pipeline qualification conditions</h2>
         <p>
@@ -4433,17 +4332,9 @@ function renderLandingPage(orgReadme) {
 </div>`;
 }
 
-// Fetch and render the landing page. Content pulled from the org README is
-// best-effort: on any failure the page still renders with a static fallback.
-async function loadLandingPage() {
-    let orgReadme = null;
-    try {
-        const resp = await fetch(ORG_PROFILE_README_URL);
-        if (resp.ok) orgReadme = await resp.text();
-    } catch {
-        /* network/CORS failure; fall back to static intro copy */
-    }
-    document.getElementById("runs").innerHTML = renderLandingPage(orgReadme);
+// Render the static landing page into the shared content region.
+function loadLandingPage() {
+    document.getElementById("runs").innerHTML = renderLandingPage();
     showDiffResults();
 }
 
@@ -4589,8 +4480,7 @@ async function init() {
             "Welcome to DANDI Compute: AIND",
             'An experiment in reproducible electrophysiology processing on the <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>.'
         );
-        showLoading();
-        await loadLandingPage();
+        loadLandingPage();
         return;
     }
 
@@ -4703,9 +4593,6 @@ if (typeof module !== "undefined" && module.exports) {
         normalizeRegistryEntries,
         renderParamsGroup,
         renderDiffPage,
-        renderInlineMarkdown,
-        renderMarkdownSubset,
-        stripLeadingH1,
         renderLandingPage,
         renderFilterBanner,
         renderSummary,

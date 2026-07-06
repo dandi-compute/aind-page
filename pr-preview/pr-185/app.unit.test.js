@@ -27,13 +27,11 @@ const {
     parseSortMode,
     parseRunPath,
     parseTrace,
+    parseViewMode,
     queueStateCacheKey,
     syncTopNav,
     renderDiffPage,
     renderDandisets,
-    renderInlineMarkdown,
-    renderMarkdownSubset,
-    stripLeadingH1,
     renderLandingPage,
     renderParamsGroup,
     renderQueuePriorities,
@@ -142,6 +140,17 @@ describe("app unit behavior", () => {
         expect(parseSortDirection()).toBe("asc");
     });
 
+    it("allows only known view modes and falls back to the landing page otherwise", () => {
+        window.history.replaceState(null, "", "/?view=dashboard");
+        expect(parseViewMode()).toBe("dashboard");
+        window.history.replaceState(null, "", "/?view=archive");
+        expect(parseViewMode()).toBe("archive");
+        window.history.replaceState(null, "", "/?view=bogus");
+        expect(parseViewMode()).toBe(null);
+        window.history.replaceState(null, "", "/");
+        expect(parseViewMode()).toBe(null);
+    });
+
     it("marks only the selected top nav link as active", () => {
         document.body.innerHTML = `
             <nav>
@@ -248,66 +257,13 @@ describe("app unit behavior", () => {
         expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(false);
     });
 
-    it("renders markdown links as safe external anchors and escapes text", () => {
-        const html = renderInlineMarkdown("See [the docs](https://example.com/a) & <stuff>");
-        expect(html).toContain('<a href="https://example.com/a" target="_blank" rel="noopener">the docs</a>');
-        expect(html).toContain("&amp; &lt;stuff&gt;");
-    });
-
-    it("does not linkify non-http markdown link targets", () => {
-        const html = renderInlineMarkdown("[click](javascript:alert(1))");
-        expect(html).not.toContain("<a ");
-        expect(html).toContain("javascript");
-    });
-
-    it("linkifies bare urls and strips github emoji shortcodes", () => {
-        const html = renderInlineMarkdown(":book: visit https://example.org/x now");
-        expect(html).toContain(
-            '<a href="https://example.org/x" target="_blank" rel="noopener">https://example.org/x</a>'
-        );
-        expect(html).not.toContain(":book:");
-    });
-
-    it("preserves numeric text next to rendered fragments (no placeholder collision)", () => {
-        const html = renderInlineMarkdown("a `rate` greater than 10 kHz on [dandi](https://dandiarchive.org)");
-        expect(html).toContain("<code>rate</code>");
-        expect(html).toContain("greater than 10 kHz on");
-        expect(html).toContain('<a href="https://dandiarchive.org" target="_blank" rel="noopener">dandi</a>');
-    });
-
-    it("renders markdown headings, paragraphs, and lists into html", () => {
-        const md = "# Title\n\nHello world.\n\n### Links\n\n- [a](https://a.test)\n- plain item";
-        const html = renderMarkdownSubset(md);
-        expect(html).toContain('<h2 class="landing-heading">Title</h2>');
-        expect(html).toContain('<h4 class="landing-heading">Links</h4>');
-        expect(html).toContain("<p>Hello world.</p>");
-        expect(html).toContain('<ul class="landing-list">');
-        expect(html).toContain('<a href="https://a.test" target="_blank" rel="noopener">a</a>');
-        expect(html).toContain("<li>plain item</li>");
-    });
-
-    it("strips a single leading top-level heading", () => {
-        expect(stripLeadingH1("# Welcome\n\nBody text")).toBe("\nBody text");
-        expect(stripLeadingH1("## Keep\n\nBody")).toBe("## Keep\n\nBody");
-    });
-
-    it("renders the landing page from org readme content and includes qualification conditions", () => {
-        const orgReadme =
-            "# Welcome to DANDI Compute!\n\nAn experiment in reproducible computing.\n\n### DANDI Archive\n\n- [dandiarchive.org](https://dandiarchive.org/)";
-        const html = renderLandingPage(orgReadme);
-        expect(html).toContain("An experiment in reproducible computing.");
-        // Leading H1 is stripped to avoid duplicating the page title.
-        expect(html).not.toContain("Welcome to DANDI Compute!</h2>");
+    it("renders the landing page with qualification conditions and resource links", () => {
+        const html = renderLandingPage();
         expect(html).toContain("AIND Ephys pipeline qualification conditions");
         expect(html).toContain("<code>ElectricalSeries</code>");
         expect(html).toContain('href="?view=dashboard"');
         expect(html).toContain("qualifying-aind-content-ids");
-    });
-
-    it("falls back to static intro copy when org readme is unavailable", () => {
-        const html = renderLandingPage(null);
-        expect(html).toContain("Welcome to DANDI Compute!");
-        expect(html).toContain("AIND Ephys pipeline qualification conditions");
+        expect(html).toContain("Explore &amp; resources");
     });
 
     it("includes all test-only dandisets used to scope dashboard and tests views", () => {
