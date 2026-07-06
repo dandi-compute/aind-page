@@ -27,6 +27,7 @@ const {
     parseSortMode,
     parseRunPath,
     parseTrace,
+    parseViewMode,
     queueStateCacheKey,
     syncTopNav,
     renderDiffPage,
@@ -137,6 +138,17 @@ describe("app unit behavior", () => {
         localStorage.setItem("sortDirection", "asc");
         window.history.replaceState(null, "", "/");
         expect(parseSortDirection()).toBe("asc");
+    });
+
+    it("allows only known view modes and falls back to the landing page otherwise", () => {
+        window.history.replaceState(null, "", "/?view=dashboard");
+        expect(parseViewMode()).toBe("dashboard");
+        window.history.replaceState(null, "", "/?view=archive");
+        expect(parseViewMode()).toBe("archive");
+        window.history.replaceState(null, "", "/?view=bogus");
+        expect(parseViewMode()).toBe(null);
+        window.history.replaceState(null, "", "/");
+        expect(parseViewMode()).toBe(null);
     });
 
     it("marks only the selected top nav link as active", () => {

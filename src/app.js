@@ -62,7 +62,7 @@ let _filteredRuns = [];
 
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
-    const allowedViews = new Set(["compare", "params", "tests", "archive"]);
+    const allowedViews = new Set(["dashboard", "compare", "params", "tests", "archive"]);
     return allowedViews.has(rawView) ? rawView : null;
 }
 
