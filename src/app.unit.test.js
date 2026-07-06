@@ -27,10 +27,12 @@ const {
     parseSortMode,
     parseRunPath,
     parseTrace,
+    parseViewMode,
     queueStateCacheKey,
     syncTopNav,
     renderDiffPage,
     renderDandisets,
+    renderLandingPage,
     renderParamsGroup,
     renderQueuePriorities,
     renderRegistryLink,
@@ -138,10 +140,22 @@ describe("app unit behavior", () => {
         expect(parseSortDirection()).toBe("asc");
     });
 
+    it("allows only known view modes and falls back to the landing page otherwise", () => {
+        window.history.replaceState(null, "", "/?view=dashboard");
+        expect(parseViewMode()).toBe("dashboard");
+        window.history.replaceState(null, "", "/?view=archive");
+        expect(parseViewMode()).toBe("archive");
+        window.history.replaceState(null, "", "/?view=bogus");
+        expect(parseViewMode()).toBe(null);
+        window.history.replaceState(null, "", "/");
+        expect(parseViewMode()).toBe(null);
+    });
+
     it("marks only the selected top nav link as active", () => {
         document.body.innerHTML = `
             <nav>
-                <a class="site-dashboard-link site-view-toggle-link" href="./"></a>
+                <a class="site-welcome-link site-view-toggle-link" href="./"></a>
+                <a class="site-dashboard-link site-view-toggle-link" href="?view=dashboard"></a>
                 <a class="site-tests-link site-view-toggle-link" href="?view=tests"></a>
                 <a class="site-diffs-link site-view-toggle-link" href="?view=compare"></a>
                 <a class="site-params-link site-view-toggle-link" href="?view=params"></a>
@@ -150,6 +164,7 @@ describe("app unit behavior", () => {
 
         syncTopNav("compare");
 
+        expect(document.querySelector(".site-welcome-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-diffs-link").classList.contains("active")).toBe(true);
@@ -157,10 +172,11 @@ describe("app unit behavior", () => {
         expect(document.querySelector(".site-params-link").classList.contains("active")).toBe(false);
     });
 
-    it("marks dashboard top nav link as active when no view is selected", () => {
+    it("marks welcome top nav link as active when no view is selected", () => {
         document.body.innerHTML = `
             <nav>
-                <a class="site-dashboard-link site-view-toggle-link" href="./"></a>
+                <a class="site-welcome-link site-view-toggle-link" href="./"></a>
+                <a class="site-dashboard-link site-view-toggle-link active" href="?view=dashboard" aria-current="page"></a>
                 <a class="site-tests-link site-view-toggle-link active" href="?view=tests" aria-current="page"></a>
                 <a class="site-diffs-link site-view-toggle-link active" href="?view=compare" aria-current="page"></a>
                 <a class="site-params-link site-view-toggle-link active" href="?view=params" aria-current="page"></a>
@@ -169,8 +185,10 @@ describe("app unit behavior", () => {
 
         syncTopNav(null);
 
-        expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(true);
-        expect(document.querySelector(".site-dashboard-link").getAttribute("aria-current")).toBe("page");
+        expect(document.querySelector(".site-welcome-link").classList.contains("active")).toBe(true);
+        expect(document.querySelector(".site-welcome-link").getAttribute("aria-current")).toBe("page");
+        expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-dashboard-link").hasAttribute("aria-current")).toBe(false);
         expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-tests-link").hasAttribute("aria-current")).toBe(false);
         expect(document.querySelector(".site-diffs-link").classList.contains("active")).toBe(false);
@@ -179,10 +197,29 @@ describe("app unit behavior", () => {
         expect(document.querySelector(".site-params-link").hasAttribute("aria-current")).toBe(false);
     });
 
+    it("marks dashboard top nav link as active when dashboard view is selected", () => {
+        document.body.innerHTML = `
+            <nav>
+                <a class="site-welcome-link site-view-toggle-link" href="./"></a>
+                <a class="site-dashboard-link site-view-toggle-link" href="?view=dashboard"></a>
+                <a class="site-tests-link site-view-toggle-link" href="?view=tests"></a>
+            </nav>
+        `;
+
+        syncTopNav("dashboard");
+        const dashboardLink = document.querySelector('.site-view-toggle-link[href="?view=dashboard"]');
+
+        expect(dashboardLink.classList.contains("active")).toBe(true);
+        expect(dashboardLink.getAttribute("aria-current")).toBe("page");
+        expect(document.querySelector(".site-welcome-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
+    });
+
     it("marks tests top nav link as active when tests view is selected", () => {
         document.body.innerHTML = `
             <nav>
-                <a class="site-dashboard-link site-view-toggle-link" href="./"></a>
+                <a class="site-welcome-link site-view-toggle-link" href="./"></a>
+                <a class="site-dashboard-link site-view-toggle-link" href="?view=dashboard"></a>
                 <a class="site-diffs-link site-view-toggle-link" href="?view=compare"></a>
                 <a class="site-params-link site-view-toggle-link" href="?view=params"></a>
                 <a class="site-tests-link site-view-toggle-link" href="?view=tests"></a>
@@ -203,7 +240,8 @@ describe("app unit behavior", () => {
     it("marks archive top nav link as active when archive view is selected", () => {
         document.body.innerHTML = `
             <nav>
-                <a class="site-dashboard-link site-view-toggle-link" href="./"></a>
+                <a class="site-welcome-link site-view-toggle-link" href="./"></a>
+                <a class="site-dashboard-link site-view-toggle-link" href="?view=dashboard"></a>
                 <a class="site-tests-link site-view-toggle-link" href="?view=tests"></a>
                 <a class="site-archive-link site-view-toggle-link" href="?view=archive"></a>
             </nav>
@@ -215,7 +253,17 @@ describe("app unit behavior", () => {
         expect(archiveLink.classList.contains("active")).toBe(true);
         expect(archiveLink.getAttribute("aria-current")).toBe("page");
         expect(document.querySelector(".site-tests-link").classList.contains("active")).toBe(false);
+        expect(document.querySelector(".site-welcome-link").classList.contains("active")).toBe(false);
         expect(document.querySelector(".site-dashboard-link").classList.contains("active")).toBe(false);
+    });
+
+    it("renders the landing page with qualification conditions and resource links", () => {
+        const html = renderLandingPage();
+        expect(html).toContain("AIND Ephys pipeline qualification conditions");
+        expect(html).toContain("<code>ElectricalSeries</code>");
+        expect(html).toContain('href="?view=dashboard"');
+        expect(html).toContain("qualifying-aind-content-ids");
+        expect(html).toContain("Explore &amp; resources");
     });
 
     it("includes all test-only dandisets used to scope dashboard and tests views", () => {
