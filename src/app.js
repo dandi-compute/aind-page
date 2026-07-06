@@ -15,6 +15,15 @@ const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/mai
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
+/* Content sources for the landing page. The project description is pulled live
+   from the org profile README so it stays deduplicated with the GitHub org
+   page; the qualification conditions are summarized from the qualifying content
+   IDs repo and link back to it as the authoritative source. */
+const ORG_PROFILE_README_URL = "https://raw.githubusercontent.com/dandi-compute/.github/main/profile/README.md";
+const QUALIFYING_CONTENT_IDS_REPO_URL = "https://github.com/dandi-cache/qualifying-aind-content-ids";
+const QUALIFYING_CONTENT_IDS_README_URL =
+    "https://github.com/dandi-cache/qualifying-aind-content-ids#aind-ephys-qualification-conditions";
+
 const PIPELINE_REPO_URL = "https://github.com/AllenNeuralDynamics/aind-ephys-pipeline";
 const PIPELINE_API_BASE = "https://api.github.com/repos/AllenNeuralDynamics/aind-ephys-pipeline";
 const CODE_REPO_URL = "https://github.com/dandi-compute/code";
@@ -60,6 +69,7 @@ function parseViewMode() {
 function syncTopNav(viewMode = parseViewMode()) {
     const navLinks = [
         { selector: '.site-view-toggle-link[href="./"]', mode: null },
+        { selector: '.site-view-toggle-link[href="?view=dashboard"]', mode: "dashboard" },
         { selector: '.site-view-toggle-link[href="?view=compare"]', mode: "compare" },
         { selector: '.site-view-toggle-link[href="?view=params"]', mode: "params" },
         { selector: '.site-view-toggle-link[href="?view=tests"]', mode: "tests" },
@@ -245,15 +255,14 @@ function applyFilter(runs, filter) {
 }
 
 /* Build a page URL with the given filter parameters.
-   When on a scoped dashboard page (tests or archive), the matching view param
-   is automatically preserved so navigation stays within that scope.
-   When on the main page (_viewMode === null), no view param is emitted. */
+   When on a named dashboard page (dashboard, tests, or archive), the matching
+   view param is automatically preserved so navigation stays within that scope. */
 function narrowUrl(params) {
     const sp = new URLSearchParams();
     sp.set("layout", parseLayoutMode());
     sp.set("sort", parseSortMode());
     sp.set("sortDir", parseSortDirection());
-    if (_viewMode === "tests" || _viewMode === "archive") sp.set("view", _viewMode);
+    if (_viewMode === "dashboard" || _viewMode === "tests" || _viewMode === "archive") sp.set("view", _viewMode);
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
@@ -526,7 +535,7 @@ function renderFilterBanner(filter, availableRuns = []) {
         ? `<div class="tests-page-banner">
     <span class="tests-page-label">${scopedBanner.label}</span>
     <span class="tests-page-desc">${scopedBanner.desc}</span>
-    <a class="tests-back-link" href="./">← Back to main</a>
+    <a class="tests-back-link" href="?view=dashboard">← Back to dashboard</a>
 </div>`
         : "";
 
@@ -539,7 +548,8 @@ function renderFilterBanner(filter, availableRuns = []) {
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
     clearAllParams.set("sortDir", sortDirection);
-    if (_viewMode === "tests" || _viewMode === "archive") clearAllParams.set("view", _viewMode);
+    if (_viewMode === "dashboard" || _viewMode === "tests" || _viewMode === "archive")
+        clearAllParams.set("view", _viewMode);
     const clearAllHref = `?${clearAllParams.toString()}`;
 
     banner.innerHTML = `
@@ -4253,6 +4263,188 @@ function e(str) {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/* ─── Landing page ──────────────────────────────────────────── */
+// Render a safe subset of Markdown inline syntax used by the source READMEs:
+// links, bare URLs, inline code, bold/italic emphasis. GitHub emoji shortcodes
+// (e.g. :book:) are stripped since they don't render outside GitHub. All
+// literal text is HTML-escaped, and generated links are restricted to http(s).
+function renderInlineMarkdown(text) {
+    const tokens = [];
+    const placeholder = (html) => {
+        tokens.push(html);
+        return `\u0000${tokens.length - 1}\u0000`;
+    };
+    let s = String(text);
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => {
+        if (!/^https?:\/\//i.test(url)) return match;
+        return placeholder(`<a href="${e(url)}" target="_blank" rel="noopener">${e(label)}</a>`);
+    });
+    s = s.replace(/https?:\/\/[^\s)]+/g, (url) =>
+        placeholder(`<a href="${e(url)}" target="_blank" rel="noopener">${e(url)}</a>`)
+    );
+    s = s.replace(/`([^`]+)`/g, (match, code) => placeholder(`<code>${e(code)}</code>`));
+    s = s.replace(/:[a-z0-9_+-]+:/gi, "");
+    s = e(s);
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    s = s.replace(/\u0000(\d+)\u0000/g, (match, index) => tokens[Number(index)]);
+    return s.trim();
+}
+
+// Render a safe subset of block-level Markdown (headings, paragraphs, and
+// unordered lists) into HTML. Heading levels are offset by headingBaseLevel so
+// the pulled content nests below the page's own <h1>.
+function renderMarkdownSubset(md, { headingBaseLevel = 2 } = {}) {
+    const lines = String(md).replace(/\r\n/g, "\n").split("\n");
+    const html = [];
+    let paragraph = [];
+    let listItems = [];
+    const flushParagraph = () => {
+        if (paragraph.length) {
+            html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
+            paragraph = [];
+        }
+    };
+    const flushList = () => {
+        if (listItems.length) {
+            const items = listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("");
+            html.push(`<ul class="landing-list">${items}</ul>`);
+            listItems = [];
+        }
+    };
+    for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        if (line.trim() === "") {
+            flushParagraph();
+            flushList();
+            continue;
+        }
+        const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
+        if (headingMatch) {
+            flushParagraph();
+            flushList();
+            const level = Math.min(6, headingBaseLevel + headingMatch[1].length - 1);
+            html.push(`<h${level} class="landing-heading">${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+            continue;
+        }
+        const listMatch = /^\s*[-*]\s+(.*)$/.exec(line);
+        if (listMatch) {
+            flushParagraph();
+            listItems.push(listMatch[1]);
+            continue;
+        }
+        flushList();
+        paragraph.push(line.trim());
+    }
+    flushParagraph();
+    flushList();
+    return html.join("\n");
+}
+
+// Drop a single leading top-level (#) heading so the org README's own "Welcome"
+// title doesn't duplicate the page's <h1>.
+function stripLeadingH1(md) {
+    return String(md).replace(/^\s*#\s+.*(?:\n|$)/, "");
+}
+
+const LANDING_INTRO_FALLBACK = `<h2 class="landing-heading">Welcome to DANDI Compute!</h2>
+<p>This is an experiment in reproducible computing related to the DANDI Archive. Repositories in the
+<a href="https://github.com/dandi-compute" target="_blank" rel="noopener">DANDI Compute</a> organization
+provide convenient access to neural data stored in the BRAIN Initiative
+<a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>.</p>`;
+
+// Build the landing page HTML. The project description is rendered from the org
+// profile README when available (deduplicating the GitHub org page copy) and
+// falls back to a static summary otherwise. Qualification conditions are
+// summarized inline and link back to the authoritative source repo.
+function renderLandingPage(orgReadme) {
+    const introHtml =
+        orgReadme && orgReadme.trim()
+            ? renderMarkdownSubset(stripLeadingH1(orgReadme), { headingBaseLevel: 2 })
+            : LANDING_INTRO_FALLBACK;
+
+    return `<div class="landing-page">
+    <section class="landing-card landing-intro">
+        ${introHtml}
+    </section>
+
+    <section class="landing-card landing-qualify">
+        <h2 class="landing-heading">AIND Ephys pipeline qualification conditions</h2>
+        <p>
+            The AIND Ephys pipeline runs on electrophysiology assets drawn from the DANDI Archive. To qualify, an
+            asset must meet the following conditions, summarized from the
+            <a href="${e(QUALIFYING_CONTENT_IDS_REPO_URL)}" target="_blank" rel="noopener"
+                >qualifying AIND content IDs</a
+            >
+            reference:
+        </p>
+        <ol class="landing-conditions">
+            <li>The asset must be listed within a public Dandiset.</li>
+            <li>The asset must be an NWB file, either in HDF5 or Zarr format.</li>
+            <li>The NWB file must be valid (openable, satisfying DANDI upload requirements).</li>
+            <li>
+                The NWB file must contain at least one <code>ElectricalSeries</code> data stream in the
+                <code>acquisition</code> group with a <code>rate</code> greater than 10&nbsp;kHz.
+            </li>
+        </ol>
+        <p>
+            Only acquisition <code>ElectricalSeries</code> above 10&nbsp;kHz are assessed further; lower-rate series
+            (e.g. LFP) are ignored. The pipeline processes <em>every</em> such series, so a single non-processable
+            series causes the whole asset to fail. Each qualifying series must additionally:
+        </p>
+        <ul class="landing-conditions landing-conditions-sub">
+            <li>have a total duration of more than 2 minutes; and</li>
+            <li>
+                survive the pipeline's split-then-aggregate step — when a series spans more than one channel group, the
+                pipeline splits it by group and recombines the groups with
+                <code>spikeinterface.aggregate_channels</code>, which requires the relative channel locations to remain
+                unique once combined.
+            </li>
+        </ul>
+        <p class="landing-note">
+            See the
+            <a href="${e(QUALIFYING_CONTENT_IDS_README_URL)}" target="_blank" rel="noopener"
+                >full qualification conditions</a
+            >
+            for the exact checks and common failure modes.
+        </p>
+    </section>
+
+    <section class="landing-card landing-resources">
+        <h2 class="landing-heading">Explore &amp; resources</h2>
+        <ul class="landing-links">
+            <li><a href="?view=dashboard">Pipeline Results dashboard</a> — browse processing runs across Dandisets.</li>
+            <li>
+                <a href="${e(PIPELINE_REPO_URL)}" target="_blank" rel="noopener">AIND Ephys pipeline</a> — the
+                electrophysiology processing pipeline itself.
+            </li>
+            <li>
+                <a href="${e(CODE_REPO_URL)}" target="_blank" rel="noopener">DANDI Compute code</a> — the compute
+                codebase driving these runs.
+            </li>
+            <li>
+                <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a> — the neural data
+                archive backing the project.
+            </li>
+        </ul>
+    </section>
+</div>`;
+}
+
+// Fetch and render the landing page. Content pulled from the org README is
+// best-effort: on any failure the page still renders with a static fallback.
+async function loadLandingPage() {
+    let orgReadme = null;
+    try {
+        const resp = await fetch(ORG_PROFILE_README_URL);
+        if (resp.ok) orgReadme = await resp.text();
+    } catch {
+        /* network/CORS failure; fall back to static intro copy */
+    }
+    document.getElementById("runs").innerHTML = renderLandingPage(orgReadme);
+    showDiffResults();
+}
+
 /* ─── Queue data loader ─────────────────────────────────────── */
 // Fetches, processes, and renders the queue state for the current view.
 // Only applies to the dashboard queue views ("main", "tests", and "archive");
@@ -4387,6 +4579,19 @@ async function init() {
     initTheme();
     initModal();
     syncTopNav(_viewMode);
+
+    // The landing page is the default view (no `view` param). It has no queue
+    // data or registries to load, so render it and return before the queue path.
+    if (_viewMode === null) {
+        setPageCopy(
+            "Welcome to DANDI Compute: AIND",
+            'An experiment in reproducible electrophysiology processing on the <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>.'
+        );
+        showLoading();
+        await loadLandingPage();
+        return;
+    }
+
     if (_viewMode === "compare") {
         setPageCopy(
             "AIND Pipeline Diffs Index",
@@ -4496,6 +4701,10 @@ if (typeof module !== "undefined" && module.exports) {
         normalizeRegistryEntries,
         renderParamsGroup,
         renderDiffPage,
+        renderInlineMarkdown,
+        renderMarkdownSubset,
+        stripLeadingH1,
+        renderLandingPage,
         renderFilterBanner,
         renderSummary,
         renderFlatList,

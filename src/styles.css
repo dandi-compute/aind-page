@@ -117,6 +117,7 @@ body {
     flex-shrink: 0;
 }
 
+.site-welcome-link,
 .site-tests-link,
 .site-dashboard-link {
     color: rgba(255, 255, 255, 0.55);
@@ -134,15 +135,18 @@ body {
         box-shadow 0.2s;
     white-space: nowrap;
 }
+.site-welcome-link:last-child,
 .site-tests-link:last-child,
 .site-dashboard-link:last-child {
     border-right: 0;
 }
+.site-welcome-link:hover,
 .site-tests-link:hover,
 .site-dashboard-link:hover {
     color: rgba(255, 255, 255, 0.95);
     background: rgba(255, 255, 255, 0.08);
 }
+.site-welcome-link.active,
 .site-tests-link.active,
 .site-dashboard-link.active {
     color: #fff;
@@ -1162,7 +1166,9 @@ details[open] > .run-section-title::before {
     background: var(--color-bg);
     color: var(--color-accent);
     text-decoration: none;
-    transition: border-color 0.15s, background 0.15s;
+    transition:
+        border-color 0.15s,
+        background 0.15s;
 }
 .viz-kachery-link:hover {
     border-color: var(--color-accent);
@@ -1746,7 +1752,9 @@ a.prov-name:hover {
 }
 a.prov-hash-link {
     text-decoration: none;
-    transition: border-color 0.15s, color 0.15s;
+    transition:
+        border-color 0.15s,
+        color 0.15s;
 }
 a.prov-hash-link:hover {
     border-color: var(--color-accent);
@@ -2475,6 +2483,8 @@ a.prov-hash-link:hover {
         font-size: 0.92em;
     }
 
+    .site-welcome-link,
+    .site-dashboard-link,
     .site-tests-link {
         font-size: 0.78em;
         padding: 3px 7px;
@@ -2830,4 +2840,97 @@ a.prov-hash-link:hover {
     border: 1px solid var(--color-border);
     border-radius: 3px;
     padding: 1px 5px;
+}
+
+/* ─── Landing page ──────────────────────────────────────────── */
+.landing-page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 860px;
+    margin: 0 auto 40px;
+}
+
+.landing-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 22px 26px;
+    line-height: 1.6;
+    color: var(--color-text);
+}
+
+.landing-card p {
+    margin: 0 0 12px;
+    color: var(--color-text-secondary);
+}
+
+.landing-card p:last-child {
+    margin-bottom: 0;
+}
+
+.landing-heading {
+    font-weight: 600;
+    font-size: 1.15em;
+    letter-spacing: 0.01em;
+    margin: 0 0 12px;
+    color: var(--color-text);
+}
+
+.landing-heading:not(:first-child) {
+    margin-top: 22px;
+}
+
+.landing-card a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+.landing-card a:hover {
+    text-decoration: underline;
+}
+
+.landing-card code {
+    font-family: "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.88em;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 1px 5px;
+}
+
+.landing-list,
+.landing-conditions,
+.landing-links {
+    margin: 0 0 12px;
+    padding-left: 20px;
+    color: var(--color-text-secondary);
+}
+
+.landing-list li,
+.landing-conditions li,
+.landing-links li {
+    margin: 6px 0;
+}
+
+.landing-conditions-sub {
+    margin-top: -4px;
+}
+
+.landing-links {
+    list-style: none;
+    padding-left: 0;
+}
+
+.landing-links li {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.landing-links li:last-child {
+    border-bottom: none;
+}
+
+.landing-note {
+    font-size: 0.9em;
 }
