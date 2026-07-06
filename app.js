@@ -15,6 +15,11 @@ const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/mai
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
+/* Content source for the landing page qualification conditions, linked as the
+   authoritative reference. */
+const QUALIFYING_CONTENT_IDS_README_URL =
+    "https://github.com/dandi-cache/qualifying-aind-content-ids#aind-ephys-qualification-conditions";
+
 const PIPELINE_REPO_URL = "https://github.com/AllenNeuralDynamics/aind-ephys-pipeline";
 const PIPELINE_API_BASE = "https://api.github.com/repos/AllenNeuralDynamics/aind-ephys-pipeline";
 const CODE_REPO_URL = "https://github.com/dandi-compute/code";
@@ -55,13 +60,14 @@ let _filteredRuns = [];
 
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
-    const allowedViews = new Set(["compare", "params", "tests", "archive"]);
+    const allowedViews = new Set(["dashboard", "compare", "params", "tests", "archive"]);
     return allowedViews.has(rawView) ? rawView : null;
 }
 
 function syncTopNav(viewMode = parseViewMode()) {
     const navLinks = [
         { selector: '.site-view-toggle-link[href="./"]', mode: null },
+        { selector: '.site-view-toggle-link[href="?view=dashboard"]', mode: "dashboard" },
         { selector: '.site-view-toggle-link[href="?view=compare"]', mode: "compare" },
         { selector: '.site-view-toggle-link[href="?view=params"]', mode: "params" },
         { selector: '.site-view-toggle-link[href="?view=tests"]', mode: "tests" },
@@ -247,15 +253,14 @@ function applyFilter(runs, filter) {
 }
 
 /* Build a page URL with the given filter parameters.
-   When on a scoped dashboard page (tests or archive), the matching view param
-   is automatically preserved so navigation stays within that scope.
-   When on the main page (_viewMode === null), no view param is emitted. */
+   When on a named dashboard page (dashboard, tests, or archive), the matching
+   view param is automatically preserved so navigation stays within that scope. */
 function narrowUrl(params) {
     const sp = new URLSearchParams();
     sp.set("layout", parseLayoutMode());
     sp.set("sort", parseSortMode());
     sp.set("sortDir", parseSortDirection());
-    if (_viewMode === "tests" || _viewMode === "archive") sp.set("view", _viewMode);
+    if (_viewMode === "dashboard" || _viewMode === "tests" || _viewMode === "archive") sp.set("view", _viewMode);
     if (params.dandiset) sp.set("dandiset", params.dandiset);
     if (params.subject) sp.set("subject", params.subject);
     if (params.session) sp.set("session", params.session);
@@ -528,7 +533,7 @@ function renderFilterBanner(filter, availableRuns = []) {
         ? `<div class="tests-page-banner">
     <span class="tests-page-label">${scopedBanner.label}</span>
     <span class="tests-page-desc">${scopedBanner.desc}</span>
-    <a class="tests-back-link" href="./">← Back to main</a>
+    <a class="tests-back-link" href="?view=dashboard">← Back to dashboard</a>
 </div>`
         : "";
 
@@ -541,7 +546,8 @@ function renderFilterBanner(filter, availableRuns = []) {
     clearAllParams.set("layout", layoutMode);
     clearAllParams.set("sort", sortMode);
     clearAllParams.set("sortDir", sortDirection);
-    if (_viewMode === "tests" || _viewMode === "archive") clearAllParams.set("view", _viewMode);
+    if (_viewMode === "dashboard" || _viewMode === "tests" || _viewMode === "archive")
+        clearAllParams.set("view", _viewMode);
     const clearAllHref = `?${clearAllParams.toString()}`;
 
     banner.innerHTML = `
@@ -4255,6 +4261,91 @@ function e(str) {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/* ─── Landing page ──────────────────────────────────────────── */
+// Build the landing page HTML. Qualification conditions are summarized inline
+// and link back to the authoritative source repo; the brief project
+// description lives in the page subtitle set by init().
+function renderLandingPage() {
+    return `<div class="landing-page">
+    <section class="landing-card landing-qualify">
+        <h2 class="landing-heading">AIND Ephys pipeline qualification conditions</h2>
+        <p>
+            The AIND Ephys pipeline runs on electrophysiology assets drawn from the DANDI Archive. To qualify, an
+            asset must meet the following conditions:
+        </p>
+        <ol class="landing-conditions">
+            <li>The asset must be listed within a public Dandiset.</li>
+            <li>The asset must be an NWB file, either in HDF5 or Zarr format.</li>
+            <li>The NWB file must be openable and valid.</li>
+            <li>
+                The NWB file must contain at least one <code>ElectricalSeries</code> data stream in the
+                <code>acquisition</code> group with a <code>rate</code> greater than 10&nbsp;kHz; lower-rate series
+                (e.g. LFP) are ignored.
+            </li>
+        </ol>
+        <p>Each qualifying series must additionally:</p>
+        <ul class="landing-conditions landing-conditions-sub">
+            <li>have a total duration of more than 2 minutes.</li>
+            <li>
+                survive the pipeline's split-then-aggregate step: when a series spans more than one channel group, the
+                pipeline splits series by channel group and recombines them with
+                <code>spikeinterface.aggregate_channels</code>, which requires the relative channel locations to remain
+                unique once combined.
+            </li>
+        </ul>
+        <p class="landing-note">
+            See the
+            <a href="${e(QUALIFYING_CONTENT_IDS_README_URL)}" target="_blank" rel="noopener"
+                >full qualification conditions</a
+            >
+            for the exact checks and common failure modes.
+        </p>
+    </section>
+
+    <section class="landing-card landing-resources">
+        <h2 class="landing-heading">Explore &amp; resources</h2>
+        <table class="landing-resources-table">
+            <thead>
+                <tr>
+                    <th scope="col">Resource</th>
+                    <th scope="col">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th scope="row"><a href="?view=dashboard">Pipeline Results dashboard</a></th>
+                    <td>Browse processing runs across Dandisets.</td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="${e(PIPELINE_REPO_URL)}" target="_blank" rel="noopener">AIND Ephys pipeline</a>
+                    </th>
+                    <td>The electrophysiology processing pipeline itself.</td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="${e(CODE_REPO_URL)}" target="_blank" rel="noopener">DANDI Compute code</a>
+                    </th>
+                    <td>The compute codebase driving these runs.</td>
+                </tr>
+                <tr>
+                    <th scope="row">
+                        <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>
+                    </th>
+                    <td>The neural data archive backing the project.</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+</div>`;
+}
+
+// Render the static landing page into the shared content region.
+function loadLandingPage() {
+    document.getElementById("runs").innerHTML = renderLandingPage();
+    showDiffResults();
+}
+
 /* ─── Queue data loader ─────────────────────────────────────── */
 // Fetches, processes, and renders the queue state for the current view.
 // Only applies to the dashboard queue views ("main", "tests", and "archive");
@@ -4389,6 +4480,18 @@ async function init() {
     initTheme();
     initModal();
     syncTopNav(_viewMode);
+
+    // The landing page is the default view (no `view` param). It has no queue
+    // data or registries to load, so render it and return before the queue path.
+    if (_viewMode === null) {
+        setPageCopy(
+            "Welcome to DANDI Compute: AIND Ephys",
+            'An experiment in reproducible electrophysiology processing on the <a href="https://dandiarchive.org" target="_blank" rel="noopener">DANDI Archive</a>.'
+        );
+        loadLandingPage();
+        return;
+    }
+
     if (_viewMode === "compare") {
         setPageCopy(
             "AIND Pipeline Diffs Index",
@@ -4498,6 +4601,7 @@ if (typeof module !== "undefined" && module.exports) {
         normalizeRegistryEntries,
         renderParamsGroup,
         renderDiffPage,
+        renderLandingPage,
         renderFilterBanner,
         renderSummary,
         renderFlatList,
