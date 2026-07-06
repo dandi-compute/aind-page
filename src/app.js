@@ -63,7 +63,9 @@ let _sortDirection = "desc";
 let _filteredRuns = [];
 
 function parseViewMode() {
-    return new URLSearchParams(window.location.search).get("view") ?? null;
+    const rawView = new URLSearchParams(window.location.search).get("view");
+    const allowedViews = new Set(["compare", "params", "tests", "archive"]);
+    return allowedViews.has(rawView) ? rawView : null;
 }
 
 function syncTopNav(viewMode = parseViewMode()) {
