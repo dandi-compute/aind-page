@@ -2899,7 +2899,6 @@ a.prov-hash-link:hover {
     padding: 1px 5px;
 }
 
-.landing-list,
 .landing-conditions,
 .landing-links {
     margin: 0 0 12px;
@@ -2907,7 +2906,6 @@ a.prov-hash-link:hover {
     color: var(--color-text-secondary);
 }
 
-.landing-list li,
 .landing-conditions li,
 .landing-links li {
     margin: 6px 0;
