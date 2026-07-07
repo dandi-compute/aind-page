@@ -664,6 +664,10 @@ const SUN_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy
 const ETAG_CACHE_PREFIX = "aind_etag:";
 
 async function cachedFetch(url, init = {}) {
+    // Content-addressed S3 blobs are immutable: a cache hit never needs
+    // revalidation, so skip the conditional-GET machinery entirely.
+    if (isImmutableBlobUrl(url)) return blobCachedFetch(url, init);
+
     const cacheKey = ETAG_CACHE_PREFIX + url;
     let cached = null;
     try {
@@ -702,6 +706,114 @@ async function cachedFetch(url, init = {}) {
     }
 
     return new Response(body, { status: resp.status, headers: { "Content-Type": contentType } });
+}
+
+/* ─── Immutable S3 blob cache ───────────────────────────────── */
+// DANDI S3 blob URLs are content-addressed (the blob id is a content hash), so
+// the body behind a given URL can never change — a re-run surfaces as new blob
+// ids in the queue state. Cached blobs therefore never need revalidation and
+// are stored persistently in the Cache API (large quota, shared across
+// tabs/sessions), with the sessionStorage ETag-cache format as a fallback for
+// contexts without CacheStorage. A per-page memory Map sits on top so repeat
+// loads in the same tab (e.g. the manual queue refresh) skip storage entirely.
+// Every cache operation is best-effort: failures fall through to the network.
+const BLOB_CACHE_NAME = "aind-blobs-v1";
+const BLOB_MEMORY_CACHE_MAX_BODY = 512 * 1024; // keep huge bodies out of the Map
+const _blobMemoryCache = new Map(); // url -> { body, contentType, status }
+
+function isImmutableBlobUrl(url) {
+    return typeof url === "string" && url.startsWith(`${S3_BLOB_BASE}/`);
+}
+
+async function openBlobCache() {
+    if (typeof caches === "undefined") return null;
+    try {
+        return await caches.open(BLOB_CACHE_NAME);
+    } catch {
+        return null; // insecure context or storage restrictions
+    }
+}
+
+// Drop persistent blob caches left behind by older cache-name versions.
+function pruneStaleBlobCaches() {
+    if (typeof caches === "undefined") return;
+    caches
+        .keys()
+        .then((names) =>
+            Promise.all(
+                names
+                    .filter((name) => name.startsWith("aind-blobs-") && name !== BLOB_CACHE_NAME)
+                    .map((name) => caches.delete(name))
+            )
+        )
+        .catch(() => {});
+}
+
+function blobResponse({ body, contentType, status }) {
+    return new Response(body, { status: status ?? 200, headers: { "Content-Type": contentType ?? "" } });
+}
+
+async function readCachedBlob(url) {
+    const memoryHit = _blobMemoryCache.get(url);
+    if (memoryHit) return blobResponse(memoryHit);
+
+    const cache = await openBlobCache();
+    if (cache) {
+        try {
+            const match = await cache.match(url);
+            if (match) {
+                const entry = {
+                    body: await match.text(),
+                    contentType: match.headers.get("Content-Type") ?? "",
+                    status: match.status,
+                };
+                if (entry.body.length <= BLOB_MEMORY_CACHE_MAX_BODY) _blobMemoryCache.set(url, entry);
+                return blobResponse(entry);
+            }
+        } catch {
+            /* fall through to the sessionStorage fallback */
+        }
+    }
+
+    try {
+        const raw = sessionStorage.getItem(ETAG_CACHE_PREFIX + url);
+        if (raw) return blobResponse(JSON.parse(raw));
+    } catch {
+        /* sessionStorage unavailable or parse error */
+    }
+    return null;
+}
+
+function writeCachedBlob(url, body, contentType, status) {
+    const entry = { body, contentType, status };
+    if (body.length <= BLOB_MEMORY_CACHE_MAX_BODY) _blobMemoryCache.set(url, entry);
+
+    if (typeof caches !== "undefined") {
+        openBlobCache()
+            .then((cache) => cache?.put(url, blobResponse(entry)))
+            .catch(() => {});
+        return;
+    }
+    // No CacheStorage: fall back to the sessionStorage ETag-cache format so the
+    // entry is still readable by readCachedBlob (no etag → no revalidation).
+    try {
+        sessionStorage.setItem(ETAG_CACHE_PREFIX + url, JSON.stringify(entry));
+    } catch {
+        /* Ignore storage errors (e.g., quota exceeded) */
+    }
+}
+
+async function blobCachedFetch(url, init = {}) {
+    const hit = await readCachedBlob(url);
+    if (hit) return hit;
+
+    const resp = await fetch(url, init); // plain GET: no If-None-Match needed
+    if (!resp.ok) return resp; // never cache failures
+
+    const body = await resp.text();
+    const contentType = resp.headers.get("Content-Type") ?? "";
+    writeCachedBlob(url, body, contentType, resp.status);
+    return blobResponse({ body, contentType, status: resp.status });
 }
 
 function normalizeRegistryEntries(registryEntries) {
@@ -750,6 +862,17 @@ async function loadAindPipelineRegistries() {
         console.warn(configResult.reason?.message ?? "Failed to load config registry.");
     }
     return { paramsRegistry: PARAMS_REGISTRY, configRegistry: CONFIG_REGISTRY };
+}
+
+// Memoized registry load so init() and loadQueueData() can share one in-flight
+// fetch; kicked off without await so it overlaps the queue-state/blob fetches.
+// loadAindPipelineRegistries never rejects (it warns and falls back to raw
+// values), so awaiting this promise cannot introduce a new failure mode.
+let _registriesReady = null;
+
+function ensureRegistriesLoaded() {
+    if (!_registriesReady) _registriesReady = loadAindPipelineRegistries();
+    return _registriesReady;
 }
 
 /* ─── Data fetching ─────────────────────────────────────────── */
@@ -1302,7 +1425,7 @@ function renderSummary(runs) {
    key/value view. Dandiset-id entries link into the filtered dashboard.       */
 async function fetchQueueConfig() {
     try {
-        const resp = await fetch(QUEUE_CONFIG_URL, { cache: "no-cache" });
+        const resp = await cachedFetch(QUEUE_CONFIG_URL);
         if (!resp.ok) return null;
         return await resp.json();
     } catch {
@@ -3395,6 +3518,9 @@ function initLayoutToggle() {
         }
         const refreshBtn = ev.target.closest("[data-refresh-queue]");
         if (!refreshBtn) return;
+        // Only the queue/archive state caches are cleared: per-run S3 blobs are
+        // content-addressed (immutable), so new results always arrive as new
+        // blob URLs in the freshly fetched state.
         clearQueueStateCache();
         loadQueueData();
     });
@@ -4357,6 +4483,9 @@ async function loadQueueData() {
     renderFilterBanner(parseFilter(), []);
 
     try {
+        // Registries are only consumed at filter/render time, so let their
+        // fetch overlap the queue-state download and the per-run blob fan-out.
+        const registriesReady = ensureRegistriesLoaded();
         const entries = _viewMode === "archive" ? await fetchArchiveState() : await fetchQueueState();
         const runs = parseQueueEntries(entries);
 
@@ -4416,6 +4545,10 @@ async function loadQueueData() {
                 };
             })
         );
+
+        // Params/config alias resolution (filtering, registry links) needs the
+        // registries from here on.
+        await registriesReady;
 
         const sortedRuns = sortRuns(runsWithStatus, parseSortMode());
 
@@ -4512,11 +4645,12 @@ async function init() {
     }
 
     showLoading();
-    if (_viewMode !== "params") {
-        await loadAindPipelineRegistries();
-    }
+    pruneStaleBlobCaches();
     if (_viewMode === "compare") {
         try {
+            // The compare page consumes the registries up front (params/config
+            // entries), unlike the queue views which overlap the fetch.
+            await ensureRegistriesLoaded();
             const entries = await fetchQueueState();
             const runs = parseQueueEntries(entries);
             const pipelineEntries = await buildPipelineCompareEntries(runs);
@@ -4569,9 +4703,13 @@ if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         applyFilter,
         buildRunPath,
+        cachedFetch,
         classifyFailedTaskStep,
         clearQueueStateCache,
+        ensureRegistriesLoaded,
+        fetchQueueConfig,
         fetchQueueState,
+        isImmutableBlobUrl,
         fetchArchiveState,
         archiveStateCacheKey,
         fetchSlurmLogs,
