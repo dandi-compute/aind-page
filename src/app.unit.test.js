@@ -3,11 +3,15 @@ const {
     buildRunPath,
     buildPipelineDiffPairs,
     buildParamsCompareEntries,
+    cachedFetch,
     classifyFailedTaskStep,
     clearQueueStateCache,
     collectJsonDiffs,
     collectTextDiffs,
+    ensureRegistriesLoaded,
+    fetchQueueConfig,
     fetchQueueState,
+    isImmutableBlobUrl,
     fetchArchiveState,
     archiveStateCacheKey,
     fetchSlurmLogs,
@@ -2820,5 +2824,204 @@ describe("clearQueueStateCache", () => {
         clearQueueStateCache();
         expect(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY)).toBeNull();
         expect(sessionStorage.getItem("other-key")).toBe("other-value");
+    });
+});
+
+describe("cachedFetch immutable blob cache", () => {
+    // Each test uses a unique blob id so the module-level in-memory blob cache
+    // never leaks state between tests.
+    let blobCounter = 0;
+    function uniqueBlobUrl() {
+        const id = `abcdef${String(blobCounter++).padStart(34, "0")}`;
+        return `https://dandiarchive.s3.amazonaws.com/blobs/${id.slice(0, 3)}/${id.slice(3, 6)}/${id}`;
+    }
+
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        delete global.caches;
+        sessionStorage.clear();
+    });
+
+    it("recognizes S3 blob URLs as immutable", () => {
+        expect(isImmutableBlobUrl("https://dandiarchive.s3.amazonaws.com/blobs/abc/def/abcdef123")).toBe(true);
+        expect(isImmutableBlobUrl("https://raw.githubusercontent.com/dandi-compute/code/main/x.json")).toBe(false);
+        expect(isImmutableBlobUrl(null)).toBe(false);
+    });
+
+    it("fetches a blob once and serves repeat requests from cache without network", async () => {
+        const url = uniqueBlobUrl();
+        global.fetch = vi
+            .fn()
+            .mockResolvedValue(new Response("blob-body", { status: 200, headers: { "Content-Type": "text/plain" } }));
+
+        const first = await cachedFetch(url);
+        expect(await first.text()).toBe("blob-body");
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        // Plain GET: no If-None-Match revalidation header on blob requests.
+        const init = global.fetch.mock.calls[0][1];
+        expect(init?.headers?.get?.("If-None-Match") ?? null).toBeNull();
+
+        const second = await cachedFetch(url);
+        expect(await second.text()).toBe("blob-body");
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("serves a blob from a pre-existing sessionStorage entry without any fetch", async () => {
+        const url = uniqueBlobUrl();
+        sessionStorage.setItem(
+            "aind_etag:" + url,
+            JSON.stringify({ etag: '"v1"', body: "warm-body", contentType: "text/plain", status: 200 })
+        );
+        global.fetch = vi.fn();
+
+        const resp = await cachedFetch(url);
+
+        expect(await resp.text()).toBe("warm-body");
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("still revalidates non-blob URLs with If-None-Match", async () => {
+        const url = "https://raw.githubusercontent.com/dandi-compute/code/main/some.json";
+        sessionStorage.setItem(
+            "aind_etag:" + url,
+            JSON.stringify({ etag: '"v1"', body: '{"a":1}', contentType: "application/json", status: 200 })
+        );
+        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
+
+        const resp = await cachedFetch(url);
+
+        expect(await resp.json()).toEqual({ a: 1 });
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const [, init] = global.fetch.mock.calls[0];
+        expect(init.headers.get("If-None-Match")).toBe('"v1"');
+    });
+
+    it("stores fetched blobs in the Cache API when available", async () => {
+        const url = uniqueBlobUrl();
+        const fakeCache = { match: vi.fn().mockResolvedValue(undefined), put: vi.fn().mockResolvedValue(undefined) };
+        global.caches = { open: vi.fn().mockResolvedValue(fakeCache) };
+        global.fetch = vi.fn().mockResolvedValue(new Response("api-body", { status: 200 }));
+
+        const resp = await cachedFetch(url);
+        expect(await resp.text()).toBe("api-body");
+
+        // The Cache API write is fire-and-forget; allow it to settle.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(fakeCache.put).toHaveBeenCalledTimes(1);
+        expect(fakeCache.put.mock.calls[0][0]).toBe(url);
+        // Cache API path is used instead of sessionStorage.
+        expect(sessionStorage.getItem("aind_etag:" + url)).toBeNull();
+    });
+
+    it("serves a blob from the Cache API without any fetch", async () => {
+        const url = uniqueBlobUrl();
+        const cachedResp = new Response("cached-api-body", {
+            status: 200,
+            headers: { "Content-Type": "text/plain" },
+        });
+        const fakeCache = { match: vi.fn().mockResolvedValue(cachedResp), put: vi.fn() };
+        global.caches = { open: vi.fn().mockResolvedValue(fakeCache) };
+        global.fetch = vi.fn();
+
+        const resp = await cachedFetch(url);
+
+        expect(await resp.text()).toBe("cached-api-body");
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the network when Cache API operations fail", async () => {
+        const url = uniqueBlobUrl();
+        global.caches = { open: vi.fn().mockRejectedValue(new Error("denied")) };
+        global.fetch = vi.fn().mockResolvedValue(new Response("net-body", { status: 200 }));
+
+        const resp = await cachedFetch(url);
+        expect(await resp.text()).toBe("net-body");
+
+        const url2 = uniqueBlobUrl();
+        global.caches = {
+            open: vi.fn().mockResolvedValue({ match: vi.fn().mockRejectedValue(new Error("boom")), put: vi.fn() }),
+        };
+        global.fetch = vi.fn().mockResolvedValue(new Response("net-body-2", { status: 200 }));
+        const resp2 = await cachedFetch(url2);
+        expect(await resp2.text()).toBe("net-body-2");
+    });
+
+    it("returns non-ok blob responses as-is without caching them", async () => {
+        const url = uniqueBlobUrl();
+        global.fetch = vi
+            .fn()
+            .mockResolvedValueOnce(new Response(null, { status: 404 }))
+            .mockResolvedValueOnce(new Response("late-body", { status: 200 }));
+
+        const first = await cachedFetch(url);
+        expect(first.ok).toBe(false);
+        expect(first.status).toBe(404);
+
+        const second = await cachedFetch(url);
+        expect(await second.text()).toBe("late-body");
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("fetchQueueConfig", () => {
+    let originalFetch;
+
+    beforeEach(() => {
+        sessionStorage.clear();
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+    });
+
+    it("fetches and parses the queue config through cachedFetch (no cache: no-cache opt-out)", async () => {
+        global.fetch = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify({ priorities: ["000409"] }), {
+                status: 200,
+                headers: { "Content-Type": "application/json", ETag: '"cfg-v1"' },
+            })
+        );
+
+        const config = await fetchQueueConfig();
+
+        expect(config).toEqual({ priorities: ["000409"] });
+        const [url, init] = global.fetch.mock.calls[0];
+        expect(init.cache).toBeUndefined();
+        // ETag-cached like other mutable sources, enabling 304 revalidation.
+        expect(JSON.parse(sessionStorage.getItem("aind_etag:" + url)).etag).toBe('"cfg-v1"');
+    });
+
+    it("returns null on fetch failure", async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error("network down"));
+        expect(await fetchQueueConfig()).toBeNull();
+    });
+});
+
+describe("ensureRegistriesLoaded", () => {
+    it("memoizes the registry load across concurrent callers", async () => {
+        const originalFetch = global.fetch;
+        global.fetch = vi
+            .fn()
+            .mockResolvedValue(new Response(JSON.stringify(REGISTERED_PARAMS_FIXTURE), { status: 200 }));
+        try {
+            const [first, second] = await Promise.all([ensureRegistriesLoaded(), ensureRegistriesLoaded()]);
+            expect(first).toBe(second);
+            // One params + one config fetch in total, not per caller.
+            expect(global.fetch.mock.calls.length).toBeLessThanOrEqual(2);
+
+            await ensureRegistriesLoaded();
+            expect(global.fetch.mock.calls.length).toBeLessThanOrEqual(2);
+        } finally {
+            global.fetch = originalFetch;
+        }
     });
 });
