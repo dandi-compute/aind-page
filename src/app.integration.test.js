@@ -730,7 +730,10 @@ describe("progressive queue loading", () => {
             installFetch(
                 new Map([
                     [urls.trace, () => new Response(TRACE_OK, { status: 200 })],
-                    [reportUrl, () => new Response("<html><head></head><body>report row</body></html>", { status: 200 })],
+                    [
+                        reportUrl,
+                        () => new Response("<html><head></head><body>report row</body></html>", { status: 200 }),
+                    ],
                 ])
             );
 
@@ -739,7 +742,7 @@ describe("progressive queue loading", () => {
 
             // The Reports section rendered an iframe shell, but the (potentially
             // multi-MB) report content must not have been fetched yet.
-            const iframe = document.querySelector('iframe[data-srcdoc-url]');
+            const iframe = document.querySelector("iframe[data-srcdoc-url]");
             expect(iframe).not.toBeNull();
             expect(blobRequests()).not.toContain(reportUrl);
             expect(iframe.getAttribute("srcdoc")).toBeNull();
