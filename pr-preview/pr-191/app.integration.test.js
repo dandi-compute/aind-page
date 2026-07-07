@@ -717,6 +717,48 @@ describe("progressive queue loading", () => {
         expect(document.querySelector(".gbadge-success").className).not.toContain("status-provisional");
     });
 
+    it("fetches inline report content only when its section is revealed", async () => {
+        const rafOriginal = global.requestAnimationFrame;
+        global.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+        try {
+            const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId() });
+            const reportId = newBlobId();
+            const [probe] = parseQueueEntries([entry]);
+            entry.output_paths[`${probe.path}/logs/report.html`] = reportId;
+            const reportUrl = blobUrlFor(reportId);
+            seedQueueState([entry]);
+            installFetch(
+                new Map([
+                    [urls.trace, () => new Response(TRACE_OK, { status: 200 })],
+                    [reportUrl, () => new Response("<html><head></head><body>report row</body></html>", { status: 200 })],
+                ])
+            );
+
+            await loadQueueData();
+            await hydrationIdle();
+
+            // The Reports section rendered an iframe shell, but the (potentially
+            // multi-MB) report content must not have been fetched yet.
+            const iframe = document.querySelector('iframe[data-srcdoc-url]');
+            expect(iframe).not.toBeNull();
+            expect(blobRequests()).not.toContain(reportUrl);
+            expect(iframe.getAttribute("srcdoc")).toBeNull();
+
+            // Reveal the Reports section through the real toggle path.
+            const section = document.querySelector('details[data-section="reports"]');
+            section.open = true;
+            section.dispatchEvent(new Event("toggle"));
+            await new Promise((r) => setTimeout(r, 0)); // rAF stub tick
+            await new Promise((r) => setTimeout(r, 0)); // fetch + patch settle
+            await new Promise((r) => setTimeout(r, 0));
+
+            expect(blobRequests()).toContain(reportUrl);
+            expect(iframe.getAttribute("srcdoc")).toContain("report row");
+        } finally {
+            global.requestAnimationFrame = rafOriginal;
+        }
+    });
+
     it("supersedes stale hydration when the queue is reloaded mid-flight", async () => {
         const first = withArtifacts(makeEntry(), { trace: newBlobId() });
         seedQueueState([first.entry]);
