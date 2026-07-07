@@ -1,4 +1,17 @@
-const { renderFilterBanner, renderSummary, showDiffResults, showError, showLoading, showResults } = require("./app");
+const {
+    cancelHydration,
+    hydrationIdle,
+    initHydrationPromotion,
+    loadQueueData,
+    parseQueueEntries,
+    queueStateCacheKey,
+    renderFilterBanner,
+    renderSummary,
+    showDiffResults,
+    showError,
+    showLoading,
+    showResults,
+} = require("./app");
 
 beforeEach(() => {
     document.body.innerHTML = `
@@ -128,7 +141,7 @@ describe("app integration behavior", () => {
         expect(summaryHtml).toContain("stat-stalled");
         expect(summaryHtml).toContain("Stalled");
         expect(summaryHtml).toContain("⚠ 1");
-        expect(summaryHtml).toContain('status=stalled');
+        expect(summaryHtml).toContain("status=stalled");
     });
 
     it("hides stalled counter when no running runs exceed 24 hours", () => {
@@ -346,5 +359,268 @@ describe("app integration behavior", () => {
             (option) => option.value
         );
         expect(sessionOptions).toEqual(["ses-1"]);
+    });
+});
+
+describe("progressive queue loading", () => {
+    const QUEUE_KEY = queueStateCacheKey();
+    let blobCounter = 0;
+    let originalFetch;
+
+    const newBlobId = () => `zz${String(blobCounter++).padStart(30, "0")}`;
+    const blobUrlFor = (id) => `https://dandiarchive.s3.amazonaws.com/blobs/${id.slice(0, 3)}/${id.slice(3, 6)}/${id}`;
+
+    function deferred() {
+        let resolve;
+        const promise = new Promise((r) => (resolve = r));
+        return { promise, resolve };
+    }
+
+    function makeEntry(overrides = {}) {
+        return {
+            dandiset_id: "000777",
+            subject: "sub1",
+            session: "ses1",
+            pipeline: "aind+ephys",
+            version: "v1.2.4",
+            params: "1cbdbee",
+            config: "7940dfd",
+            attempt: 1,
+            has_code: true,
+            has_been_submitted: true,
+            has_output: true,
+            has_logs: true,
+            ...overrides,
+        };
+    }
+
+    // Attach blob-backed artifacts under the entry's computed run path and
+    // return { entry, urls } with the resolvable blob URL per artifact.
+    function withArtifacts(entry, ids = {}) {
+        const [probe] = parseQueueEntries([entry]);
+        const p = probe.path;
+        const urls = {};
+        entry.output_paths = { ...(entry.output_paths ?? {}) };
+        if (ids.trace) {
+            entry.output_paths[`${p}/logs/trace.txt`] = ids.trace;
+            urls.trace = blobUrlFor(ids.trace);
+        }
+        if (ids.png) entry.output_paths[`${p}/derivatives/visualization/summary/psd.png`] = ids.png;
+        return { entry, urls, path: p };
+    }
+
+    function seedQueueState(entries) {
+        sessionStorage.setItem(
+            QUEUE_KEY,
+            JSON.stringify({ etag: '"state-etag"', body: entries.map((x) => JSON.stringify(x)).join("\n") })
+        );
+    }
+
+    // Route the app's fetches: queue state revalidates against the seeded
+    // sessionStorage entry (304), registries resolve to a minimal fixture, and
+    // S3 blob URLs are served by the per-test handler map.
+    function installFetch(blobHandlers) {
+        global.fetch = vi.fn(async (url) => {
+            const u = String(url);
+            if (u.includes("state.jsonl.gz")) return new Response(null, { status: 304 });
+            if (u.includes("registered_params.json") || u.includes("registered_configs.json")) {
+                return new Response(
+                    JSON.stringify({ default: { path: "p.json", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" } }),
+                    { status: 200 }
+                );
+            }
+            const handler = blobHandlers.get(u);
+            if (handler) return handler();
+            return new Response(null, { status: 404 });
+        });
+    }
+
+    const blobRequests = () =>
+        global.fetch.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("dandiarchive.s3.amazonaws.com"));
+
+    const TRACE_OK =
+        "task_id\tname\tstatus\texit\n1\tjob_dispatch (1)\tCOMPLETED\t0\n2\tpreprocessing (1)\tCOMPLETED\t0";
+    const TRACE_FAILED_PRE =
+        "task_id\tname\tstatus\texit\n1\tjob_dispatch (1)\tCOMPLETED\t0\n2\tpreprocessing (1)\tFAILED\t1";
+
+    beforeEach(() => {
+        cancelHydration();
+        sessionStorage.clear();
+        // Earlier tests in this file set filter query params without resetting.
+        window.history.replaceState(null, "", "/");
+        originalFetch = global.fetch;
+    });
+
+    afterEach(async () => {
+        cancelHydration();
+        global.fetch = originalFetch;
+        sessionStorage.clear();
+        localStorage.clear();
+        window.history.replaceState(null, "", "/");
+    });
+
+    it("renders instantly from the state file while blob fetches are still pending", async () => {
+        const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId() });
+        seedQueueState([entry]);
+        installFetch(new Map([[urls.trace, () => new Promise(() => {})]])); // trace never resolves
+
+        await loadQueueData();
+
+        const card = document.querySelector("#runs .run-entry");
+        expect(card).not.toBeNull();
+        expect(card.className).toContain("status-success"); // has_output flag, no trace needed
+        expect(card.dataset.runKey).toBeTruthy();
+        expect(document.getElementById("runs").style.display).toBe("");
+        expect(document.getElementById("summary").innerHTML).toContain("Total Runs");
+    });
+
+    it("refines status via hydration without collapsing open sections", async () => {
+        const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId(), png: newBlobId() });
+        seedQueueState([entry]);
+        const trace = deferred();
+        installFetch(new Map([[urls.trace, () => trace.promise]]));
+
+        await loadQueueData();
+
+        const before = document.querySelector("#runs .run-entry");
+        expect(before.className).toContain("status-success");
+        expect(before.querySelector('details[data-section="trace"]')).toBeNull(); // no tasks yet
+        const viz = before.querySelector('details[data-section="viz"]');
+        expect(viz).not.toBeNull(); // sync-derived from output_paths
+        viz.open = true;
+
+        trace.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
+        await hydrationIdle();
+
+        const after = document.querySelector("#runs .run-entry");
+        expect(after.className).toContain("status-failed"); // trace refined success → failed
+        expect(after.querySelector('details[data-section="trace"]')).not.toBeNull();
+        expect(after.querySelector('details[data-section="viz"]').open).toBe(true); // preserved
+        expect(after.dataset.runKey).toBe(before.dataset.runKey);
+        expect(document.querySelector("#summary .stat-failed .stat-value").textContent.trim()).toBe("1");
+    });
+
+    it("treats an explicit upstream status as authoritative over the trace", async () => {
+        const { entry, urls } = withArtifacts(makeEntry({ status: "failed", failure_step: "post-processing" }), {
+            trace: newBlobId(),
+        });
+        seedQueueState([entry]);
+        installFetch(new Map([[urls.trace, () => new Response(TRACE_OK, { status: 200 })]]));
+
+        await loadQueueData();
+        expect(document.querySelector("#runs .run-entry").className).toContain("status-failed");
+
+        await hydrationIdle();
+        // The all-COMPLETED trace must not override the upstream verdict.
+        expect(document.querySelector("#runs .run-entry").className).toContain("status-failed");
+    });
+
+    it("promotes an expanded run to the front of the hydration queue", async () => {
+        const handlers = new Map();
+        const entries = [];
+        const runsMeta = [];
+        for (let i = 0; i < 6; i++) {
+            const { entry, urls, path } = withArtifacts(
+                makeEntry({ subject: `sub${i}`, has_output: false, has_logs: true }),
+                { trace: newBlobId() }
+            );
+            const gate = deferred();
+            handlers.set(urls.trace, () => gate.promise);
+            entries.push(entry);
+            runsMeta.push({ path, url: urls.trace, gate });
+        }
+        seedQueueState(entries);
+        installFetch(handlers);
+        initHydrationPromotion();
+
+        await loadQueueData();
+        await Promise.resolve(); // let the first worker wave issue its fetches
+
+        const started = blobRequests();
+        expect(started).toHaveLength(3); // HYDRATION_CONCURRENCY
+        const pending = runsMeta.filter((m) => !started.includes(m.url));
+        const promoted = pending[pending.length - 1];
+
+        // Open a section on the promoted run's card through the real toggle path.
+        const card = Array.from(document.querySelectorAll("[data-run-key]")).find(
+            (el) => el.dataset.runKey === promoted.path
+        );
+        expect(card).not.toBeNull();
+        const section = card.querySelector("details");
+        section.open = true;
+        section.dispatchEvent(new Event("toggle"));
+
+        // Free one worker; it must pick up the promoted run next.
+        const firstStarted = runsMeta.find((m) => m.url === started[0]);
+        firstStarted.gate.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
+        await vi.waitFor(() => {
+            if (!blobRequests().includes(promoted.url)) throw new Error("promoted run not yet fetched");
+        });
+        expect(blobRequests()[3]).toBe(promoted.url);
+
+        for (const m of runsMeta) m.gate.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
+        await hydrationIdle();
+    });
+
+    it("brings runs into an active failure-step filter as hydration lands", async () => {
+        window.history.replaceState(null, "", "/?failureStep=pre-processing");
+        const { entry, urls } = withArtifacts(makeEntry({ has_output: false, has_logs: true }), {
+            trace: newBlobId(),
+        });
+        seedQueueState([entry]);
+        const trace = deferred();
+        installFetch(new Map([[urls.trace, () => trace.promise]]));
+
+        await loadQueueData();
+
+        // failureStep is unknown pre-hydration, so nothing matches yet.
+        expect(document.getElementById("error").innerHTML).toContain("No pipeline runs match");
+        expect(document.getElementById("runs").style.display).toBe("none");
+
+        trace.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
+        await hydrationIdle();
+
+        expect(document.getElementById("error").style.display).toBe("none");
+        expect(document.getElementById("runs").style.display).toBe("");
+        expect(document.querySelector("#runs .run-entry").className).toContain("status-failed");
+    });
+
+    it("drops runs out of an active status filter when hydration refutes it", async () => {
+        window.history.replaceState(null, "", "/?status=success");
+        const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId() });
+        seedQueueState([entry]);
+        const trace = deferred();
+        installFetch(new Map([[urls.trace, () => trace.promise]]));
+
+        await loadQueueData();
+        expect(document.querySelector("#runs .run-entry")).not.toBeNull(); // flag status matches
+
+        trace.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
+        await hydrationIdle();
+
+        expect(document.getElementById("error").innerHTML).toContain("No pipeline runs match");
+        expect(document.getElementById("runs").style.display).toBe("none");
+    });
+
+    it("supersedes stale hydration when the queue is reloaded mid-flight", async () => {
+        const first = withArtifacts(makeEntry(), { trace: newBlobId() });
+        seedQueueState([first.entry]);
+        const staleTrace = deferred();
+        const handlers = new Map([[first.urls.trace, () => staleTrace.promise]]);
+        installFetch(handlers);
+        await loadQueueData(); // generation 1: trace hangs
+
+        // The run re-ran upstream: same identity, new content-addressed blob.
+        const second = withArtifacts(makeEntry(), { trace: newBlobId() });
+        handlers.set(second.urls.trace, () => new Response(TRACE_OK, { status: 200 }));
+        seedQueueState([second.entry]);
+        await loadQueueData(); // generation 2
+        await hydrationIdle();
+        expect(document.querySelector("#runs .run-entry").className).toContain("status-success");
+
+        // The stale generation-1 result must not touch the fresh DOM.
+        staleTrace.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(document.querySelector("#runs .run-entry").className).toContain("status-success");
     });
 });
