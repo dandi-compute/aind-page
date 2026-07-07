@@ -349,6 +349,18 @@ describe("app unit behavior", () => {
         expect(applyFilter(runs, { status: "running" })).toEqual([{ status: "running", id: 4 }]);
     });
 
+    it("excludes stalled runs from the running status filter", () => {
+        const stalledCreatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+        const recentCreatedAt = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+        const runs = [
+            { status: "running", createdAt: stalledCreatedAt, id: 1 },
+            { status: "running", createdAt: recentCreatedAt, id: 2 },
+        ];
+
+        expect(applyFilter(runs, { status: "running" })).toEqual([runs[1]]);
+        expect(applyFilter(runs, { status: "stalled" })).toEqual([runs[0]]);
+    });
+
     it("filters runs by params/config types and dandi codebase hash", async () => {
         await loadFixtureRegistries();
         const runs = [

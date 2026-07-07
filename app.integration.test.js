@@ -144,6 +144,23 @@ describe("app integration behavior", () => {
         expect(summaryHtml).toContain("status=stalled");
     });
 
+    it("does not double count stalled runs as running", () => {
+        const stalledCreatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+        const recentCreatedAt = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+        renderSummary([
+            { status: "running", createdAt: stalledCreatedAt },
+            { status: "running", createdAt: stalledCreatedAt },
+            { status: "running", createdAt: recentCreatedAt },
+        ]);
+
+        const summary = document.getElementById("summary");
+        const runningValue = summary.querySelector(".stat-running .stat-value").textContent;
+        const stalledValue = summary.querySelector(".stat-stalled .stat-value").textContent;
+        expect(runningValue).toBe("1");
+        expect(stalledValue).toBe("⚠ 2");
+        expect(summary.innerHTML).not.toContain("Unknown");
+    });
+
     it("hides stalled counter when no running runs exceed 24 hours", () => {
         const recentCreatedAt = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
         renderSummary([{ status: "running", createdAt: recentCreatedAt }]);

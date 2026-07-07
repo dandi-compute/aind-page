@@ -297,6 +297,8 @@ function applyFilter(runs, filter) {
         if (filter.assetSize && !matchesAssetSizeExpr(r, filter.assetSize)) return false;
         if (normalizedFilterStatus === "stalled") {
             if (!isStalled(r)) return false;
+        } else if (normalizedFilterStatus === "running") {
+            if (String(r.status).toLowerCase() !== "running" || isStalled(r)) return false;
         } else if (normalizedFilterStatus && String(r.status).toLowerCase() !== normalizedFilterStatus) return false;
         if (filter.failureStep) {
             if (!isFailedStatus(r.status)) return false;
@@ -1402,9 +1404,9 @@ function renderSummary(runs) {
     const success = runs.filter((r) => r.status === "success").length;
     const failed = runs.filter((r) => r.status === "failed").length;
     const queued = runs.filter((r) => r.status === "queued").length;
-    const running = runs.filter((r) => r.status === "running").length;
     const stalled = runs.filter(isStalled).length;
-    const unknown = total - success - failed - queued - running;
+    const running = runs.filter((r) => r.status === "running" && !isStalled(r)).length;
+    const unknown = total - success - failed - queued - running - stalled;
     const successfulRuns = runs.filter((run) => run.status === "success");
     const runsWithKnownByteCounts = successfulRuns.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(successfulRuns);
