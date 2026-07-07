@@ -3863,14 +3863,20 @@ let _inlineFrameListenerInstalled = false;
 
 // _framePatchedContent holds the fully-patched HTML for each iframe, populated
 // asynchronously; _frameInjected tracks which iframes already had their srcdoc
-// set. srcdoc is set lazily: only once the iframe's parent <details> is open
-// (visible), so that chart libraries (e.g. Highcharts in timeline.html) render
-// in a non-zero container and avoid producing invalid negative <rect> widths in
-// the browser console. Module-level (weak, so replaced cards' frames drop out)
-// because toggle listeners and content fetches can come from different
-// initInlineHtmlFrames invocations.
+// set; _frameFetching dedups in-flight content fetches. Report HTML is fetched
+// AND injected lazily — only once the iframe is no longer inside a closed
+// <details>. Fetch-on-reveal matters as much as inject-on-reveal: Nextflow
+// report/timeline files run to megabytes each, so eagerly fetching them for
+// every run both floods the S3 connection pool (starving the trace/status
+// hydration passes) and pins the whole queue's report HTML in memory at once —
+// enough to OOM the tab on large queues. Injection additionally waits for
+// visibility so chart libraries (e.g. Highcharts in timeline.html) render in a
+// non-zero container and avoid invalid negative <rect> widths. Module-level
+// (weak, so replaced cards' frames drop out) because toggle listeners and
+// content fetches can come from different initInlineHtmlFrames invocations.
 const _framePatchedContent = new WeakMap();
 const _frameInjected = new WeakSet();
+const _frameFetching = new WeakSet();
 
 function maybeInjectFrame(iframe) {
     if (_frameInjected.has(iframe)) return;
@@ -3878,6 +3884,63 @@ function maybeInjectFrame(iframe) {
     if (iframe.closest("details:not([open])")) return; // still inside a closed <details>
     _frameInjected.add(iframe);
     iframe.srcdoc = _framePatchedContent.get(iframe);
+}
+
+// The injected script reports scrollHeight on load AND responds to a
+// 'requestHeight' message from the parent. The parent re-requests when a
+// collapsed <details> is opened, because the iframe layout is zero-height
+// while the section is hidden. Sandboxed srcdoc iframes have opaque origin so
+// evt.origin === 'null'; we also verify evt.source is one of our known iframe
+// windows as an additional guard.
+const INLINE_FRAME_HEIGHT_SCRIPT = `<script>
+(function(){
+function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
+if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
+window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
+})();
+</script>`;
+
+// Injected into <head> for most reports: nudge the browser's default
+// color-scheme to light so any unset colors pick up readable dark-on-white
+// defaults. timeline.html (Nextflow-generated) has an *explicit* dark navy
+// background in its own CSS, so color-scheme alone cannot help — override
+// background + text explicitly for it.
+const INLINE_FRAME_LIGHT_STYLE = "<style>html{color-scheme:light;}</style>";
+const INLINE_FRAME_TIMELINE_LIGHT_STYLE =
+    "<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>";
+
+// Fetch, patch, and (once visible) inject one report iframe's content. Safe to
+// call repeatedly — in-flight and already-fetched frames are no-ops.
+async function ensureFrameContent(iframe) {
+    if (_frameInjected.has(iframe) || _frameFetching.has(iframe)) return;
+    if (_framePatchedContent.has(iframe)) return maybeInjectFrame(iframe);
+    _frameFetching.add(iframe);
+    try {
+        const content = await fetchLogText(iframe.dataset.srcdocUrl);
+        const html =
+            content !== null
+                ? content
+                : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
+        // Insert the light-mode override and height-reporter into the document.
+        // Prefer inserting the style in <head> and the script before </body>.
+        const isTimeline = iframe.dataset.srcdocName === "timeline.html";
+        const styleToInject = isTimeline ? INLINE_FRAME_TIMELINE_LIGHT_STYLE : INLINE_FRAME_LIGHT_STYLE;
+        const lcHtml = html.toLowerCase();
+        const headClose = lcHtml.indexOf("</head>");
+        const bodyClose = lcHtml.lastIndexOf("</body>");
+        let patched =
+            headClose !== -1 ? html.slice(0, headClose) + styleToInject + html.slice(headClose) : styleToInject + html;
+        // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
+        const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
+        patched =
+            adjustedBodyClose !== -1
+                ? patched.slice(0, adjustedBodyClose) + INLINE_FRAME_HEIGHT_SCRIPT + patched.slice(adjustedBodyClose)
+                : patched + INLINE_FRAME_HEIGHT_SCRIPT;
+        _framePatchedContent.set(iframe, patched);
+    } finally {
+        _frameFetching.delete(iframe);
+    }
+    maybeInjectFrame(iframe);
 }
 
 function ensureInlineFrameListener() {
@@ -3898,29 +3961,18 @@ function ensureInlineFrameListener() {
     });
 }
 
-/* Fetch and inject srcdoc for inline report iframes under `root` — the whole
-   document by default, or a single replaced run card during hydration. */
+/* Wire lazy fetch-and-inject for inline report iframes under `root` — the
+   whole document by default, or a single replaced run card during hydration.
+   Content is only fetched once an iframe is revealed (no closed <details>
+   ancestor), either immediately below or via the toggle listeners. */
 function initInlineHtmlFrames(root = document) {
     const frames = Array.from(root.querySelectorAll("iframe[data-srcdoc-url]"));
     for (const iframe of frames) _inlineFrameSet.add(iframe);
     ensureInlineFrameListener();
 
-    // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
-    // message from the parent. The parent re-requests when a collapsed <details> is opened,
-    // because the iframe layout is zero-height while the section is hidden.
-    // Sandboxed srcdoc iframes have opaque origin so evt.origin === 'null'; we also verify
-    // evt.source is one of our known iframe windows as an additional guard.
-    const heightScript = `<script>
-(function(){
-function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
-if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
-window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
-})();
-</script>`;
-
-    // When a <details> containing inline frames is opened, inject any pending frames
-    // whose content is already available, and request a fresh height measurement from
-    // frames that are already loaded. State lives at module level (see
+    // When a <details> containing inline frames is opened, fetch/inject any
+    // frames it reveals and request a fresh height measurement from frames
+    // that are already loaded. State lives at module level (see
     // _framePatchedContent) so listeners attached by one invocation (e.g. a
     // group opener from the initial render) also serve iframes registered by a
     // later one (e.g. a run card replaced during hydration).
@@ -3939,51 +3991,22 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
                             // The message contains no sensitive data ({type:'requestHeight'} only).
                             iframe.contentWindow.postMessage({ type: "requestHeight" }, "*");
                         }
-                    } else {
-                        maybeInjectFrame(iframe);
+                    } else if (!iframe.closest("details:not([open])")) {
+                        // Fetch only frames this open actually revealed — a
+                        // group opening must not pull reports for cards whose
+                        // Reports section is itself still closed.
+                        ensureFrameContent(iframe);
                     }
                 });
             });
         });
     });
 
-    // Injected into <head> for most reports: nudge the browser's default color-scheme to light
-    // so any unset colors pick up readable dark-on-white defaults.
-    const lightStyle = "<style>html{color-scheme:light;}</style>";
-    // timeline.html (Nextflow-generated) has an *explicit* dark navy background in its own CSS,
-    // so color-scheme alone cannot help — the dark background stays and light-scheme defaults
-    // produce dark text on dark background (invisible). Override background + text explicitly.
-    const timelineLightStyle =
-        "<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>";
-
-    Promise.all(
-        frames.map(async (iframe) => {
-            const content = await fetchLogText(iframe.dataset.srcdocUrl);
-            const html =
-                content !== null
-                    ? content
-                    : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
-            // Insert light-mode override and height-reporter into the document.
-            // Prefer inserting the style in <head> and the script before </body>.
-            const isTimeline = iframe.dataset.srcdocName === "timeline.html";
-            const styleToInject = isTimeline ? timelineLightStyle : lightStyle;
-            const lcHtml = html.toLowerCase();
-            const headClose = lcHtml.indexOf("</head>");
-            const bodyClose = lcHtml.lastIndexOf("</body>");
-            let patched =
-                headClose !== -1
-                    ? html.slice(0, headClose) + styleToInject + html.slice(headClose)
-                    : styleToInject + html;
-            // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
-            const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
-            patched =
-                adjustedBodyClose !== -1
-                    ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
-                    : patched + heightScript;
-            _framePatchedContent.set(iframe, patched);
-            maybeInjectFrame(iframe);
-        })
-    );
+    // Fetch content now only for frames that are already revealed (e.g. a
+    // hydration update replaced a card whose Reports section was open).
+    for (const iframe of frames) {
+        if (!iframe.closest("details:not([open])")) ensureFrameContent(iframe);
+    }
 }
 
 /* ─── Params Editor ─────────────────────────────────────────── */
