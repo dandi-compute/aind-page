@@ -2527,9 +2527,15 @@ function renderQualityControlSection(qc) {
 // placeholder itself is the reveal that enqueues the fetch (see
 // initHydrationPromotion), and updateRunCard swaps in the real content.
 function renderQcPlaceholderSection() {
+    // The "…" count badge is a geometry stand-in for the metric count: without
+    // it the summary row is a few pixels shorter than the loaded section's, so
+    // the page would shift when the real content swaps in.
     return `
 <details class="run-section" data-section="qc">
-    <summary class="run-section-title">Quality Control</summary>
+    <summary class="run-section-title">
+        Quality Control
+        <span class="count-badge">…</span>
+    </summary>
     <div class="qc-loading">Loading quality control…</div>
 </details>`;
 }

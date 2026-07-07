@@ -1573,7 +1573,8 @@ a.src-version-link:hover {
 }
 
 .qc-stage {
-    padding: 0 20px 8px;
+    /* Indented past the section title (20px) so the stage reads as nested. */
+    padding: 0 20px 8px 40px;
 }
 
 .qc-stage-title {
@@ -1611,7 +1612,8 @@ details[open] > .qc-stage-title::before {
 .qc-metrics {
     display: grid;
     gap: 10px;
-    padding: 4px 0 6px;
+    /* One more level of indent under the stage title. */
+    padding: 4px 0 6px 20px;
 }
 
 .qc-metric {
