@@ -2961,3 +2961,9 @@ a.prov-hash-link:hover {
 .landing-note {
     font-size: 0.9em;
 }
+
+.flat-show-more {
+    display: block;
+    margin: 14px auto 0;
+    padding: 8px 22px;
+}

@@ -61,6 +61,12 @@ let _filteredRuns = [];
    Hydration mutates these run objects in place, so _filteredRuns and the
    hydration queue share them and re-renders always show the latest data. */
 let _runsInScope = [];
+/* data-group-key values of tree groups the user has open. Group bodies render
+   lazily (only for open groups), so this drives what re-renders materialize. */
+let _openGroupKeys = new Set();
+/* How many flat-layout cards are currently materialized ("Show more" grows it) */
+const FLAT_RENDER_CHUNK = 200;
+let _flatRenderLimit = FLAT_RENDER_CHUNK;
 
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
@@ -3269,16 +3275,49 @@ function renderDandisets(runs) {
     return dandisetIds.map((id) => renderDandisetGroup(id, byDandiset.get(id), autoExpand)).join("");
 }
 
-function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
+// The stable data-group-key values a run belongs to, from dandiset down to
+// session. Shared by the renderers, badge refresh, and lazy body rendering.
+function runGroupKeys(run) {
+    return [
+        `d:${run.dandisetId}`,
+        `s:${run.dandisetId}/${run.subject}`,
+        `e:${run.dandisetId}/${run.subject}/${run.session ?? ""}`,
+    ];
+}
+
+// Group bodies render lazily: a collapsed group contributes only its summary
+// row (label, counts, status badges) to the DOM, and its body — ultimately the
+// full run cards — is built on first open (see renderLazyGroupBody). This
+// keeps page memory proportional to what the user has expanded rather than to
+// the total queue size. _openGroupKeys mirrors which groups are open so full
+// re-renders (sort/layout toggles, filter-membership flushes) rebuild the same
+// expansion state.
+function groupIsOpen(key, autoExpand) {
+    if (autoExpand) _openGroupKeys.add(key);
+    return autoExpand || _openGroupKeys.has(key);
+}
+
+function groupOpenAttrs(key, autoExpand) {
+    return groupIsOpen(key, autoExpand) ? ' open data-body-rendered="1"' : "";
+}
+
+function renderDandisetGroupBody(runs, autoExpand = false) {
+    const dandisetId = runs[0]?.dandisetId;
     const bySubject = groupBy(runs, (r) => r.subject);
     const subjects = [...bySubject.keys()].sort();
     const autoExpandSubject = autoExpand && subjects.length === 1;
-    const subjectHtml = subjects
-        .map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s), autoExpandSubject))
-        .join("");
+    return subjects.map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s), autoExpandSubject)).join("");
+}
+
+function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
+    const bySubject = groupBy(runs, (r) => r.subject);
+    const subjects = [...bySubject.keys()].sort();
+    const key = `d:${dandisetId}`;
+    const open = groupIsOpen(key, autoExpand);
+    const subjectHtml = open ? renderDandisetGroupBody(runs, autoExpand) : "";
 
     return `
-<details class="dandiset-group" data-group-key="d:${e(dandisetId)}"${autoExpand ? " open" : ""}>
+<details class="dandiset-group" data-group-key="d:${e(dandisetId)}"${open ? ' open data-body-rendered="1"' : ""}>
     <summary class="dandiset-summary">
         <span class="dandiset-summary-inner">
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
@@ -3295,10 +3334,26 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
                title="Narrow view to Dandiset ${e(dandisetId)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
-    <div class="dandiset-body">
+    <div class="dandiset-body" data-group-body>
         ${subjectHtml}
     </div>
 </details>`;
+}
+
+function renderSubjectGroupBody(runs, autoExpand = false) {
+    const dandisetId = runs[0]?.dandisetId;
+    const subject = runs[0]?.subject;
+    const bySession = groupBy(runs, (r) => r.session);
+    // Sort sessions; null (no session) sorts last
+    const sessions = [...bySession.keys()].sort((a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return String(a).localeCompare(String(b));
+    });
+    const autoExpandSession = autoExpand && sessions.length === 1;
+    return sessions
+        .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
+        .join("");
 }
 
 function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
@@ -3308,19 +3363,13 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
     const subjectUrl = `${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}/draft/files?location=${e(location)}`;
 
     const bySession = groupBy(runs, (r) => r.session);
-    // Sort sessions; null (no session) sorts last
-    const sessions = [...bySession.keys()].sort((a, b) => {
-        if (a === null) return 1;
-        if (b === null) return -1;
-        return String(a).localeCompare(String(b));
-    });
-    const autoExpandSession = autoExpand && sessions.length === 1;
-    const sessionHtml = sessions
-        .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
-        .join("");
+    const sessions = [...bySession.keys()];
+    const key = `s:${dandisetId}/${subject}`;
+    const open = groupIsOpen(key, autoExpand);
+    const sessionHtml = open ? renderSubjectGroupBody(runs, autoExpand) : "";
 
     return `
-<details class="subject-group" data-group-key="s:${e(dandisetId)}/${e(subject)}"${autoExpand ? " open" : ""}>
+<details class="subject-group" data-group-key="s:${e(dandisetId)}/${e(subject)}"${open ? ' open data-body-rendered="1"' : ""}>
     <summary class="subject-summary">
         <span class="group-summary-inner">
             <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
@@ -3333,10 +3382,14 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
                title="Narrow view to Sub: ${e(subject)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
-    <div class="subject-body">
+    <div class="subject-body" data-group-body>
         ${sessionHtml}
     </div>
 </details>`;
+}
+
+function renderSessionGroupBody(runs) {
+    return runs.map(renderRunEntry).join("");
 }
 
 function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
@@ -3348,10 +3401,12 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
-    const runsHtml = runs.map(renderRunEntry).join("");
+    const key = `e:${dandisetId}/${subject}/${session ?? ""}`;
+    const open = groupIsOpen(key, autoExpand);
+    const runsHtml = open ? renderSessionGroupBody(runs) : "";
 
     return `
-<details class="session-group" data-group-key="e:${e(dandisetId)}/${e(subject)}/${e(session ?? "")}"${autoExpand ? " open" : ""}>
+<details class="session-group" data-group-key="e:${e(dandisetId)}/${e(subject)}/${e(session ?? "")}"${open ? ' open data-body-rendered="1"' : ""}>
     <summary class="session-summary">
         <span class="group-summary-inner">
             ${sessionLinkHtml}
@@ -3363,7 +3418,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
                title="Narrow view to Ses: ${e(session)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
-    <div class="session-body">
+    <div class="session-body" data-group-body>
         ${runsHtml}
     </div>
 </details>`;
@@ -3505,8 +3560,30 @@ function renderFlatRunEntry(run) {
 </div>`;
 }
 
+// Flat layout materializes cards in chunks: the DOM (and its memory) grows via
+// the "Show more" button rather than scaling with the whole queue up front.
 function renderFlatList(runs) {
-    return `<div class="flat-list">${sortRuns(runs).map(renderFlatRunEntry).join("")}</div>`;
+    const sorted = sortRuns(runs);
+    const visible = sorted.slice(0, _flatRenderLimit);
+    const hidden = sorted.length - visible.length;
+    const moreHtml =
+        hidden > 0
+            ? `<button class="layout-btn flat-show-more" type="button" data-flat-more>
+        Show ${Math.min(hidden, FLAT_RENDER_CHUNK)} more (${hidden} not shown)
+    </button>`
+            : "";
+    return `<div class="flat-list">${visible.map(renderFlatRunEntry).join("")}</div>${moreHtml}`;
+}
+
+function initFlatShowMore() {
+    const runsEl = document.getElementById("runs");
+    if (!runsEl || runsEl.dataset.flatMoreInit) return;
+    runsEl.dataset.flatMoreInit = "1";
+    runsEl.addEventListener("click", (evt) => {
+        if (!evt.target.closest("[data-flat-more]")) return;
+        _flatRenderLimit += FLAT_RENDER_CHUNK;
+        rerenderRuns();
+    });
 }
 
 /* ─── Layout toggle ─────────────────────────────────────────── */
@@ -4786,6 +4863,32 @@ function prioritizeRun(runKey, { qc = false } = {}) {
 
 // Promote runs the user reveals. 'toggle' does not bubble, so listen in the
 // capture phase on #runs — the element itself survives innerHTML swaps.
+// The runs backing a tree group, in current sort order. Used to build lazily
+// deferred group bodies at open time (always from the live, possibly-hydrated
+// run objects, so a body rendered late is born up to date).
+function runsForGroupKey(groupKey) {
+    return sortRuns(_filteredRuns).filter((run) => runGroupKeys(run).includes(groupKey));
+}
+
+// Build a lazily deferred group body on first open. No-op for groups whose
+// body was already rendered (data-body-rendered) or non-tree groups.
+function renderLazyGroupBody(details) {
+    if (details.dataset.bodyRendered) return;
+    const groupKey = details.dataset.groupKey ?? "";
+    if (!/^[dse]:/.test(groupKey)) return;
+    const body = details.querySelector(":scope > [data-group-body]");
+    if (!body) return;
+    details.dataset.bodyRendered = "1";
+    const runs = runsForGroupKey(groupKey);
+    body.innerHTML =
+        groupKey[0] === "d"
+            ? renderDandisetGroupBody(runs)
+            : groupKey[0] === "s"
+              ? renderSubjectGroupBody(runs)
+              : renderSessionGroupBody(runs);
+    initInlineHtmlFrames(details);
+}
+
 function initHydrationPromotion() {
     const runsEl = document.getElementById("runs");
     if (!runsEl || runsEl.dataset.hydrationInit) return;
@@ -4794,18 +4897,29 @@ function initHydrationPromotion() {
         "toggle",
         (evt) => {
             const details = evt.target;
-            if (!(details instanceof Element) || !details.open) return;
-            const card = details.closest("[data-run-key]");
-            if (card) {
-                // A card section opened: full promotion, including QC.
-                prioritizeRun(card.dataset.runKey, { qc: true });
+            if (!(details instanceof Element)) return;
+            const groupKey = details.dataset?.groupKey;
+            if (groupKey) {
+                // Track expansion state for lazy re-renders; a group closing
+                // needs no further work (its body stays until a full re-render
+                // reclaims it).
+                if (!details.open) {
+                    _openGroupKeys.delete(groupKey);
+                    return;
+                }
+                _openGroupKeys.add(groupKey);
+                renderLazyGroupBody(details);
+                // Promote the revealed runs' status/detail tasks (not QC — the
+                // heavy artifact waits for a card-level expand), iterating in
+                // reverse DOM order so the topmost card goes first.
+                const cards = details.querySelectorAll("[data-run-key]");
+                for (let i = cards.length - 1; i >= 0; i--) prioritizeRun(cards[i].dataset.runKey);
                 return;
             }
-            // A group opened: promote the revealed runs' status/detail tasks
-            // (not QC — the heavy artifact waits for a card-level expand),
-            // iterating in reverse DOM order so the topmost card goes first.
-            const cards = details.querySelectorAll("[data-run-key]");
-            for (let i = cards.length - 1; i >= 0; i--) prioritizeRun(cards[i].dataset.runKey);
+            if (!details.open) return;
+            const card = details.closest("[data-run-key]");
+            // A card section opened: full promotion, including QC.
+            if (card) prioritizeRun(card.dataset.runKey, { qc: true });
         },
         true
     );
@@ -4851,12 +4965,7 @@ function refreshGroupBadges() {
     if (!runsEl) return;
     const groups = new Map(); // data-group-key -> runs
     for (const run of _filteredRuns) {
-        const keys = [
-            `d:${run.dandisetId}`,
-            `s:${run.dandisetId}/${run.subject}`,
-            `e:${run.dandisetId}/${run.subject}/${run.session ?? ""}`,
-        ];
-        for (const key of keys) {
+        for (const key of runGroupKeys(run)) {
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(run);
         }
@@ -4888,11 +4997,19 @@ function rerenderRunsPreservingState() {
     for (const details of runsEl.querySelectorAll("details")) {
         const key = detailsStateKey(details);
         if (!key) continue;
-        if (openKeys.has(key)) details.setAttribute("open", "");
+        if (openKeys.has(key)) {
+            details.setAttribute("open", "");
+            renderLazyGroupBody(details); // restored-open groups need their lazy body
+        }
         // Restoring the closed set too keeps autoExpand defaults from popping
         // groups the user explicitly collapsed.
         else if (closedKeys.has(key)) details.removeAttribute("open");
     }
+    // Reconcile the expansion registry with what the restore produced (e.g.
+    // autoExpand groups the user had explicitly collapsed).
+    _openGroupKeys = new Set(
+        Array.from(runsEl.querySelectorAll("details[data-group-key][open]"), (el) => el.dataset.groupKey)
+    );
     window.scrollTo(scrollX, scrollY);
 }
 
@@ -4962,6 +5079,10 @@ async function loadQueueData() {
     // Supersede any in-flight hydration from a previous load before the new
     // state fetch begins (stale results must never touch the fresh DOM).
     cancelHydration();
+    // Fresh load: collapse the tree and reset flat-layout chunking, matching
+    // the pre-lazy-rendering behavior of a full reload.
+    _openGroupKeys = new Set();
+    _flatRenderLimit = FLAT_RENDER_CHUNK;
 
     try {
         // Registries are only consumed at filter/render time, so let their
@@ -5047,6 +5168,7 @@ async function init() {
     initTheme();
     initModal();
     initHydrationPromotion();
+    initFlatShowMore();
     syncTopNav(_viewMode);
 
     // The landing page is the default view (no `view` param). It has no queue
@@ -5151,6 +5273,7 @@ if (typeof module !== "undefined" && module.exports) {
         hydrateRunStatus,
         runHasQualityControl,
         hydrationIdle,
+        initFlatShowMore,
         initHydrationPromotion,
         isImmutableBlobUrl,
         prioritizeRun,
