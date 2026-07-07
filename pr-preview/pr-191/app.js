@@ -3297,10 +3297,6 @@ function groupIsOpen(key, autoExpand) {
     return autoExpand || _openGroupKeys.has(key);
 }
 
-function groupOpenAttrs(key, autoExpand) {
-    return groupIsOpen(key, autoExpand) ? ' open data-body-rendered="1"' : "";
-}
-
 function renderDandisetGroupBody(runs, autoExpand = false) {
     const dandisetId = runs[0]?.dandisetId;
     const bySubject = groupBy(runs, (r) => r.subject);
