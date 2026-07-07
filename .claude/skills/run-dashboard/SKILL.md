@@ -45,6 +45,11 @@ open it in Chromium, and stub the external endpoints at the network boundary.
 - Fulfilled ETags on cross-origin fetches aren't exposed to page JS without
   `Access-Control-Expose-Headers: ETag`, so If-None-Match assertions against
   stubs need that header (the real GitHub CDN sends it).
+- Tree-group bodies render lazily: run cards don't exist in the DOM until their
+  group chain is opened (set `.open = true` AND `dispatchEvent(new Event("toggle"))`
+  per level). Wait on `details.dandiset-group`, not `.run-entry`, at first paint.
+- A single-dandiset fixture auto-expands its group (`autoExpand`), so "clicking to
+  open" it actually closes it — check `details.open` before assuming click direction.
 - Run cards live inside collapsed `<details>` groups (tree layout), so Playwright's
   default "visible" waits time out on them — use `waitForSelector(..., { state: "attached" })`.
 - The Google Fonts request fails offline — harmless, ignore it.

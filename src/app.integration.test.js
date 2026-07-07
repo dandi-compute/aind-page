@@ -1,6 +1,7 @@
 const {
     cancelHydration,
     hydrationIdle,
+    initFlatShowMore,
     initHydrationPromotion,
     loadQueueData,
     parseQueueEntries,
@@ -423,6 +424,18 @@ describe("progressive queue loading", () => {
             urls.trace = blobUrlFor(ids.trace);
         }
         if (ids.png) entry.output_paths[`${p}/derivatives/visualization/summary/psd.png`] = ids.png;
+        if (ids.qc) {
+            entry.output_paths[`${p}/derivatives/visualization/quality_control.json`] = ids.qc;
+            urls.qc = blobUrlFor(ids.qc);
+        }
+        if (ids.viz) {
+            entry.output_paths[`${p}/derivatives/visualization/visualization_output.json`] = ids.viz;
+            urls.viz = blobUrlFor(ids.viz);
+        }
+        if (ids.dd) {
+            entry.dataset_description_path = { [`${p}/dataset_description.json`]: ids.dd };
+            urls.dd = blobUrlFor(ids.dd);
+        }
         return { entry, urls, path: p };
     }
 
@@ -535,6 +548,7 @@ describe("progressive queue loading", () => {
     });
 
     it("promotes an expanded run to the front of the hydration queue", async () => {
+        window.history.replaceState(null, "", "/?layout=flat"); // flat: all cards materialized
         const handlers = new Map();
         const entries = [];
         const runsMeta = [];
@@ -619,6 +633,232 @@ describe("progressive queue loading", () => {
 
         expect(document.getElementById("error").innerHTML).toContain("No pipeline runs match");
         expect(document.getElementById("runs").style.display).toBe("none");
+    });
+
+    it("background-hydrates only traces; detail artifacts wait for a card reveal", async () => {
+        const entries = [];
+        const meta = [];
+        const handlers = new Map();
+        for (let i = 0; i < 3; i++) {
+            const { entry, urls } = withArtifacts(makeEntry({ subject: `sub${i}` }), {
+                trace: newBlobId(),
+                dd: newBlobId(),
+                viz: newBlobId(),
+                qc: newBlobId(),
+            });
+            entries.push(entry);
+            meta.push(urls);
+            handlers.set(urls.trace, () => new Response(TRACE_OK, { status: 200 }));
+            handlers.set(urls.dd, () => new Response('{"GeneratedBy":[]}', { status: 200 }));
+            handlers.set(urls.viz, () => new Response("{}", { status: 200 }));
+            handlers.set(urls.qc, () => new Response('{"metrics":[{"name":"drift","stage":"pre"}]}', { status: 200 }));
+        }
+        seedQueueState(entries);
+        installFetch(handlers);
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        // Idle background hydration touched exactly the three traces — nothing else.
+        const traceUrls = new Set(meta.map((m) => m.trace));
+        const requested = blobRequests();
+        expect(requested).toHaveLength(3);
+        expect(requested.every((u) => traceUrls.has(u))).toBe(true);
+    });
+
+    it("eagerly hydrates provenance when a codebase-hash filter is active", async () => {
+        window.history.replaceState(null, "", "/?codebaseHash=abc1234");
+        const { entry, urls } = withArtifacts(makeEntry({ has_logs: false }), { dd: newBlobId() });
+        seedQueueState([entry]);
+        installFetch(
+            new Map([
+                [
+                    urls.dd,
+                    () =>
+                        new Response(
+                            JSON.stringify({
+                                GeneratedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "abc1234" }],
+                            }),
+                            { status: 200 }
+                        ),
+                ],
+            ])
+        );
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        // The filter needs every run's GeneratedBy, so dataset_description is
+        // fetched without any card reveal and the run enters the filtered set.
+        expect(blobRequests()).toContain(urls.dd);
+        expect(document.querySelector("#runs .run-entry")).not.toBeNull();
+    });
+
+    it("fetches QC only when a card section is expanded", async () => {
+        const { entry, urls } = withArtifacts(makeEntry(), {
+            trace: newBlobId(),
+            qc: newBlobId(),
+            png: newBlobId(),
+        });
+        seedQueueState([entry]);
+        installFetch(
+            new Map([
+                [urls.trace, () => new Response(TRACE_OK, { status: 200 })],
+                [urls.qc, () => new Response('{"metrics":[{"name":"drift","stage":"pre"}]}', { status: 200 })],
+            ])
+        );
+        initHydrationPromotion();
+
+        await loadQueueData();
+        await hydrationIdle();
+        expect(blobRequests()).not.toContain(urls.qc);
+        expect(document.querySelector('details[data-section="qc"]')).toBeNull();
+
+        // Expand a section on the card through the real toggle path.
+        const section = document.querySelector("#runs .run-entry details[data-section]");
+        section.open = true;
+        section.dispatchEvent(new Event("toggle"));
+        await hydrationIdle();
+
+        expect(blobRequests()).toContain(urls.qc);
+        expect(document.querySelector('details[data-section="qc"]')).not.toBeNull();
+    });
+
+    it("marks optimistic successes as provisional until the trace confirms them", async () => {
+        const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId() });
+        seedQueueState([entry]);
+        const trace = deferred();
+        installFetch(new Map([[urls.trace, () => trace.promise]]));
+
+        await loadQueueData();
+
+        const badge = document.querySelector("#runs .run-entry .status-badge");
+        expect(badge.className).toContain("status-provisional");
+        expect(document.querySelector(".gbadge-success").className).toContain("status-provisional");
+
+        trace.resolve(new Response(TRACE_OK, { status: 200 }));
+        await hydrationIdle();
+
+        const confirmed = document.querySelector("#runs .run-entry .status-badge");
+        expect(confirmed.className).toContain("status-success");
+        expect(confirmed.className).not.toContain("status-provisional");
+        expect(document.querySelector(".gbadge-success").className).not.toContain("status-provisional");
+    });
+
+    it("fetches inline report content only when its section is revealed", async () => {
+        const rafOriginal = global.requestAnimationFrame;
+        global.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+        try {
+            const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId() });
+            const reportId = newBlobId();
+            const [probe] = parseQueueEntries([entry]);
+            entry.output_paths[`${probe.path}/logs/report.html`] = reportId;
+            const reportUrl = blobUrlFor(reportId);
+            seedQueueState([entry]);
+            installFetch(
+                new Map([
+                    [urls.trace, () => new Response(TRACE_OK, { status: 200 })],
+                    [
+                        reportUrl,
+                        () => new Response("<html><head></head><body>report row</body></html>", { status: 200 }),
+                    ],
+                ])
+            );
+
+            await loadQueueData();
+            await hydrationIdle();
+
+            // The Reports section rendered an iframe shell, but the (potentially
+            // multi-MB) report content must not have been fetched yet.
+            const iframe = document.querySelector("iframe[data-srcdoc-url]");
+            expect(iframe).not.toBeNull();
+            expect(blobRequests()).not.toContain(reportUrl);
+            expect(iframe.getAttribute("srcdoc")).toBeNull();
+
+            // Reveal the Reports section through the real toggle path.
+            const section = document.querySelector('details[data-section="reports"]');
+            section.open = true;
+            section.dispatchEvent(new Event("toggle"));
+            await new Promise((r) => setTimeout(r, 0)); // rAF stub tick
+            await new Promise((r) => setTimeout(r, 0)); // fetch + patch settle
+            await new Promise((r) => setTimeout(r, 0));
+
+            expect(blobRequests()).toContain(reportUrl);
+            expect(iframe.getAttribute("srcdoc")).toContain("report row");
+        } finally {
+            global.requestAnimationFrame = rafOriginal;
+        }
+    });
+
+    it("renders tree group bodies lazily on first open", async () => {
+        const handlers = new Map();
+        const entries = [];
+        for (let i = 0; i < 3; i++) {
+            const { entry, urls } = withArtifacts(makeEntry({ subject: `sub${i}` }), { trace: newBlobId() });
+            entries.push(entry);
+            handlers.set(urls.trace, () => new Response(TRACE_FAILED_PRE, { status: 200 }));
+        }
+        seedQueueState(entries);
+        installFetch(handlers);
+        initHydrationPromotion();
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        // Single dandiset auto-expands, but its three subject groups stay
+        // collapsed — no run cards materialized anywhere.
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(0);
+        const subjectGroups = document.querySelectorAll("details.subject-group");
+        expect(subjectGroups).toHaveLength(3);
+        // Group badges still reflect (hydrated) statuses without any cards.
+        expect(document.querySelector(".gbadge-failed")).not.toBeNull();
+
+        // Opening a subject group builds its body through the real toggle path…
+        const subject = subjectGroups[0];
+        subject.open = true;
+        subject.dispatchEvent(new Event("toggle"));
+        const session = subject.querySelector("details.session-group");
+        expect(session).not.toBeNull();
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(0); // session still closed
+
+        // …and opening the session group materializes its cards, already
+        // hydrated (lazy bodies render from the live run objects).
+        session.open = true;
+        session.dispatchEvent(new Event("toggle"));
+        const cards = session.querySelectorAll(".run-entry");
+        expect(cards).toHaveLength(1);
+        expect(cards[0].className).toContain("status-failed");
+    });
+
+    it("materializes flat-layout cards in chunks behind a Show more button", async () => {
+        window.history.replaceState(null, "", "/?layout=flat");
+        const entries = [];
+        for (let i = 0; i < 205; i++) {
+            entries.push(
+                makeEntry({
+                    subject: `sub${i}`,
+                    has_logs: false,
+                    has_output: false,
+                    has_code: true,
+                    has_been_submitted: false,
+                })
+            );
+        }
+        seedQueueState(entries);
+        installFetch(new Map());
+        initFlatShowMore();
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(200);
+        const more = document.querySelector("[data-flat-more]");
+        expect(more).not.toBeNull();
+        expect(more.textContent).toContain("5 not shown");
+
+        more.dispatchEvent(new Event("click", { bubbles: true }));
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(205);
+        expect(document.querySelector("[data-flat-more]")).toBeNull();
     });
 
     it("supersedes stale hydration when the queue is reloaded mid-flight", async () => {
