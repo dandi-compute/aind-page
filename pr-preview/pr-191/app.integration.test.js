@@ -1,6 +1,7 @@
 const {
     cancelHydration,
     hydrationIdle,
+    initFlatShowMore,
     initHydrationPromotion,
     loadQueueData,
     parseQueueEntries,
@@ -547,6 +548,7 @@ describe("progressive queue loading", () => {
     });
 
     it("promotes an expanded run to the front of the hydration queue", async () => {
+        window.history.replaceState(null, "", "/?layout=flat"); // flat: all cards materialized
         const handlers = new Map();
         const entries = [];
         const runsMeta = [];
@@ -760,6 +762,77 @@ describe("progressive queue loading", () => {
         } finally {
             global.requestAnimationFrame = rafOriginal;
         }
+    });
+
+    it("renders tree group bodies lazily on first open", async () => {
+        const handlers = new Map();
+        const entries = [];
+        for (let i = 0; i < 3; i++) {
+            const { entry, urls } = withArtifacts(makeEntry({ subject: `sub${i}` }), { trace: newBlobId() });
+            entries.push(entry);
+            handlers.set(urls.trace, () => new Response(TRACE_FAILED_PRE, { status: 200 }));
+        }
+        seedQueueState(entries);
+        installFetch(handlers);
+        initHydrationPromotion();
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        // Single dandiset auto-expands, but its three subject groups stay
+        // collapsed — no run cards materialized anywhere.
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(0);
+        const subjectGroups = document.querySelectorAll("details.subject-group");
+        expect(subjectGroups).toHaveLength(3);
+        // Group badges still reflect (hydrated) statuses without any cards.
+        expect(document.querySelector(".gbadge-failed")).not.toBeNull();
+
+        // Opening a subject group builds its body through the real toggle path…
+        const subject = subjectGroups[0];
+        subject.open = true;
+        subject.dispatchEvent(new Event("toggle"));
+        const session = subject.querySelector("details.session-group");
+        expect(session).not.toBeNull();
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(0); // session still closed
+
+        // …and opening the session group materializes its cards, already
+        // hydrated (lazy bodies render from the live run objects).
+        session.open = true;
+        session.dispatchEvent(new Event("toggle"));
+        const cards = session.querySelectorAll(".run-entry");
+        expect(cards).toHaveLength(1);
+        expect(cards[0].className).toContain("status-failed");
+    });
+
+    it("materializes flat-layout cards in chunks behind a Show more button", async () => {
+        window.history.replaceState(null, "", "/?layout=flat");
+        const entries = [];
+        for (let i = 0; i < 205; i++) {
+            entries.push(
+                makeEntry({
+                    subject: `sub${i}`,
+                    has_logs: false,
+                    has_output: false,
+                    has_code: true,
+                    has_been_submitted: false,
+                })
+            );
+        }
+        seedQueueState(entries);
+        installFetch(new Map());
+        initFlatShowMore();
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(200);
+        const more = document.querySelector("[data-flat-more]");
+        expect(more).not.toBeNull();
+        expect(more.textContent).toContain("5 not shown");
+
+        more.dispatchEvent(new Event("click", { bubbles: true }));
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(205);
+        expect(document.querySelector("[data-flat-more]")).toBeNull();
     });
 
     it("supersedes stale hydration when the queue is reloaded mid-flight", async () => {
