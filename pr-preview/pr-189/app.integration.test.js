@@ -436,7 +436,9 @@ describe("progressive queue loading", () => {
     }
 
     const blobRequests = () =>
-        global.fetch.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("dandiarchive.s3.amazonaws.com"));
+        global.fetch.mock.calls
+            .map(([u]) => String(u))
+            .filter((u) => new URL(u).hostname === "dandiarchive.s3.amazonaws.com");
 
     const TRACE_OK =
         "task_id\tname\tstatus\texit\n1\tjob_dispatch (1)\tCOMPLETED\t0\n2\tpreprocessing (1)\tCOMPLETED\t0";
