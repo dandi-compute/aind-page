@@ -61,6 +61,12 @@ let _filteredRuns = [];
    Hydration mutates these run objects in place, so _filteredRuns and the
    hydration queue share them and re-renders always show the latest data. */
 let _runsInScope = [];
+/* data-group-key values of tree groups the user has open. Group bodies render
+   lazily (only for open groups), so this drives what re-renders materialize. */
+let _openGroupKeys = new Set();
+/* How many flat-layout cards are currently materialized ("Show more" grows it) */
+const FLAT_RENDER_CHUNK = 200;
+let _flatRenderLimit = FLAT_RENDER_CHUNK;
 
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
@@ -254,15 +260,23 @@ function deriveFlagStatus(run) {
 
 // Skeleton run for the immediate first render: flag-derived status plus
 // everything derivable synchronously from the entry's output_paths map
-// (visualization images, log-file listing). Trace-refined status, failureStep,
-// tasks, provenance, QC, and viz links arrive later via hydrateRun. failureStep
-// stays null (= "not yet known") rather than defaulting to "other" so
-// failure-step filters never transiently over-match before hydration.
+// (visualization images, log-file listing). The trace-refined status,
+// failureStep, tasks, provenance, QC, and viz links arrive later via the
+// hydration passes. failureStep stays null (= "not yet known") rather than
+// defaulting to "other" so failure-step filters never transiently over-match
+// before hydration.
+//
+// statusProvisional marks runs whose displayed status glyph could still change
+// once the trace lands: a run with output counts as "success" from flags alone,
+// but its trace may reveal failed tasks. Runs without output (or with an
+// authoritative upstream status) can only gain detail, never flip — their
+// badges are trustworthy immediately.
 function buildInitialRun(run) {
     return {
         ...run,
         status: deriveFlagStatus(run),
         failureStep: run.stateFailureStep ?? null,
+        statusProvisional: !run.stateStatus && !!(run.hasOutput && run.hasLogs),
         tasks: [],
         generatedBy: [],
         datasetDescription: null,
@@ -270,7 +284,11 @@ function buildInitialRun(run) {
         vizLinks: null,
         qualityControl: null,
         logFiles: runLogFiles(run),
-        hydrated: false,
+        traceLoaded: !run.hasLogs, // nothing to fetch for runs without logs
+        detailsLoaded: false,
+        detailQueued: false,
+        qcLoaded: false,
+        qcQueued: false,
     };
 }
 
@@ -766,7 +784,29 @@ async function cachedFetch(url, init = {}) {
 // Every cache operation is best-effort: failures fall through to the network.
 const BLOB_CACHE_NAME = "aind-blobs-v1";
 const BLOB_MEMORY_CACHE_MAX_BODY = 512 * 1024; // keep huge bodies out of the Map
+// Hard cap on the Map's total retained bytes: page memory must stay flat as
+// background hydration sweeps thousands of blobs. Oldest entries evict first
+// (Map iteration order; reads refresh recency); the Cache API remains the
+// durable warm layer, so eviction only costs a disk re-read.
+const BLOB_MEMORY_CACHE_MAX_TOTAL = 24 * 1024 * 1024;
 const _blobMemoryCache = new Map(); // url -> { body, contentType, status }
+let _blobMemoryCacheBytes = 0;
+
+function blobMemoryCachePut(url, entry) {
+    if (entry.body.length > BLOB_MEMORY_CACHE_MAX_BODY) return;
+    const existing = _blobMemoryCache.get(url);
+    if (existing) {
+        _blobMemoryCacheBytes -= existing.body.length;
+        _blobMemoryCache.delete(url);
+    }
+    _blobMemoryCache.set(url, entry);
+    _blobMemoryCacheBytes += entry.body.length;
+    for (const [oldUrl, oldEntry] of _blobMemoryCache) {
+        if (_blobMemoryCacheBytes <= BLOB_MEMORY_CACHE_MAX_TOTAL) break;
+        _blobMemoryCache.delete(oldUrl);
+        _blobMemoryCacheBytes -= oldEntry.body.length;
+    }
+}
 
 function isImmutableBlobUrl(url) {
     return typeof url === "string" && url.startsWith(`${S3_BLOB_BASE}/`);
@@ -802,7 +842,10 @@ function blobResponse({ body, contentType, status }) {
 
 async function readCachedBlob(url) {
     const memoryHit = _blobMemoryCache.get(url);
-    if (memoryHit) return blobResponse(memoryHit);
+    if (memoryHit) {
+        blobMemoryCachePut(url, memoryHit); // refresh recency for eviction order
+        return blobResponse(memoryHit);
+    }
 
     const cache = await openBlobCache();
     if (cache) {
@@ -814,7 +857,7 @@ async function readCachedBlob(url) {
                     contentType: match.headers.get("Content-Type") ?? "",
                     status: match.status,
                 };
-                if (entry.body.length <= BLOB_MEMORY_CACHE_MAX_BODY) _blobMemoryCache.set(url, entry);
+                blobMemoryCachePut(url, entry);
                 return blobResponse(entry);
             }
         } catch {
@@ -833,7 +876,7 @@ async function readCachedBlob(url) {
 
 function writeCachedBlob(url, body, contentType, status) {
     const entry = { body, contentType, status };
-    if (body.length <= BLOB_MEMORY_CACHE_MAX_BODY) _blobMemoryCache.set(url, entry);
+    blobMemoryCachePut(url, entry);
 
     if (typeof caches !== "undefined") {
         openBlobCache()
@@ -1928,7 +1971,7 @@ function renderRunEntry(run) {
     return `
 <div class="run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header">
-        <span class="status-badge ${sc}">${slbl}</span>
+        <span class="status-badge ${sc}${run.statusProvisional ? " status-provisional" : ""}"${run.statusProvisional ? ' title="Pass/fail pending trace confirmation"' : ""}>${slbl}</span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${run.paramsProfile ? `<span class="run-sep">·</span><span class="run-params">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>` : ""}
         ${run.configHash ? `<span class="run-sep">·</span><span class="run-config">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
@@ -2523,10 +2566,14 @@ function renderGroupBadges(runs) {
     const u = runs.length - s - f - q;
     const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(runs);
+    // A success count is provisional while any counted run's trace could still
+    // flip it to failed — render it dimmed so an unconfirmed ✓ can't mislead.
+    // Failed counts never need this: hydration can only add failures.
+    const provisional = runs.some((r) => r.status === "success" && r.statusProvisional);
     const parts = [];
     if (s)
         parts.push(
-            `<span class="gbadge gbadge-success" title="${s} successful run${s !== 1 ? "s" : ""}">${s}&thinsp;✓</span>`
+            `<span class="gbadge gbadge-success${provisional ? " status-provisional" : ""}" title="${s} successful run${s !== 1 ? "s" : ""}${provisional ? " (pending trace confirmation)" : ""}">${s}&thinsp;✓</span>`
         );
     if (f)
         parts.push(
@@ -3254,16 +3301,45 @@ function renderDandisets(runs) {
     return dandisetIds.map((id) => renderDandisetGroup(id, byDandiset.get(id), autoExpand)).join("");
 }
 
-function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
+// The stable data-group-key values a run belongs to, from dandiset down to
+// session. Shared by the renderers, badge refresh, and lazy body rendering.
+function runGroupKeys(run) {
+    return [
+        `d:${run.dandisetId}`,
+        `s:${run.dandisetId}/${run.subject}`,
+        `e:${run.dandisetId}/${run.subject}/${run.session ?? ""}`,
+    ];
+}
+
+// Group bodies render lazily: a collapsed group contributes only its summary
+// row (label, counts, status badges) to the DOM, and its body — ultimately the
+// full run cards — is built on first open (see renderLazyGroupBody). This
+// keeps page memory proportional to what the user has expanded rather than to
+// the total queue size. _openGroupKeys mirrors which groups are open so full
+// re-renders (sort/layout toggles, filter-membership flushes) rebuild the same
+// expansion state.
+function groupIsOpen(key, autoExpand) {
+    if (autoExpand) _openGroupKeys.add(key);
+    return autoExpand || _openGroupKeys.has(key);
+}
+
+function renderDandisetGroupBody(runs, autoExpand = false) {
+    const dandisetId = runs[0]?.dandisetId;
     const bySubject = groupBy(runs, (r) => r.subject);
     const subjects = [...bySubject.keys()].sort();
     const autoExpandSubject = autoExpand && subjects.length === 1;
-    const subjectHtml = subjects
-        .map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s), autoExpandSubject))
-        .join("");
+    return subjects.map((s) => renderSubjectGroup(dandisetId, s, bySubject.get(s), autoExpandSubject)).join("");
+}
+
+function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
+    const bySubject = groupBy(runs, (r) => r.subject);
+    const subjects = [...bySubject.keys()].sort();
+    const key = `d:${dandisetId}`;
+    const open = groupIsOpen(key, autoExpand);
+    const subjectHtml = open ? renderDandisetGroupBody(runs, autoExpand) : "";
 
     return `
-<details class="dandiset-group" data-group-key="d:${e(dandisetId)}"${autoExpand ? " open" : ""}>
+<details class="dandiset-group" data-group-key="d:${e(dandisetId)}"${open ? ' open data-body-rendered="1"' : ""}>
     <summary class="dandiset-summary">
         <span class="dandiset-summary-inner">
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
@@ -3280,10 +3356,26 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
                title="Narrow view to Dandiset ${e(dandisetId)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
-    <div class="dandiset-body">
+    <div class="dandiset-body" data-group-body>
         ${subjectHtml}
     </div>
 </details>`;
+}
+
+function renderSubjectGroupBody(runs, autoExpand = false) {
+    const dandisetId = runs[0]?.dandisetId;
+    const subject = runs[0]?.subject;
+    const bySession = groupBy(runs, (r) => r.session);
+    // Sort sessions; null (no session) sorts last
+    const sessions = [...bySession.keys()].sort((a, b) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return String(a).localeCompare(String(b));
+    });
+    const autoExpandSession = autoExpand && sessions.length === 1;
+    return sessions
+        .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
+        .join("");
 }
 
 function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
@@ -3293,19 +3385,13 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
     const subjectUrl = `${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}/draft/files?location=${e(location)}`;
 
     const bySession = groupBy(runs, (r) => r.session);
-    // Sort sessions; null (no session) sorts last
-    const sessions = [...bySession.keys()].sort((a, b) => {
-        if (a === null) return 1;
-        if (b === null) return -1;
-        return String(a).localeCompare(String(b));
-    });
-    const autoExpandSession = autoExpand && sessions.length === 1;
-    const sessionHtml = sessions
-        .map((ses) => renderSessionGroup(dandisetId, subject, ses, bySession.get(ses), autoExpandSession))
-        .join("");
+    const sessions = [...bySession.keys()];
+    const key = `s:${dandisetId}/${subject}`;
+    const open = groupIsOpen(key, autoExpand);
+    const sessionHtml = open ? renderSubjectGroupBody(runs, autoExpand) : "";
 
     return `
-<details class="subject-group" data-group-key="s:${e(dandisetId)}/${e(subject)}"${autoExpand ? " open" : ""}>
+<details class="subject-group" data-group-key="s:${e(dandisetId)}/${e(subject)}"${open ? ' open data-body-rendered="1"' : ""}>
     <summary class="subject-summary">
         <span class="group-summary-inner">
             <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
@@ -3318,10 +3404,14 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
                title="Narrow view to Sub: ${e(subject)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
-    <div class="subject-body">
+    <div class="subject-body" data-group-body>
         ${sessionHtml}
     </div>
 </details>`;
+}
+
+function renderSessionGroupBody(runs) {
+    return runs.map(renderRunEntry).join("");
 }
 
 function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = false) {
@@ -3333,10 +3423,12 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
               target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
-    const runsHtml = runs.map(renderRunEntry).join("");
+    const key = `e:${dandisetId}/${subject}/${session ?? ""}`;
+    const open = groupIsOpen(key, autoExpand);
+    const runsHtml = open ? renderSessionGroupBody(runs) : "";
 
     return `
-<details class="session-group" data-group-key="e:${e(dandisetId)}/${e(subject)}/${e(session ?? "")}"${autoExpand ? " open" : ""}>
+<details class="session-group" data-group-key="e:${e(dandisetId)}/${e(subject)}/${e(session ?? "")}"${open ? ' open data-body-rendered="1"' : ""}>
     <summary class="session-summary">
         <span class="group-summary-inner">
             ${sessionLinkHtml}
@@ -3348,7 +3440,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
                title="Narrow view to Ses: ${e(session)}" onclick="event.stopPropagation()">⊕ Narrow</a>
         </span>
     </summary>
-    <div class="session-body">
+    <div class="session-body" data-group-body>
         ${runsHtml}
     </div>
 </details>`;
@@ -3465,7 +3557,7 @@ function renderFlatRunEntry(run) {
 <div class="run-entry flat-run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header flat-run-header">
         <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
-        <span class="status-badge ${sc}">${slbl}</span>
+        <span class="status-badge ${sc}${run.statusProvisional ? " status-provisional" : ""}"${run.statusProvisional ? ' title="Pass/fail pending trace confirmation"' : ""}>${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
             <span class="run-sep">·</span>
@@ -3490,8 +3582,30 @@ function renderFlatRunEntry(run) {
 </div>`;
 }
 
+// Flat layout materializes cards in chunks: the DOM (and its memory) grows via
+// the "Show more" button rather than scaling with the whole queue up front.
 function renderFlatList(runs) {
-    return `<div class="flat-list">${sortRuns(runs).map(renderFlatRunEntry).join("")}</div>`;
+    const sorted = sortRuns(runs);
+    const visible = sorted.slice(0, _flatRenderLimit);
+    const hidden = sorted.length - visible.length;
+    const moreHtml =
+        hidden > 0
+            ? `<button class="layout-btn flat-show-more" type="button" data-flat-more>
+        Show ${Math.min(hidden, FLAT_RENDER_CHUNK)} more (${hidden} not shown)
+    </button>`
+            : "";
+    return `<div class="flat-list">${visible.map(renderFlatRunEntry).join("")}</div>${moreHtml}`;
+}
+
+function initFlatShowMore() {
+    const runsEl = document.getElementById("runs");
+    if (!runsEl || runsEl.dataset.flatMoreInit) return;
+    runsEl.dataset.flatMoreInit = "1";
+    runsEl.addEventListener("click", (evt) => {
+        if (!evt.target.closest("[data-flat-more]")) return;
+        _flatRenderLimit += FLAT_RENDER_CHUNK;
+        rerenderRuns();
+    });
 }
 
 /* ─── Layout toggle ─────────────────────────────────────────── */
@@ -3848,14 +3962,20 @@ let _inlineFrameListenerInstalled = false;
 
 // _framePatchedContent holds the fully-patched HTML for each iframe, populated
 // asynchronously; _frameInjected tracks which iframes already had their srcdoc
-// set. srcdoc is set lazily: only once the iframe's parent <details> is open
-// (visible), so that chart libraries (e.g. Highcharts in timeline.html) render
-// in a non-zero container and avoid producing invalid negative <rect> widths in
-// the browser console. Module-level (weak, so replaced cards' frames drop out)
-// because toggle listeners and content fetches can come from different
-// initInlineHtmlFrames invocations.
+// set; _frameFetching dedups in-flight content fetches. Report HTML is fetched
+// AND injected lazily — only once the iframe is no longer inside a closed
+// <details>. Fetch-on-reveal matters as much as inject-on-reveal: Nextflow
+// report/timeline files run to megabytes each, so eagerly fetching them for
+// every run both floods the S3 connection pool (starving the trace/status
+// hydration passes) and pins the whole queue's report HTML in memory at once —
+// enough to OOM the tab on large queues. Injection additionally waits for
+// visibility so chart libraries (e.g. Highcharts in timeline.html) render in a
+// non-zero container and avoid invalid negative <rect> widths. Module-level
+// (weak, so replaced cards' frames drop out) because toggle listeners and
+// content fetches can come from different initInlineHtmlFrames invocations.
 const _framePatchedContent = new WeakMap();
 const _frameInjected = new WeakSet();
+const _frameFetching = new WeakSet();
 
 function maybeInjectFrame(iframe) {
     if (_frameInjected.has(iframe)) return;
@@ -3863,6 +3983,63 @@ function maybeInjectFrame(iframe) {
     if (iframe.closest("details:not([open])")) return; // still inside a closed <details>
     _frameInjected.add(iframe);
     iframe.srcdoc = _framePatchedContent.get(iframe);
+}
+
+// The injected script reports scrollHeight on load AND responds to a
+// 'requestHeight' message from the parent. The parent re-requests when a
+// collapsed <details> is opened, because the iframe layout is zero-height
+// while the section is hidden. Sandboxed srcdoc iframes have opaque origin so
+// evt.origin === 'null'; we also verify evt.source is one of our known iframe
+// windows as an additional guard.
+const INLINE_FRAME_HEIGHT_SCRIPT = `<script>
+(function(){
+function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
+if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
+window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
+})();
+</script>`;
+
+// Injected into <head> for most reports: nudge the browser's default
+// color-scheme to light so any unset colors pick up readable dark-on-white
+// defaults. timeline.html (Nextflow-generated) has an *explicit* dark navy
+// background in its own CSS, so color-scheme alone cannot help — override
+// background + text explicitly for it.
+const INLINE_FRAME_LIGHT_STYLE = "<style>html{color-scheme:light;}</style>";
+const INLINE_FRAME_TIMELINE_LIGHT_STYLE =
+    "<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>";
+
+// Fetch, patch, and (once visible) inject one report iframe's content. Safe to
+// call repeatedly — in-flight and already-fetched frames are no-ops.
+async function ensureFrameContent(iframe) {
+    if (_frameInjected.has(iframe) || _frameFetching.has(iframe)) return;
+    if (_framePatchedContent.has(iframe)) return maybeInjectFrame(iframe);
+    _frameFetching.add(iframe);
+    try {
+        const content = await fetchLogText(iframe.dataset.srcdocUrl);
+        const html =
+            content !== null
+                ? content
+                : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
+        // Insert the light-mode override and height-reporter into the document.
+        // Prefer inserting the style in <head> and the script before </body>.
+        const isTimeline = iframe.dataset.srcdocName === "timeline.html";
+        const styleToInject = isTimeline ? INLINE_FRAME_TIMELINE_LIGHT_STYLE : INLINE_FRAME_LIGHT_STYLE;
+        const lcHtml = html.toLowerCase();
+        const headClose = lcHtml.indexOf("</head>");
+        const bodyClose = lcHtml.lastIndexOf("</body>");
+        let patched =
+            headClose !== -1 ? html.slice(0, headClose) + styleToInject + html.slice(headClose) : styleToInject + html;
+        // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
+        const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
+        patched =
+            adjustedBodyClose !== -1
+                ? patched.slice(0, adjustedBodyClose) + INLINE_FRAME_HEIGHT_SCRIPT + patched.slice(adjustedBodyClose)
+                : patched + INLINE_FRAME_HEIGHT_SCRIPT;
+        _framePatchedContent.set(iframe, patched);
+    } finally {
+        _frameFetching.delete(iframe);
+    }
+    maybeInjectFrame(iframe);
 }
 
 function ensureInlineFrameListener() {
@@ -3883,29 +4060,23 @@ function ensureInlineFrameListener() {
     });
 }
 
-/* Fetch and inject srcdoc for inline report iframes under `root` — the whole
-   document by default, or a single replaced run card during hydration. */
+/* Wire lazy fetch-and-inject for inline report iframes under `root` — the
+   whole document by default, or a single replaced run card during hydration.
+   Content is only fetched once an iframe is revealed (no closed <details>
+   ancestor), either immediately below or via the toggle listeners. */
 function initInlineHtmlFrames(root = document) {
+    // Sweep frames whose cards left the DOM (hydration replacements) so the
+    // strong references here don't pin detached card trees in memory.
+    for (const iframe of _inlineFrameSet) {
+        if (!iframe.isConnected) _inlineFrameSet.delete(iframe);
+    }
     const frames = Array.from(root.querySelectorAll("iframe[data-srcdoc-url]"));
     for (const iframe of frames) _inlineFrameSet.add(iframe);
     ensureInlineFrameListener();
 
-    // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
-    // message from the parent. The parent re-requests when a collapsed <details> is opened,
-    // because the iframe layout is zero-height while the section is hidden.
-    // Sandboxed srcdoc iframes have opaque origin so evt.origin === 'null'; we also verify
-    // evt.source is one of our known iframe windows as an additional guard.
-    const heightScript = `<script>
-(function(){
-function send(){window.parent.postMessage({type:'iframeHeight',h:document.documentElement.scrollHeight},'*');}
-if(document.readyState==='complete'){send();}else{window.addEventListener('load',send);}
-window.addEventListener('message',function(e){if(e.source===window.parent&&e.data&&e.data.type==='requestHeight')send();});
-})();
-</script>`;
-
-    // When a <details> containing inline frames is opened, inject any pending frames
-    // whose content is already available, and request a fresh height measurement from
-    // frames that are already loaded. State lives at module level (see
+    // When a <details> containing inline frames is opened, fetch/inject any
+    // frames it reveals and request a fresh height measurement from frames
+    // that are already loaded. State lives at module level (see
     // _framePatchedContent) so listeners attached by one invocation (e.g. a
     // group opener from the initial render) also serve iframes registered by a
     // later one (e.g. a run card replaced during hydration).
@@ -3924,51 +4095,22 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
                             // The message contains no sensitive data ({type:'requestHeight'} only).
                             iframe.contentWindow.postMessage({ type: "requestHeight" }, "*");
                         }
-                    } else {
-                        maybeInjectFrame(iframe);
+                    } else if (!iframe.closest("details:not([open])")) {
+                        // Fetch only frames this open actually revealed — a
+                        // group opening must not pull reports for cards whose
+                        // Reports section is itself still closed.
+                        ensureFrameContent(iframe);
                     }
                 });
             });
         });
     });
 
-    // Injected into <head> for most reports: nudge the browser's default color-scheme to light
-    // so any unset colors pick up readable dark-on-white defaults.
-    const lightStyle = "<style>html{color-scheme:light;}</style>";
-    // timeline.html (Nextflow-generated) has an *explicit* dark navy background in its own CSS,
-    // so color-scheme alone cannot help — the dark background stays and light-scheme defaults
-    // produce dark text on dark background (invisible). Override background + text explicitly.
-    const timelineLightStyle =
-        "<style>html,body{background:#ffffff!important;color:#333333!important;color-scheme:light;}</style>";
-
-    Promise.all(
-        frames.map(async (iframe) => {
-            const content = await fetchLogText(iframe.dataset.srcdocUrl);
-            const html =
-                content !== null
-                    ? content
-                    : '<body style="font-family:sans-serif;padding:20px;color:#e05c5c">Failed to load report.</body>';
-            // Insert light-mode override and height-reporter into the document.
-            // Prefer inserting the style in <head> and the script before </body>.
-            const isTimeline = iframe.dataset.srcdocName === "timeline.html";
-            const styleToInject = isTimeline ? timelineLightStyle : lightStyle;
-            const lcHtml = html.toLowerCase();
-            const headClose = lcHtml.indexOf("</head>");
-            const bodyClose = lcHtml.lastIndexOf("</body>");
-            let patched =
-                headClose !== -1
-                    ? html.slice(0, headClose) + styleToInject + html.slice(headClose)
-                    : styleToInject + html;
-            // styleToInject was inserted at or before bodyClose, so adjust the position by its length.
-            const adjustedBodyClose = bodyClose !== -1 ? bodyClose + styleToInject.length : -1;
-            patched =
-                adjustedBodyClose !== -1
-                    ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
-                    : patched + heightScript;
-            _framePatchedContent.set(iframe, patched);
-            maybeInjectFrame(iframe);
-        })
-    );
+    // Fetch content now only for frames that are already revealed (e.g. a
+    // hydration update replaced a card whose Reports section was open).
+    for (const iframe of frames) {
+        if (!iframe.closest("details:not([open])")) ensureFrameContent(iframe);
+    }
 }
 
 /* ─── Params Editor ─────────────────────────────────────────── */
@@ -4553,22 +4695,36 @@ function loadLandingPage() {
 /* ─── Progressive hydration ─────────────────────────────────── */
 // The queue views render immediately from the state file alone (flag-derived
 // statuses plus the synchronously derivable visualization/log listings); the
-// per-run blob artifacts (trace.txt, dataset_description.json,
-// quality_control.json, visualization_output.json) are fetched afterwards by a
-// small background worker pool that folds results into the rendered page as
-// they land. Expanding a run's card (or a group containing it) promotes it to
-// the front of the queue. A generation counter lets a new load (page refresh,
+// per-run blob artifacts are fetched afterwards by a small background worker
+// pool that folds results into the rendered page as they land. Work is queued
+// as (run, kind) tasks in two eager passes plus one on-demand pass:
+//
+//   "status" — trace.txt only (a few KB per run). The ONLY background pass:
+//              it is what makes the pass/fail glyphs on cards and group badges
+//              truthful, and nothing else on the list view needs a fetch.
+//              Until a run's status pass lands its optimistic ✓ carries a
+//              provisional marker (see statusProvisional).
+//   "detail" — dataset_description.json + visualization_output.json
+//              (provenance, source versions, figurl links). Card-detail data:
+//              enqueued only when the user expands one of the run's card
+//              sections — except when a codebase-hash filter is active, which
+//              needs every run's provenance and hydrates it eagerly.
+//   "qc"     — quality_control.json, by far the heaviest artifact. Enqueued
+//              only on card expand, like "detail".
+//
+// Expanding a run's card (or a group containing it) promotes its tasks to the
+// front of the queue. A generation counter lets a new load (page refresh,
 // ↺ Refresh) supersede in-flight hydration so stale results never touch the
 // fresh DOM.
 //
-// Concurrency: each run fans out up to 4 requests to the same S3 host and
-// browsers allow ~6 concurrent connections per host, so 3 workers keep the
-// connection pool saturated while a promoted run still starts quickly.
+// Concurrency: every task is a single request to the same S3 host and browsers
+// allow ~6 concurrent connections per host; 3 workers keep the pool busy while
+// a promoted task still starts quickly.
 const HYDRATION_CONCURRENCY = 3;
 const HYDRATION_FLUSH_MS = 400;
 
 let _hydrationGeneration = 0; // epoch: bumped whenever a load supersedes hydration
-let _hydrationPending = []; // runs awaiting hydration (front = next)
+let _hydrationPending = []; // { run, kind } tasks awaiting hydration (front = next)
 let _hydrationActiveCount = 0; // workers currently running
 let _hydrationDirtyKeys = new Set(); // run.path values hydrated since last flush
 let _hydrationFlushTimer = null;
@@ -4598,7 +4754,15 @@ function cancelHydration() {
 
 function startHydration(runs) {
     cancelHydration();
-    _hydrationPending = runs.filter((run) => !run.hydrated);
+    // Background hydration fetches ONLY the small traces — pass/fail truth for
+    // the whole queue. Detail/QC tasks are enqueued on demand by
+    // initHydrationPromotion when a card is expanded, with one exception: an
+    // active codebase-hash filter needs every run's provenance up front.
+    const needsEagerDetails = !!parseFilter().dandiCodebaseHash;
+    _hydrationPending = [
+        ...runs.filter((run) => !run.traceLoaded).map((run) => ({ run, kind: "status" })),
+        ...(needsEagerDetails ? runs.filter((run) => !run.detailsLoaded).map((run) => ({ run, kind: "detail" })) : []),
+    ];
     const gen = _hydrationGeneration;
     const workers = Math.min(HYDRATION_CONCURRENCY, _hydrationPending.length);
     for (let i = 0; i < workers; i++) hydrationWorker(gen);
@@ -4608,14 +4772,14 @@ async function hydrationWorker(gen) {
     _hydrationActiveCount++;
     try {
         while (gen === _hydrationGeneration && _hydrationPending.length > 0) {
-            const run = _hydrationPending.shift();
+            const task = _hydrationPending.shift();
             try {
-                await hydrateRun(run);
+                await hydrateRunTask(task.run, task.kind);
             } catch {
-                run.hydrated = true; // never re-queued; render whatever landed
+                /* task never re-queued; render whatever landed */
             }
             if (gen !== _hydrationGeneration) return;
-            _hydrationDirtyKeys.add(run.path);
+            _hydrationDirtyKeys.add(task.run.path);
             scheduleHydrationFlush();
         }
     } finally {
@@ -4637,25 +4801,20 @@ async function hydrationWorker(gen) {
     }
 }
 
-// Fetch a run's blob-backed artifacts and fold them into the run object IN
-// PLACE. Mutation (rather than replacement) keeps _runsInScope, _filteredRuns,
-// and the pending queue sharing one object per run, so sort/layout re-renders
-// mid-hydration always show the latest data. Skip trace/dataset fetching for
-// queued runs (no logs yet).
-async function hydrateRun(run) {
-    const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
-    const [text, datasetDesc, qualityControl, vizLinks] = await Promise.all([
-        fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
-        run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
-        run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
-        run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
-    ]);
-    const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
-    // Move QC-referenced plots into the QC cards and drop them from the
-    // visualization gallery so each plot appears in one place.
-    const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
+// All hydration mutates the run object IN PLACE: _runsInScope, _filteredRuns,
+// and the pending queue share one object per run, so sort/layout re-renders
+// mid-hydration always show the latest data.
+async function hydrateRunTask(run, kind) {
+    if (kind === "status") return hydrateRunStatus(run);
+    if (kind === "qc") return hydrateRunQc(run);
+    return hydrateRunDetails(run);
+}
+
+// Status pass: fetch the run's trace (skipped for runs without logs) and settle
+// its authoritative status, failure step, and task table.
+async function hydrateRunStatus(run) {
+    const text = run.hasLogs ? await fetchTraceText(run) : null;
     const parsed = parseTrace(text);
-    const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
     // An explicit upstream status is authoritative; otherwise the trace refines
     // the flag-derived status (a run with output may still have failed tasks).
     const status = run.stateStatus
@@ -4669,27 +4828,107 @@ async function hydrateRun(run) {
         run.stateFailureStep ?? (isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null);
     Object.assign(run, {
         ...parsed,
-        generatedBy,
-        datasetDescription: datasetDesc ?? null,
-        vizData: vizForDisplay,
-        vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
-        qualityControl,
         status,
         failureStep,
-        logFiles: runLogFiles(run),
-        hydrated: true,
+        statusProvisional: false,
+        traceLoaded: true,
     });
 }
 
-// Move a pending run to the front of the hydration queue (no-op when the run
-// is already hydrated, in flight, or unknown).
-function prioritizeRun(runKey) {
-    const i = _hydrationPending.findIndex((run) => run.path === runKey);
-    if (i > 0) _hydrationPending.unshift(_hydrationPending.splice(i, 1)[0]);
+// Detail pass: provenance and interactive-viz links (both small artifacts).
+async function hydrateRunDetails(run) {
+    const [datasetDesc, vizLinks] = await Promise.all([
+        run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
+        run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
+    ]);
+    Object.assign(run, {
+        generatedBy: Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [],
+        datasetDescription: datasetDesc ?? null,
+        vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
+        detailsLoaded: true,
+    });
+}
+
+// On-demand pass: quality_control.json (the heaviest artifact), fetched only
+// once the user expands one of the run's card sections. QC-referenced plots
+// move out of the visualization gallery and into the QC cards when it lands.
+async function hydrateRunQc(run) {
+    const qualityControl = run.hasOutput ? await fetchQualityControl(run) : null;
+    const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
+    Object.assign(run, {
+        qualityControl,
+        vizData: qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData,
+        qcLoaded: true,
+    });
+}
+
+// Whether the run has a quality_control.json artifact to fetch (sync check
+// against the output_paths map — mirrors fetchVizArtifactJson's candidates).
+function runHasQualityControl(run) {
+    if (!run?.hasOutput || !run?.outputPaths) return false;
+    return (
+        `${run.path}/derivatives/visualization/quality_control.json` in run.outputPaths ||
+        `${run.path}/visualization/quality_control.json` in run.outputPaths
+    );
+}
+
+// Move a run's pending tasks to the front of the hydration queue, preserving
+// status-before-detail order (no-op for unknown or fully hydrated runs). With
+// { reveal: true } (a card section was expanded) the run's card-detail
+// artifacts — dataset_description/visualization_output and, when present,
+// quality_control.json — are also enqueued; none of them is ever fetched
+// without such a reveal (codebase-hash filters excepted, see startHydration).
+function prioritizeRun(runKey, { reveal = false } = {}) {
+    const mine = [];
+    const rest = [];
+    for (const task of _hydrationPending) (task.run.path === runKey ? mine : rest).push(task);
+    const run = mine[0]?.run ?? _runsInScope.find((r) => r.path === runKey);
+    if (reveal && run) {
+        if (!run.detailsLoaded && !run.detailQueued && (run.datasetDescriptionPath || run.hasOutput)) {
+            run.detailQueued = true;
+            mine.push({ run, kind: "detail" });
+        }
+        if (!run.qcLoaded && !run.qcQueued && runHasQualityControl(run)) {
+            run.qcQueued = true;
+            mine.push({ run, kind: "qc" });
+        }
+    }
+    if (mine.length === 0) return;
+    _hydrationPending = [...mine, ...rest];
+    // Revive workers if the queue had already drained (QC arrives on demand).
+    const gen = _hydrationGeneration;
+    const needed = Math.min(HYDRATION_CONCURRENCY, _hydrationPending.length) - _hydrationActiveCount;
+    for (let i = 0; i < needed; i++) hydrationWorker(gen);
 }
 
 // Promote runs the user reveals. 'toggle' does not bubble, so listen in the
 // capture phase on #runs — the element itself survives innerHTML swaps.
+// The runs backing a tree group, in current sort order. Used to build lazily
+// deferred group bodies at open time (always from the live, possibly-hydrated
+// run objects, so a body rendered late is born up to date).
+function runsForGroupKey(groupKey) {
+    return sortRuns(_filteredRuns).filter((run) => runGroupKeys(run).includes(groupKey));
+}
+
+// Build a lazily deferred group body on first open. No-op for groups whose
+// body was already rendered (data-body-rendered) or non-tree groups.
+function renderLazyGroupBody(details) {
+    if (details.dataset.bodyRendered) return;
+    const groupKey = details.dataset.groupKey ?? "";
+    if (!/^[dse]:/.test(groupKey)) return;
+    const body = details.querySelector(":scope > [data-group-body]");
+    if (!body) return;
+    details.dataset.bodyRendered = "1";
+    const runs = runsForGroupKey(groupKey);
+    body.innerHTML =
+        groupKey[0] === "d"
+            ? renderDandisetGroupBody(runs)
+            : groupKey[0] === "s"
+              ? renderSubjectGroupBody(runs)
+              : renderSessionGroupBody(runs);
+    initInlineHtmlFrames(details);
+}
+
 function initHydrationPromotion() {
     const runsEl = document.getElementById("runs");
     if (!runsEl || runsEl.dataset.hydrationInit) return;
@@ -4698,16 +4937,29 @@ function initHydrationPromotion() {
         "toggle",
         (evt) => {
             const details = evt.target;
-            if (!(details instanceof Element) || !details.open) return;
-            const card = details.closest("[data-run-key]");
-            if (card) {
-                prioritizeRun(card.dataset.runKey);
+            if (!(details instanceof Element)) return;
+            const groupKey = details.dataset?.groupKey;
+            if (groupKey) {
+                // Track expansion state for lazy re-renders; a group closing
+                // needs no further work (its body stays until a full re-render
+                // reclaims it).
+                if (!details.open) {
+                    _openGroupKeys.delete(groupKey);
+                    return;
+                }
+                _openGroupKeys.add(groupKey);
+                renderLazyGroupBody(details);
+                // Promote the revealed runs' status/detail tasks (not QC — the
+                // heavy artifact waits for a card-level expand), iterating in
+                // reverse DOM order so the topmost card goes first.
+                const cards = details.querySelectorAll("[data-run-key]");
+                for (let i = cards.length - 1; i >= 0; i--) prioritizeRun(cards[i].dataset.runKey);
                 return;
             }
-            // A group opened: promote every run it reveals, iterating in
-            // reverse DOM order so the topmost visible card hydrates first.
-            const cards = details.querySelectorAll("[data-run-key]");
-            for (let i = cards.length - 1; i >= 0; i--) prioritizeRun(cards[i].dataset.runKey);
+            if (!details.open) return;
+            const card = details.closest("[data-run-key]");
+            // A card section opened: full promotion, including detail + QC.
+            if (card) prioritizeRun(card.dataset.runKey, { reveal: true });
         },
         true
     );
@@ -4753,12 +5005,7 @@ function refreshGroupBadges() {
     if (!runsEl) return;
     const groups = new Map(); // data-group-key -> runs
     for (const run of _filteredRuns) {
-        const keys = [
-            `d:${run.dandisetId}`,
-            `s:${run.dandisetId}/${run.subject}`,
-            `e:${run.dandisetId}/${run.subject}/${run.session ?? ""}`,
-        ];
-        for (const key of keys) {
+        for (const key of runGroupKeys(run)) {
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(run);
         }
@@ -4790,11 +5037,19 @@ function rerenderRunsPreservingState() {
     for (const details of runsEl.querySelectorAll("details")) {
         const key = detailsStateKey(details);
         if (!key) continue;
-        if (openKeys.has(key)) details.setAttribute("open", "");
+        if (openKeys.has(key)) {
+            details.setAttribute("open", "");
+            renderLazyGroupBody(details); // restored-open groups need their lazy body
+        }
         // Restoring the closed set too keeps autoExpand defaults from popping
         // groups the user explicitly collapsed.
         else if (closedKeys.has(key)) details.removeAttribute("open");
     }
+    // Reconcile the expansion registry with what the restore produced (e.g.
+    // autoExpand groups the user had explicitly collapsed).
+    _openGroupKeys = new Set(
+        Array.from(runsEl.querySelectorAll("details[data-group-key][open]"), (el) => el.dataset.groupKey)
+    );
     window.scrollTo(scrollX, scrollY);
 }
 
@@ -4864,6 +5119,10 @@ async function loadQueueData() {
     // Supersede any in-flight hydration from a previous load before the new
     // state fetch begins (stale results must never touch the fresh DOM).
     cancelHydration();
+    // Fresh load: collapse the tree and reset flat-layout chunking, matching
+    // the pre-lazy-rendering behavior of a full reload.
+    _openGroupKeys = new Set();
+    _flatRenderLimit = FLAT_RENDER_CHUNK;
 
     try {
         // Registries are only consumed at filter/render time, so let their
@@ -4949,6 +5208,7 @@ async function init() {
     initTheme();
     initModal();
     initHydrationPromotion();
+    initFlatShowMore();
     syncTopNav(_viewMode);
 
     // The landing page is the default view (no `view` param). It has no queue
@@ -5050,8 +5310,10 @@ if (typeof module !== "undefined" && module.exports) {
         fetchQueueConfig,
         fetchQueueState,
         flushHydrationUpdates,
-        hydrateRun,
+        hydrateRunStatus,
+        runHasQualityControl,
         hydrationIdle,
+        initFlatShowMore,
         initHydrationPromotion,
         isImmutableBlobUrl,
         prioritizeRun,
