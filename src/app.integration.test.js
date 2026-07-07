@@ -635,7 +635,7 @@ describe("progressive queue loading", () => {
         expect(document.getElementById("runs").style.display).toBe("none");
     });
 
-    it("fetches every trace before any detail artifact and never fetches QC eagerly", async () => {
+    it("background-hydrates only traces; detail artifacts wait for a card reveal", async () => {
         const entries = [];
         const meta = [];
         const handlers = new Map();
@@ -649,7 +649,7 @@ describe("progressive queue loading", () => {
             entries.push(entry);
             meta.push(urls);
             handlers.set(urls.trace, () => new Response(TRACE_OK, { status: 200 }));
-            handlers.set(urls.dd, () => new Response("{}", { status: 200 }));
+            handlers.set(urls.dd, () => new Response('{"GeneratedBy":[]}', { status: 200 }));
             handlers.set(urls.viz, () => new Response("{}", { status: 200 }));
             handlers.set(urls.qc, () => new Response('{"metrics":[{"name":"drift","stage":"pre"}]}', { status: 200 }));
         }
@@ -659,13 +659,39 @@ describe("progressive queue loading", () => {
         await loadQueueData();
         await hydrationIdle();
 
-        const order = blobRequests();
+        // Idle background hydration touched exactly the three traces — nothing else.
         const traceUrls = new Set(meta.map((m) => m.trace));
-        const lastTraceIdx = Math.max(...order.map((u, i) => (traceUrls.has(u) ? i : -1)));
-        const firstDetailIdx = order.findIndex((u) => !traceUrls.has(u));
-        expect(order.filter((u) => traceUrls.has(u))).toHaveLength(3);
-        expect(firstDetailIdx).toBeGreaterThan(lastTraceIdx); // status pass fully precedes details
-        expect(order.some((u) => meta.some((m) => m.qc === u))).toBe(false); // QC never in background
+        const requested = blobRequests();
+        expect(requested).toHaveLength(3);
+        expect(requested.every((u) => traceUrls.has(u))).toBe(true);
+    });
+
+    it("eagerly hydrates provenance when a codebase-hash filter is active", async () => {
+        window.history.replaceState(null, "", "/?codebaseHash=abc1234");
+        const { entry, urls } = withArtifacts(makeEntry({ has_logs: false }), { dd: newBlobId() });
+        seedQueueState([entry]);
+        installFetch(
+            new Map([
+                [
+                    urls.dd,
+                    () =>
+                        new Response(
+                            JSON.stringify({
+                                GeneratedBy: [{ CodeURL: "https://github.com/dandi-compute/code", Version: "abc1234" }],
+                            }),
+                            { status: 200 }
+                        ),
+                ],
+            ])
+        );
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        // The filter needs every run's GeneratedBy, so dataset_description is
+        // fetched without any card reveal and the run enters the filtered set.
+        expect(blobRequests()).toContain(urls.dd);
+        expect(document.querySelector("#runs .run-entry")).not.toBeNull();
     });
 
     it("fetches QC only when a card section is expanded", async () => {

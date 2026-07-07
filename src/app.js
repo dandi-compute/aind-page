@@ -286,6 +286,7 @@ function buildInitialRun(run) {
         logFiles: runLogFiles(run),
         traceLoaded: !run.hasLogs, // nothing to fetch for runs without logs
         detailsLoaded: false,
+        detailQueued: false,
         qcLoaded: false,
         qcQueued: false,
     };
@@ -783,7 +784,29 @@ async function cachedFetch(url, init = {}) {
 // Every cache operation is best-effort: failures fall through to the network.
 const BLOB_CACHE_NAME = "aind-blobs-v1";
 const BLOB_MEMORY_CACHE_MAX_BODY = 512 * 1024; // keep huge bodies out of the Map
+// Hard cap on the Map's total retained bytes: page memory must stay flat as
+// background hydration sweeps thousands of blobs. Oldest entries evict first
+// (Map iteration order; reads refresh recency); the Cache API remains the
+// durable warm layer, so eviction only costs a disk re-read.
+const BLOB_MEMORY_CACHE_MAX_TOTAL = 24 * 1024 * 1024;
 const _blobMemoryCache = new Map(); // url -> { body, contentType, status }
+let _blobMemoryCacheBytes = 0;
+
+function blobMemoryCachePut(url, entry) {
+    if (entry.body.length > BLOB_MEMORY_CACHE_MAX_BODY) return;
+    const existing = _blobMemoryCache.get(url);
+    if (existing) {
+        _blobMemoryCacheBytes -= existing.body.length;
+        _blobMemoryCache.delete(url);
+    }
+    _blobMemoryCache.set(url, entry);
+    _blobMemoryCacheBytes += entry.body.length;
+    for (const [oldUrl, oldEntry] of _blobMemoryCache) {
+        if (_blobMemoryCacheBytes <= BLOB_MEMORY_CACHE_MAX_TOTAL) break;
+        _blobMemoryCache.delete(oldUrl);
+        _blobMemoryCacheBytes -= oldEntry.body.length;
+    }
+}
 
 function isImmutableBlobUrl(url) {
     return typeof url === "string" && url.startsWith(`${S3_BLOB_BASE}/`);
@@ -819,7 +842,10 @@ function blobResponse({ body, contentType, status }) {
 
 async function readCachedBlob(url) {
     const memoryHit = _blobMemoryCache.get(url);
-    if (memoryHit) return blobResponse(memoryHit);
+    if (memoryHit) {
+        blobMemoryCachePut(url, memoryHit); // refresh recency for eviction order
+        return blobResponse(memoryHit);
+    }
 
     const cache = await openBlobCache();
     if (cache) {
@@ -831,7 +857,7 @@ async function readCachedBlob(url) {
                     contentType: match.headers.get("Content-Type") ?? "",
                     status: match.status,
                 };
-                if (entry.body.length <= BLOB_MEMORY_CACHE_MAX_BODY) _blobMemoryCache.set(url, entry);
+                blobMemoryCachePut(url, entry);
                 return blobResponse(entry);
             }
         } catch {
@@ -850,7 +876,7 @@ async function readCachedBlob(url) {
 
 function writeCachedBlob(url, body, contentType, status) {
     const entry = { body, contentType, status };
-    if (body.length <= BLOB_MEMORY_CACHE_MAX_BODY) _blobMemoryCache.set(url, entry);
+    blobMemoryCachePut(url, entry);
 
     if (typeof caches !== "undefined") {
         openBlobCache()
@@ -4039,6 +4065,11 @@ function ensureInlineFrameListener() {
    Content is only fetched once an iframe is revealed (no closed <details>
    ancestor), either immediately below or via the toggle listeners. */
 function initInlineHtmlFrames(root = document) {
+    // Sweep frames whose cards left the DOM (hydration replacements) so the
+    // strong references here don't pin detached card trees in memory.
+    for (const iframe of _inlineFrameSet) {
+        if (!iframe.isConnected) _inlineFrameSet.delete(iframe);
+    }
     const frames = Array.from(root.querySelectorAll("iframe[data-srcdoc-url]"));
     for (const iframe of frames) _inlineFrameSet.add(iframe);
     ensureInlineFrameListener();
@@ -4668,15 +4699,18 @@ function loadLandingPage() {
 // pool that folds results into the rendered page as they land. Work is queued
 // as (run, kind) tasks in two eager passes plus one on-demand pass:
 //
-//   "status" — trace.txt only (a few KB per run). Runs FIRST for every run so
-//              the pass/fail glyphs on cards and group badges converge as fast
-//              as possible; until a run's status pass lands its optimistic ✓ is
-//              rendered as provisional (see statusProvisional).
-//   "detail" — dataset_description.json + visualization_output.json (small;
-//              provenance, source versions, figurl links, codebase filters).
-//   "qc"     — quality_control.json, by far the heaviest artifact. Never
-//              fetched in the background: enqueued only when the user expands
-//              one of the run's card sections.
+//   "status" — trace.txt only (a few KB per run). The ONLY background pass:
+//              it is what makes the pass/fail glyphs on cards and group badges
+//              truthful, and nothing else on the list view needs a fetch.
+//              Until a run's status pass lands its optimistic ✓ carries a
+//              provisional marker (see statusProvisional).
+//   "detail" — dataset_description.json + visualization_output.json
+//              (provenance, source versions, figurl links). Card-detail data:
+//              enqueued only when the user expands one of the run's card
+//              sections — except when a codebase-hash filter is active, which
+//              needs every run's provenance and hydrates it eagerly.
+//   "qc"     — quality_control.json, by far the heaviest artifact. Enqueued
+//              only on card expand, like "detail".
 //
 // Expanding a run's card (or a group containing it) promotes its tasks to the
 // front of the queue. A generation counter lets a new load (page refresh,
@@ -4720,12 +4754,14 @@ function cancelHydration() {
 
 function startHydration(runs) {
     cancelHydration();
-    // Two eager passes: every run's status (trace) task first, then the detail
-    // tasks — pass/fail truth for the whole queue costs only the small traces.
-    // QC tasks are enqueued on demand by initHydrationPromotion.
+    // Background hydration fetches ONLY the small traces — pass/fail truth for
+    // the whole queue. Detail/QC tasks are enqueued on demand by
+    // initHydrationPromotion when a card is expanded, with one exception: an
+    // active codebase-hash filter needs every run's provenance up front.
+    const needsEagerDetails = !!parseFilter().dandiCodebaseHash;
     _hydrationPending = [
         ...runs.filter((run) => !run.traceLoaded).map((run) => ({ run, kind: "status" })),
-        ...runs.filter((run) => !run.detailsLoaded).map((run) => ({ run, kind: "detail" })),
+        ...(needsEagerDetails ? runs.filter((run) => !run.detailsLoaded).map((run) => ({ run, kind: "detail" })) : []),
     ];
     const gen = _hydrationGeneration;
     const workers = Math.min(HYDRATION_CONCURRENCY, _hydrationPending.length);
@@ -4838,16 +4874,24 @@ function runHasQualityControl(run) {
 
 // Move a run's pending tasks to the front of the hydration queue, preserving
 // status-before-detail order (no-op for unknown or fully hydrated runs). With
-// { qc: true } (a card section was expanded) the run's quality_control.json is
-// also enqueued — QC is never fetched without such a reveal.
-function prioritizeRun(runKey, { qc = false } = {}) {
+// { reveal: true } (a card section was expanded) the run's card-detail
+// artifacts — dataset_description/visualization_output and, when present,
+// quality_control.json — are also enqueued; none of them is ever fetched
+// without such a reveal (codebase-hash filters excepted, see startHydration).
+function prioritizeRun(runKey, { reveal = false } = {}) {
     const mine = [];
     const rest = [];
     for (const task of _hydrationPending) (task.run.path === runKey ? mine : rest).push(task);
     const run = mine[0]?.run ?? _runsInScope.find((r) => r.path === runKey);
-    if (qc && run && !run.qcLoaded && !run.qcQueued && runHasQualityControl(run)) {
-        run.qcQueued = true;
-        mine.push({ run, kind: "qc" });
+    if (reveal && run) {
+        if (!run.detailsLoaded && !run.detailQueued && (run.datasetDescriptionPath || run.hasOutput)) {
+            run.detailQueued = true;
+            mine.push({ run, kind: "detail" });
+        }
+        if (!run.qcLoaded && !run.qcQueued && runHasQualityControl(run)) {
+            run.qcQueued = true;
+            mine.push({ run, kind: "qc" });
+        }
     }
     if (mine.length === 0) return;
     _hydrationPending = [...mine, ...rest];
@@ -4914,8 +4958,8 @@ function initHydrationPromotion() {
             }
             if (!details.open) return;
             const card = details.closest("[data-run-key]");
-            // A card section opened: full promotion, including QC.
-            if (card) prioritizeRun(card.dataset.runKey, { qc: true });
+            // A card section opened: full promotion, including detail + QC.
+            if (card) prioritizeRun(card.dataset.runKey, { reveal: true });
         },
         true
     );
