@@ -1558,13 +1558,6 @@ a.src-version-link:hover {
 }
 
 /* ─── Quality control ───────────────────────────────────────── */
-.qc-status-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 10px 20px 4px;
-}
-
 .qc-stage {
     padding: 8px 20px 14px;
 }

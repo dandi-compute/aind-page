@@ -1456,6 +1456,23 @@ describe("renderQualityControlSection", () => {
         expect(html).not.toContain("qc-option");
     });
 
+    it("does not render Pass/Pending evaluation statuses (per-metric or overall)", () => {
+        const html = renderQualityControlSection({
+            status: { "Raw data": "Pass", "ecephys:Curation": "Pending" },
+            metrics: [
+                {
+                    ...dropdownMetric("Normal"),
+                    status_history: [{ evaluator: "automated", status: "Pending", timestamp: "2026-06-01T00:00:00Z" }],
+                },
+            ],
+        });
+
+        expect(html).not.toContain("status-badge");
+        expect(html).not.toContain("qc-status-summary");
+        expect(html).not.toContain("Pending");
+        expect(html).not.toContain("Pass");
+    });
+
     it("renders no value chips when nothing has been selected", () => {
         const html = renderQualityControlSection({ metrics: [dropdownMetric("")] });
 

@@ -2392,26 +2392,12 @@ function renderVisualizationSection(recordings, vizLinks) {
 
 /* ─── Quality control rendering ─────────────────────────────────
    Renders the aind-data-schema QualityControl object (quality_control.json) as a
-   collapsible panel: an overall status summary plus per-metric cards grouped by
-   processing stage, each showing the latest status, modality, description (with
-   any markdown links), the selected picker value(s), and a link to the
-   referenced visualization image when it can be matched to a known PNG.        */
-const QC_STATUS_CLASS = {
-    pass: "status-success",
-    fail: "status-failed",
-    pending: "status-queued",
-};
-
-function qcStatusClass(status) {
-    return QC_STATUS_CLASS[String(status ?? "").toLowerCase()] ?? "status-unknown";
-}
-
-// Latest status from a metric's status_history (the last recorded entry).
-function qcLatestStatus(metric) {
-    const history = Array.isArray(metric?.status_history) ? metric.status_history : [];
-    const last = history[history.length - 1];
-    return last?.status ?? null;
-}
+   collapsible panel of per-metric cards grouped by processing stage, each
+   showing the metric's name, modality, description (with any markdown links),
+   the selected picker value(s), and a link to the referenced visualization
+   image when it can be matched to a known PNG. The object's Pass/Fail/Pending
+   statuses (per-metric status_history and the top-level status map) are
+   evaluation bookkeeping, not results of this run — they are not rendered.   */
 
 // Convert a description containing markdown links into safe HTML: escape first,
 // then turn [label](http…) into anchors.
@@ -2466,8 +2452,6 @@ function partitionQcPlots(qc, vizData) {
 }
 
 function renderQcMetric(metric) {
-    const status = qcLatestStatus(metric);
-    const statusBadge = status ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>` : "";
     const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
     const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
     const descHtml = metric?.description
@@ -2500,7 +2484,6 @@ function renderQcMetric(metric) {
 
     return `<div class="qc-metric">
     <div class="qc-metric-head">
-        ${statusBadge}
         <span class="qc-metric-name">${e(metric?.name ?? "Metric")}</span>
         ${modalityHtml}
     </div>
@@ -2513,17 +2496,6 @@ function renderQcMetric(metric) {
 function renderQualityControlSection(qc) {
     const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
     if (metrics.length === 0) return "";
-
-    // Overall status summary (top-level `status` map: grouping key → status).
-    const summaryEntries = qc?.status && typeof qc.status === "object" ? Object.entries(qc.status) : [];
-    const summaryHtml = summaryEntries.length
-        ? `<div class="qc-status-summary">${summaryEntries
-              .map(([key, value]) => {
-                  const label = key.includes(":") ? key.slice(key.indexOf(":") + 1) : key;
-                  return `<span class="status-badge ${qcStatusClass(value)}" title="${e(key)}">${e(label)}: ${e(value)}</span>`;
-              })
-              .join("")}</div>`
-        : "";
 
     // Group metrics by processing stage, preserving first-seen order.
     const byStage = groupBy(metrics, (m) => m.stage || "Other");
@@ -2543,7 +2515,6 @@ function renderQualityControlSection(qc) {
         Quality Control
         <span class="count-badge">${metrics.length}</span>
     </summary>
-    ${summaryHtml}
     ${stagesHtml}
 </details>`;
 }
