@@ -57,6 +57,10 @@ let _sortMode = "attempt";
 let _sortDirection = "desc";
 /* Cached filtered runs for re-rendering on layout toggle */
 let _filteredRuns = [];
+/* All view-scoped runs for the current load (superset of _filteredRuns).
+   Hydration mutates these run objects in place, so _filteredRuns and the
+   hydration queue share them and re-renders always show the latest data. */
+let _runsInScope = [];
 
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
@@ -216,6 +220,58 @@ function runFailureStep(run) {
     if (failedSteps.includes("post-processing")) return "post-processing";
     if (failedSteps.includes("job-dispatch")) return "job-dispatch";
     return "other";
+}
+
+// Whether any user-facing filter parameter is active (shared by the filter
+// banner, the queue loader, and hydration flushes).
+function isFilterActive(filter) {
+    return !!(
+        filter.dandisetId ||
+        filter.subject ||
+        filter.session ||
+        filter.pipelineVersion ||
+        filter.paramsType ||
+        filter.configType ||
+        filter.dandiCodebaseVersion ||
+        filter.assetSize ||
+        filter.failureStep ||
+        filter.status
+    );
+}
+
+// Flag-only status: what we can know before any blob fetch. Prefers an
+// explicit upstream status when the state entry carries one.
+function deriveFlagStatus(run) {
+    if (run.stateStatus) return run.stateStatus;
+    return run.hasOutput
+        ? "success"
+        : run.hasBeenSubmitted && !run.hasLogs
+          ? "running"
+          : !run.hasLogs && run.hasCode
+            ? "queued"
+            : "failed";
+}
+
+// Skeleton run for the immediate first render: flag-derived status plus
+// everything derivable synchronously from the entry's output_paths map
+// (visualization images, log-file listing). Trace-refined status, failureStep,
+// tasks, provenance, QC, and viz links arrive later via hydrateRun. failureStep
+// stays null (= "not yet known") rather than defaulting to "other" so
+// failure-step filters never transiently over-match before hydration.
+function buildInitialRun(run) {
+    return {
+        ...run,
+        status: deriveFlagStatus(run),
+        failureStep: run.stateFailureStep ?? null,
+        tasks: [],
+        generatedBy: [],
+        datasetDescription: null,
+        vizData: run.hasOutput ? fetchVisualizationData(run) : null,
+        vizLinks: null,
+        qualityControl: null,
+        logFiles: runLogFiles(run),
+        hydrated: false,
+    };
 }
 
 function normalizeStatus(status) {
@@ -416,18 +472,7 @@ function renderFilterBanner(filter, availableRuns = []) {
     const layoutMode = parseLayoutMode();
     const sortMode = parseSortMode();
     const sortDirection = parseSortDirection();
-    const isFiltered = !!(
-        filter.dandisetId ||
-        filter.subject ||
-        filter.session ||
-        filter.pipelineVersion ||
-        filter.paramsType ||
-        filter.configType ||
-        filter.dandiCodebaseVersion ||
-        filter.assetSize ||
-        filter.failureStep ||
-        filter.status
-    );
+    const isFiltered = isFilterActive(filter);
 
     const crumbs = [];
     if (filter.dandisetId) {
@@ -1207,6 +1252,11 @@ function parseQueueEntries(entries) {
             hasBeenSubmitted: entry.has_been_submitted ?? false,
             hasOutput: entry.has_output,
             hasLogs: entry.has_logs,
+            // Upstream may eventually publish authoritative status/failure-step
+            // fields in the state entries; surface them so the initial render
+            // can use them and hydration can skip trace-based refinement.
+            stateStatus: entry.status ?? null,
+            stateFailureStep: entry.failure_step ?? null,
             contentHash: entry.content_id ?? null,
             outputPaths: normalizeOutputPaths(entry),
             datasetDescriptionPath: datasetDescriptionPathOf(entry),
@@ -1874,7 +1924,7 @@ function renderRunEntry(run) {
             : `<span class="run-sep">·</span><span class="run-bytes">Asset size:&nbsp;${formatByteCount(bytes)}</span>`;
 
     return `
-<div class="run-entry ${sc}">
+<div class="run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header">
         <span class="status-badge ${sc}">${slbl}</span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
@@ -2110,7 +2160,7 @@ function renderProvenanceSection(desc) {
     const count = metaRows.length + gb.length + sd.length;
 
     return `
-<details class="run-section">
+<details class="run-section" data-section="provenance">
     <summary class="run-section-title">
         Provenance
         <span class="count-badge">${count}</span>
@@ -2138,7 +2188,7 @@ function renderTraceSection(tasks) {
         .join("");
 
     return `
-<details class="run-section">
+<details class="run-section" data-section="trace">
     <summary class="run-section-title">
         Pipeline Steps
         <span class="count-badge">${tasks.length}</span>
@@ -2173,7 +2223,7 @@ function renderLogSection(run, logFiles) {
         .join("");
 
     return `
-<details class="run-section">
+<details class="run-section" data-section="logs">
     <summary class="run-section-title">
         Logs
         <span class="count-badge">${logFiles.length}</span>
@@ -2203,7 +2253,7 @@ function renderReportSection(run, reportFiles) {
         .join("");
 
     return `
-<details class="run-section">
+<details class="run-section" data-section="reports">
     <summary class="run-section-title">
         Reports
         <span class="count-badge">${reportFiles.length}</span>
@@ -2286,7 +2336,7 @@ function renderVisualizationSection(recordings, vizLinks) {
     const count = totalImages + totalLinks;
 
     return `
-<details class="run-section">
+<details class="run-section" data-section="viz">
     <summary class="run-section-title">
         Visualizations
         <span class="count-badge">${count}</span>
@@ -2443,7 +2493,7 @@ function renderQualityControlSection(qc) {
         .join("");
 
     return `
-<details class="run-section">
+<details class="run-section" data-section="qc">
     <summary class="run-section-title">
         Quality Control
         <span class="count-badge">${metrics.length}</span>
@@ -3211,7 +3261,7 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
         .join("");
 
     return `
-<details class="dandiset-group"${autoExpand ? " open" : ""}>
+<details class="dandiset-group" data-group-key="d:${e(dandisetId)}"${autoExpand ? " open" : ""}>
     <summary class="dandiset-summary">
         <span class="dandiset-summary-inner">
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
@@ -3253,7 +3303,7 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
         .join("");
 
     return `
-<details class="subject-group"${autoExpand ? " open" : ""}>
+<details class="subject-group" data-group-key="s:${e(dandisetId)}/${e(subject)}"${autoExpand ? " open" : ""}>
     <summary class="subject-summary">
         <span class="group-summary-inner">
             <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
@@ -3284,7 +3334,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
     const runsHtml = runs.map(renderRunEntry).join("");
 
     return `
-<details class="session-group"${autoExpand ? " open" : ""}>
+<details class="session-group" data-group-key="e:${e(dandisetId)}/${e(subject)}/${e(session ?? "")}"${autoExpand ? " open" : ""}>
     <summary class="session-summary">
         <span class="group-summary-inner">
             ${sessionLinkHtml}
@@ -3315,7 +3365,7 @@ function renderPipelineVersionGroup(dandisetId, subject, session, pipelineName, 
         .join("");
 
     return `
-<details class="pipeline-version-group">
+<details class="pipeline-version-group" data-group-key="v:${e(dandisetId)}/${e(subject)}/${e(session ?? "")}/${e(pipelineVersion)}">
     <summary class="pipeline-version-summary">
         <span class="group-summary-inner">
             <span class="group-pipeline">${renderPipelineInfo(pipelineName, pipelineVersion)}</span>
@@ -3341,7 +3391,7 @@ function renderParamsGroup(paramsProfile, configHash, runs) {
         : "";
 
     return `
-<details class="params-group">
+<details class="params-group" data-group-key="p:${e(paramsProfile ?? "")}/${e(configHash ?? "")}">
     <summary class="params-summary">
         <span class="group-summary-inner">
             <span class="group-label">${paramsLabel}${configLabel}</span>
@@ -3410,7 +3460,7 @@ function renderFlatRunEntry(run) {
     const dandiPathUrl = `${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}/draft/files?location=${encodeURIComponent(location)}`;
 
     return `
-<div class="run-entry flat-run-entry ${sc}">
+<div class="run-entry flat-run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header flat-run-header">
         <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
         <span class="status-badge ${sc}">${slbl}</span>
@@ -3786,10 +3836,57 @@ async function fetchLogText(fileUrl) {
     }
 }
 
-/* Fetch and inject srcdoc for all inline report iframes in the page */
-function initInlineHtmlFrames() {
-    const frames = Array.from(document.querySelectorAll("iframe[data-srcdoc-url]"));
-    const frameSet = new Set(frames);
+// Every inline-report iframe ever registered for height messages. A single
+// module-level "message" listener sizes whichever registered frame reported;
+// frames that have left the DOM (e.g. replaced by a hydration update) are
+// pruned as messages arrive. One shared listener (instead of one per
+// invocation) keeps per-card hydration updates from accumulating listeners.
+const _inlineFrameSet = new Set();
+let _inlineFrameListenerInstalled = false;
+
+// _framePatchedContent holds the fully-patched HTML for each iframe, populated
+// asynchronously; _frameInjected tracks which iframes already had their srcdoc
+// set. srcdoc is set lazily: only once the iframe's parent <details> is open
+// (visible), so that chart libraries (e.g. Highcharts in timeline.html) render
+// in a non-zero container and avoid producing invalid negative <rect> widths in
+// the browser console. Module-level (weak, so replaced cards' frames drop out)
+// because toggle listeners and content fetches can come from different
+// initInlineHtmlFrames invocations.
+const _framePatchedContent = new WeakMap();
+const _frameInjected = new WeakSet();
+
+function maybeInjectFrame(iframe) {
+    if (_frameInjected.has(iframe)) return;
+    if (!_framePatchedContent.has(iframe)) return; // content not yet fetched
+    if (iframe.closest("details:not([open])")) return; // still inside a closed <details>
+    _frameInjected.add(iframe);
+    iframe.srcdoc = _framePatchedContent.get(iframe);
+}
+
+function ensureInlineFrameListener() {
+    if (_inlineFrameListenerInstalled) return;
+    _inlineFrameListenerInstalled = true;
+    window.addEventListener("message", (evt) => {
+        if (typeof evt.origin !== "string" || (evt.origin !== "null" && evt.origin !== window.location.origin)) return;
+        if (!evt.data || evt.data.type !== "iframeHeight") return;
+        for (const iframe of _inlineFrameSet) {
+            if (!iframe.isConnected) {
+                _inlineFrameSet.delete(iframe);
+                continue;
+            }
+            if (iframe.contentWindow === evt.source && evt.data.h > 0) {
+                iframe.style.height = evt.data.h + "px";
+            }
+        }
+    });
+}
+
+/* Fetch and inject srcdoc for inline report iframes under `root` — the whole
+   document by default, or a single replaced run card during hydration. */
+function initInlineHtmlFrames(root = document) {
+    const frames = Array.from(root.querySelectorAll("iframe[data-srcdoc-url]"));
+    for (const iframe of frames) _inlineFrameSet.add(iframe);
+    ensureInlineFrameListener();
 
     // The injected script reports scrollHeight on load AND responds to a 'requestHeight'
     // message from the parent. The parent re-requests when a collapsed <details> is opened,
@@ -3804,42 +3901,21 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
 })();
 </script>`;
 
-    window.addEventListener("message", (evt) => {
-        if (typeof evt.origin !== "string" || (evt.origin !== "null" && evt.origin !== window.location.origin)) return;
-        if (!evt.data || evt.data.type !== "iframeHeight") return;
-        for (const iframe of frameSet) {
-            if (iframe.contentWindow === evt.source && evt.data.h > 0) {
-                iframe.style.height = evt.data.h + "px";
-            }
-        }
-    });
-
-    // patchedContent holds the fully-patched HTML for each iframe, populated asynchronously.
-    // injectedFrames tracks which iframes have already had their srcdoc set.
-    // srcdoc is set lazily: only once the iframe's parent <details> is open (visible), so
-    // that chart libraries (e.g. Highcharts in timeline.html) render in a non-zero container
-    // and avoid producing invalid negative <rect> widths in the browser console.
-    const patchedContent = new Map();
-    const injectedFrames = new Set();
-
-    function maybeInjectFrame(iframe) {
-        if (injectedFrames.has(iframe)) return;
-        if (!patchedContent.has(iframe)) return; // content not yet fetched
-        if (iframe.closest("details:not([open])")) return; // still inside a closed <details>
-        injectedFrames.add(iframe);
-        iframe.srcdoc = patchedContent.get(iframe);
-    }
-
     // When a <details> containing inline frames is opened, inject any pending frames
     // whose content is already available, and request a fresh height measurement from
-    // frames that are already loaded.
-    document.querySelectorAll("details").forEach((details) => {
+    // frames that are already loaded. State lives at module level (see
+    // _framePatchedContent) so listeners attached by one invocation (e.g. a
+    // group opener from the initial render) also serve iframes registered by a
+    // later one (e.g. a run card replaced during hydration).
+    root.querySelectorAll("details").forEach((details) => {
+        if (details.dataset.framesWired) return;
         if (!details.querySelector("iframe[data-srcdoc-url]")) return;
+        details.dataset.framesWired = "1";
         details.addEventListener("toggle", () => {
             if (!details.open) return;
             requestAnimationFrame(() => {
                 details.querySelectorAll("iframe[data-srcdoc-url]").forEach((iframe) => {
-                    if (injectedFrames.has(iframe)) {
+                    if (_frameInjected.has(iframe)) {
                         if (iframe.contentWindow) {
                             // '*' is required: sandboxed srcdoc iframes have opaque ('null') origin,
                             // which is not a valid targetOrigin — only '*' reaches them.
@@ -3887,7 +3963,7 @@ window.addEventListener('message',function(e){if(e.source===window.parent&&e.dat
                 adjustedBodyClose !== -1
                     ? patched.slice(0, adjustedBodyClose) + heightScript + patched.slice(adjustedBodyClose)
                     : patched + heightScript;
-            patchedContent.set(iframe, patched);
+            _framePatchedContent.set(iframe, patched);
             maybeInjectFrame(iframe);
         })
     );
@@ -4472,6 +4548,308 @@ function loadLandingPage() {
     showDiffResults();
 }
 
+/* ─── Progressive hydration ─────────────────────────────────── */
+// The queue views render immediately from the state file alone (flag-derived
+// statuses plus the synchronously derivable visualization/log listings); the
+// per-run blob artifacts (trace.txt, dataset_description.json,
+// quality_control.json, visualization_output.json) are fetched afterwards by a
+// small background worker pool that folds results into the rendered page as
+// they land. Expanding a run's card (or a group containing it) promotes it to
+// the front of the queue. A generation counter lets a new load (page refresh,
+// ↺ Refresh) supersede in-flight hydration so stale results never touch the
+// fresh DOM.
+//
+// Concurrency: each run fans out up to 4 requests to the same S3 host and
+// browsers allow ~6 concurrent connections per host, so 3 workers keep the
+// connection pool saturated while a promoted run still starts quickly.
+const HYDRATION_CONCURRENCY = 3;
+const HYDRATION_FLUSH_MS = 400;
+
+let _hydrationGeneration = 0; // epoch: bumped whenever a load supersedes hydration
+let _hydrationPending = []; // runs awaiting hydration (front = next)
+let _hydrationActiveCount = 0; // workers currently running
+let _hydrationDirtyKeys = new Set(); // run.path values hydrated since last flush
+let _hydrationFlushTimer = null;
+let _hydrationIdleResolvers = [];
+
+// Resolves once no hydration work is pending or in flight (the primary
+// synchronization hook for tests).
+function hydrationIdle() {
+    if (_hydrationPending.length === 0 && _hydrationActiveCount === 0) return Promise.resolve();
+    return new Promise((resolve) => _hydrationIdleResolvers.push(resolve));
+}
+
+function cancelHydration() {
+    _hydrationGeneration++;
+    _hydrationPending = [];
+    _hydrationDirtyKeys.clear();
+    // Superseded workers no longer count: they exit silently without touching
+    // the counter (see hydrationWorker), so a worker wedged on a hung fetch
+    // can never block a later generation's drain.
+    _hydrationActiveCount = 0;
+    if (_hydrationFlushTimer !== null) {
+        clearTimeout(_hydrationFlushTimer);
+        _hydrationFlushTimer = null;
+    }
+    for (const resolve of _hydrationIdleResolvers.splice(0)) resolve();
+}
+
+function startHydration(runs) {
+    cancelHydration();
+    _hydrationPending = runs.filter((run) => !run.hydrated);
+    const gen = _hydrationGeneration;
+    const workers = Math.min(HYDRATION_CONCURRENCY, _hydrationPending.length);
+    for (let i = 0; i < workers; i++) hydrationWorker(gen);
+}
+
+async function hydrationWorker(gen) {
+    _hydrationActiveCount++;
+    try {
+        while (gen === _hydrationGeneration && _hydrationPending.length > 0) {
+            const run = _hydrationPending.shift();
+            try {
+                await hydrateRun(run);
+            } catch {
+                run.hydrated = true; // never re-queued; render whatever landed
+            }
+            if (gen !== _hydrationGeneration) return;
+            _hydrationDirtyKeys.add(run.path);
+            scheduleHydrationFlush();
+        }
+    } finally {
+        // Only current-generation workers own the counter — cancelHydration
+        // already zeroed it for superseded ones.
+        if (gen === _hydrationGeneration) {
+            _hydrationActiveCount--;
+            if (_hydrationActiveCount === 0 && _hydrationPending.length === 0) {
+                // Drain: flush synchronously (so awaiting hydrationIdle()
+                // observes a fully updated DOM) and release idle waiters.
+                if (_hydrationFlushTimer !== null) {
+                    clearTimeout(_hydrationFlushTimer);
+                    _hydrationFlushTimer = null;
+                }
+                flushHydrationUpdates();
+                for (const resolve of _hydrationIdleResolvers.splice(0)) resolve();
+            }
+        }
+    }
+}
+
+// Fetch a run's blob-backed artifacts and fold them into the run object IN
+// PLACE. Mutation (rather than replacement) keeps _runsInScope, _filteredRuns,
+// and the pending queue sharing one object per run, so sort/layout re-renders
+// mid-hydration always show the latest data. Skip trace/dataset fetching for
+// queued runs (no logs yet).
+async function hydrateRun(run) {
+    const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
+    const [text, datasetDesc, qualityControl, vizLinks] = await Promise.all([
+        fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
+        run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
+        run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
+        run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
+    ]);
+    const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
+    // Move QC-referenced plots into the QC cards and drop them from the
+    // visualization gallery so each plot appears in one place.
+    const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
+    const parsed = parseTrace(text);
+    const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
+    // An explicit upstream status is authoritative; otherwise the trace refines
+    // the flag-derived status (a run with output may still have failed tasks).
+    const status = run.stateStatus
+        ? run.stateStatus
+        : run.hasOutput
+          ? parsed.status !== "unknown"
+              ? parsed.status
+              : "success"
+          : deriveFlagStatus(run);
+    const failureStep =
+        run.stateFailureStep ?? (isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null);
+    Object.assign(run, {
+        ...parsed,
+        generatedBy,
+        datasetDescription: datasetDesc ?? null,
+        vizData: vizForDisplay,
+        vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
+        qualityControl,
+        status,
+        failureStep,
+        logFiles: runLogFiles(run),
+        hydrated: true,
+    });
+}
+
+// Move a pending run to the front of the hydration queue (no-op when the run
+// is already hydrated, in flight, or unknown).
+function prioritizeRun(runKey) {
+    const i = _hydrationPending.findIndex((run) => run.path === runKey);
+    if (i > 0) _hydrationPending.unshift(_hydrationPending.splice(i, 1)[0]);
+}
+
+// Promote runs the user reveals. 'toggle' does not bubble, so listen in the
+// capture phase on #runs — the element itself survives innerHTML swaps.
+function initHydrationPromotion() {
+    const runsEl = document.getElementById("runs");
+    if (!runsEl || runsEl.dataset.hydrationInit) return;
+    runsEl.dataset.hydrationInit = "1";
+    runsEl.addEventListener(
+        "toggle",
+        (evt) => {
+            const details = evt.target;
+            if (!(details instanceof Element) || !details.open) return;
+            const card = details.closest("[data-run-key]");
+            if (card) {
+                prioritizeRun(card.dataset.runKey);
+                return;
+            }
+            // A group opened: promote every run it reveals, iterating in
+            // reverse DOM order so the topmost visible card hydrates first.
+            const cards = details.querySelectorAll("[data-run-key]");
+            for (let i = cards.length - 1; i >= 0; i--) prioritizeRun(cards[i].dataset.runKey);
+        },
+        true
+    );
+}
+
+// Stable identity for a <details> element across re-renders: group key for
+// group nodes, "<runKey>::<section>" for run detail sections.
+function detailsStateKey(details) {
+    if (details.dataset.groupKey) return `g:${details.dataset.groupKey}`;
+    if (details.dataset.section) {
+        const card = details.closest("[data-run-key]");
+        if (card) return `${card.dataset.runKey}::${details.dataset.section}`;
+    }
+    return null;
+}
+
+// Replace one run card in place, preserving its open <details> sections.
+// Ancestor group nodes are untouched, so expansion state and scroll position
+// survive. No-op when the run is not currently in the DOM.
+function updateRunCard(run) {
+    const runsEl = document.getElementById("runs");
+    if (!runsEl) return;
+    // Attribute-equality lookup instead of a selector: run paths contain
+    // characters that would need CSS escaping (and jsdom lacks CSS.escape).
+    const old = Array.from(runsEl.querySelectorAll("[data-run-key]")).find((el) => el.dataset.runKey === run.path);
+    if (!old) return;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = (_layoutMode === "flat" ? renderFlatRunEntry(run) : renderRunEntry(run)).trim();
+    const fresh = tpl.content.firstElementChild;
+    if (!fresh) return;
+    for (const openDetails of old.querySelectorAll("details[data-section][open]")) {
+        fresh.querySelector(`details[data-section="${openDetails.dataset.section}"]`)?.setAttribute("open", "");
+    }
+    old.replaceWith(fresh);
+    initInlineHtmlFrames(fresh);
+}
+
+// Rewrite group status badges (tree layout) after hydration refines statuses.
+// While filter membership is stable only the badges can change — the
+// subject/session/run counts are membership-derived.
+function refreshGroupBadges() {
+    const runsEl = document.getElementById("runs");
+    if (!runsEl) return;
+    const groups = new Map(); // data-group-key -> runs
+    for (const run of _filteredRuns) {
+        const keys = [
+            `d:${run.dandisetId}`,
+            `s:${run.dandisetId}/${run.subject}`,
+            `e:${run.dandisetId}/${run.subject}/${run.session ?? ""}`,
+        ];
+        for (const key of keys) {
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(run);
+        }
+    }
+    for (const el of runsEl.querySelectorAll("details[data-group-key]")) {
+        const groupRuns = groups.get(el.dataset.groupKey);
+        if (!groupRuns) continue;
+        const badges = el.querySelector(":scope > summary .group-badges");
+        if (badges) badges.innerHTML = renderGroupBadges(groupRuns);
+    }
+}
+
+// Wholesale re-render preserving expansion state and scroll. Used when
+// hydration changes which runs match the active filter — rare (requires an
+// active hydration-dependent filter) and a keyed re-render is simpler and
+// safer than incremental creation/pruning of nested group chains.
+function rerenderRunsPreservingState() {
+    const runsEl = document.getElementById("runs");
+    if (!runsEl) return;
+    const openKeys = new Set();
+    const closedKeys = new Set();
+    for (const details of runsEl.querySelectorAll("details")) {
+        const key = detailsStateKey(details);
+        if (key) (details.open ? openKeys : closedKeys).add(key);
+    }
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    rerenderRuns();
+    for (const details of runsEl.querySelectorAll("details")) {
+        const key = detailsStateKey(details);
+        if (!key) continue;
+        if (openKeys.has(key)) details.setAttribute("open", "");
+        // Restoring the closed set too keeps autoExpand defaults from popping
+        // groups the user explicitly collapsed.
+        else if (closedKeys.has(key)) details.removeAttribute("open");
+    }
+    window.scrollTo(scrollX, scrollY);
+}
+
+function scheduleHydrationFlush() {
+    if (_hydrationFlushTimer !== null) return; // trailing-edge batch
+    const gen = _hydrationGeneration;
+    _hydrationFlushTimer = setTimeout(() => {
+        _hydrationFlushTimer = null;
+        if (gen === _hydrationGeneration) flushHydrationUpdates();
+    }, HYDRATION_FLUSH_MS);
+}
+
+// Fold freshly hydrated runs into the page: refresh dirty cards in place when
+// filter membership is unchanged, or re-render the whole list (preserving
+// expansion + scroll) when hydration moved runs in/out of the filtered set.
+// Summary stats and the filter banner's value lists refresh on every flush.
+function flushHydrationUpdates() {
+    const dirty = [..._hydrationDirtyKeys];
+    _hydrationDirtyKeys.clear();
+    if (dirty.length === 0) return;
+
+    const filter = parseFilter();
+    const isFiltered = isFilterActive(filter);
+    const nextFiltered = applyFilter(sortRuns(_runsInScope), filter);
+    const nextKeys = new Set(nextFiltered.map((run) => run.path));
+    const membershipChanged =
+        nextKeys.size !== _filteredRuns.length || _filteredRuns.some((run) => !nextKeys.has(run.path));
+    _filteredRuns = nextFiltered;
+
+    if (membershipChanged) {
+        if (isFiltered && nextFiltered.length === 0) {
+            // Entering the empty-filter state mid-view: hide the stale list.
+            showError("No pipeline runs match the current filter.");
+            document.getElementById("summary").style.display = "none";
+            document.getElementById("runs").style.display = "none";
+        } else {
+            // Recover from an earlier empty-filter error state.
+            rerenderRunsPreservingState();
+            initLayoutToggle();
+            document.getElementById("error").style.display = "none";
+            showResults();
+        }
+    } else if (nextFiltered.length > 0) {
+        const dirtySet = new Set(dirty);
+        for (const run of _filteredRuns) {
+            if (dirtySet.has(run.path)) updateRunCard(run);
+        }
+        if (_layoutMode !== "flat") refreshGroupBadges();
+    }
+
+    renderSummary(isFiltered ? _filteredRuns : _runsInScope);
+    // Skip the banner while the user is typing in one of its filter inputs;
+    // the value lists catch up on the next flush.
+    const banner = document.getElementById("filter-banner");
+    if (!banner || !banner.contains(document.activeElement)) renderFilterBanner(filter, _runsInScope);
+}
+
 /* ─── Queue data loader ─────────────────────────────────────── */
 // Fetches, processes, and renders the queue state for the current view.
 // Only applies to the dashboard queue views ("main", "tests", and "archive");
@@ -4481,6 +4859,9 @@ function loadLandingPage() {
 async function loadQueueData() {
     showLoading();
     renderFilterBanner(parseFilter(), []);
+    // Supersede any in-flight hydration from a previous load before the new
+    // state fetch begins (stale results must never touch the fresh DOM).
+    cancelHydration();
 
     try {
         // Registries are only consumed at filter/render time, so let their
@@ -4495,62 +4876,18 @@ async function loadQueueData() {
             return;
         }
 
-        // Fetch trace.txt and dataset_description.json content (from S3 blobs) and
-        // DANDI asset IDs for all runs in parallel. Skip trace/dataset fetching for
-        // queued runs (no logs yet). Visualization images and the log-file listing
-        // are derived synchronously from each entry's output_paths map.
-        const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
-        const runsWithStatus = await Promise.all(
-            runs.map(async (run) => {
-                const [text, datasetDesc, qualityControl, vizLinks] = await Promise.all([
-                    fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
-                    run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
-                    run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
-                    run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
-                ]);
-                const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
-                // Move QC-referenced plots into the QC cards and drop them from
-                // the visualization gallery so each plot appears in one place.
-                const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
-                const parsed = parseTrace(text);
-                const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
-                // Determine status from JSONL flags:
-                //   has_output=true            → success (use trace status for task detail)
-                //   has_been_submitted=true &&
-                //     has_output=false &&
-                //     has_logs=false            → running (submitted, awaiting output)
-                //   has_logs=false && has_code=true → queued (not yet started)
-                //   otherwise                  → failed
-                const status = run.hasOutput
-                    ? parsed.status !== "unknown"
-                        ? parsed.status
-                        : "success"
-                    : run.hasBeenSubmitted && !run.hasLogs
-                      ? "running"
-                      : !run.hasLogs && run.hasCode
-                        ? "queued"
-                        : "failed";
-                const failureStep = isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null;
-                return {
-                    ...run,
-                    ...parsed,
-                    generatedBy,
-                    datasetDescription: datasetDesc ?? null,
-                    vizData: vizForDisplay,
-                    vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
-                    qualityControl,
-                    status,
-                    failureStep,
-                    logFiles: runLogFiles(run),
-                };
-            })
-        );
+        // First paint uses only the state file: flag-derived statuses plus the
+        // visualization images and log-file listings derivable synchronously
+        // from each entry's output_paths map. The per-run blob artifacts
+        // (trace, dataset_description, quality_control, visualization_output)
+        // hydrate in the background after render — see startHydration below.
+        const initialRuns = runs.map(buildInitialRun);
 
         // Params/config alias resolution (filtering, registry links) needs the
         // registries from here on.
         await registriesReady;
 
-        const sortedRuns = sortRuns(runsWithStatus, parseSortMode());
+        const sortedRuns = sortRuns(initialRuns, parseSortMode());
 
         // Scope runs by view mode:
         //   tests page    → show only TEST_DANDISETS entries
@@ -4564,31 +4901,10 @@ async function loadQueueData() {
                   : sortedRuns.filter((r) => !TEST_DANDISETS.has(r.dandisetId));
 
         const filter = parseFilter();
-        const isFiltered = !!(
-            filter.dandisetId ||
-            filter.subject ||
-            filter.session ||
-            filter.pipelineVersion ||
-            filter.paramsType ||
-            filter.configType ||
-            filter.dandiCodebaseVersion ||
-            filter.assetSize ||
-            filter.failureStep ||
-            filter.status
-        );
+        const isFiltered = isFilterActive(filter);
         const filteredRuns = applyFilter(runsInScope, filter);
 
-        if (isFiltered && filteredRuns.length === 0) {
-            renderFilterBanner(filter, runsInScope);
-            showError("No pipeline runs match the current filter.");
-            return;
-        }
-
-        // Show the full summary for the in-scope runs; when a specific filter is
-        // active show only the matching subset.
-        const runsForSummary = isFiltered ? filteredRuns : runsInScope;
-        renderSummary(runsForSummary);
-        renderFilterBanner(filter, runsInScope);
+        _runsInScope = runsInScope;
         _filteredRuns = filteredRuns;
         _layoutMode = parseLayoutMode();
         _sortMode = parseSortMode();
@@ -4596,11 +4912,29 @@ async function loadQueueData() {
         updateLayoutModeUrl(_layoutMode);
         updateSortModeUrl(_sortMode);
         updateSortDirectionUrl(_sortDirection);
-        document.getElementById("runs").innerHTML =
-            _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(sortRuns(filteredRuns));
-        initInlineHtmlFrames();
-        initLayoutToggle();
-        showResults();
+
+        if (isFiltered && filteredRuns.length === 0) {
+            renderFilterBanner(filter, runsInScope);
+            showError("No pipeline runs match the current filter.");
+            // No early return: hydration below may yet bring runs into the
+            // filtered set (e.g. failure-step filters need trace data), at
+            // which point flushHydrationUpdates switches back to the results.
+        } else {
+            // Show the full summary for the in-scope runs; when a specific
+            // filter is active show only the matching subset.
+            renderSummary(isFiltered ? filteredRuns : runsInScope);
+            renderFilterBanner(filter, runsInScope);
+            document.getElementById("runs").innerHTML =
+                _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(sortRuns(filteredRuns));
+            initInlineHtmlFrames();
+            initLayoutToggle();
+            showResults();
+        }
+
+        // Hydrate the full scope (summary stats and the filter banner's value
+        // lists cover out-of-filter runs too), visible runs first.
+        const visible = new Set(filteredRuns);
+        startHydration([...filteredRuns, ...runsInScope.filter((run) => !visible.has(run))]);
     } catch (err) {
         renderFilterBanner(parseFilter(), []);
         showError(err.message || "An unexpected error occurred.");
@@ -4612,6 +4946,7 @@ async function init() {
     _viewMode = parseViewMode();
     initTheme();
     initModal();
+    initHydrationPromotion();
     syncTopNav(_viewMode);
 
     // The landing page is the default view (no `view` param). It has no queue
@@ -4702,14 +5037,24 @@ document.addEventListener("DOMContentLoaded", init);
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         applyFilter,
+        buildInitialRun,
         buildRunPath,
         cachedFetch,
+        cancelHydration,
         classifyFailedTaskStep,
         clearQueueStateCache,
+        deriveFlagStatus,
         ensureRegistriesLoaded,
         fetchQueueConfig,
         fetchQueueState,
+        flushHydrationUpdates,
+        hydrateRun,
+        hydrationIdle,
+        initHydrationPromotion,
         isImmutableBlobUrl,
+        prioritizeRun,
+        startHydration,
+        updateRunCard,
         fetchArchiveState,
         archiveStateCacheKey,
         fetchSlurmLogs,

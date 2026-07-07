@@ -45,6 +45,8 @@ open it in Chromium, and stub the external endpoints at the network boundary.
 - Fulfilled ETags on cross-origin fetches aren't exposed to page JS without
   `Access-Control-Expose-Headers: ETag`, so If-None-Match assertions against
   stubs need that header (the real GitHub CDN sends it).
+- Run cards live inside collapsed `<details>` groups (tree layout), so Playwright's
+  default "visible" waits time out on them — use `waitForSelector(..., { state: "attached" })`.
 - The Google Fonts request fails offline — harmless, ignore it.
 
 A complete working example of this recipe (server + stubs + phased

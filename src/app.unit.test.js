@@ -1,9 +1,11 @@
 const {
     applyFilter,
+    buildInitialRun,
     buildRunPath,
     buildPipelineDiffPairs,
     buildParamsCompareEntries,
     cachedFetch,
+    deriveFlagStatus,
     classifyFailedTaskStep,
     clearQueueStateCache,
     collectJsonDiffs,
@@ -3023,5 +3025,68 @@ describe("ensureRegistriesLoaded", () => {
         } finally {
             global.fetch = originalFetch;
         }
+    });
+});
+
+describe("progressive hydration helpers", () => {
+    const BASE_ENTRY = {
+        dandiset_id: "000777",
+        subject: "sub1",
+        session: "ses1",
+        pipeline: "aind+ephys",
+        version: "v1.2.4",
+        params: "1cbdbee",
+        config: "7940dfd",
+        attempt: 1,
+        has_code: true,
+        has_been_submitted: true,
+        has_output: true,
+        has_logs: true,
+    };
+
+    it("derives flag-only status from JSONL flags", () => {
+        expect(deriveFlagStatus({ hasOutput: true })).toBe("success");
+        expect(deriveFlagStatus({ hasOutput: false, hasBeenSubmitted: true, hasLogs: false })).toBe("running");
+        expect(deriveFlagStatus({ hasOutput: false, hasBeenSubmitted: false, hasLogs: false, hasCode: true })).toBe(
+            "queued"
+        );
+        expect(deriveFlagStatus({ hasOutput: false, hasBeenSubmitted: true, hasLogs: true })).toBe("failed");
+    });
+
+    it("prefers an explicit upstream status over flag derivation", () => {
+        expect(deriveFlagStatus({ stateStatus: "failed", hasOutput: true })).toBe("failed");
+    });
+
+    it("surfaces upstream status/failure_step fields from state entries", () => {
+        const [run] = parseQueueEntries([{ ...BASE_ENTRY, status: "failed", failure_step: "pre-processing" }]);
+        expect(run.stateStatus).toBe("failed");
+        expect(run.stateFailureStep).toBe("pre-processing");
+        const [plain] = parseQueueEntries([BASE_ENTRY]);
+        expect(plain.stateStatus).toBeNull();
+        expect(plain.stateFailureStep).toBeNull();
+    });
+
+    it("builds an initial run skeleton with sync-derived data and unknown failureStep", () => {
+        // Two-step: parse once to learn the computed run path, then attach
+        // output_paths keyed under that path.
+        const [pathProbe] = parseQueueEntries([BASE_ENTRY]);
+        const entry = {
+            ...BASE_ENTRY,
+            output_paths: {
+                [`${pathProbe.path}/logs/trace.txt`]: "aaabbbccc111",
+                [`${pathProbe.path}/derivatives/visualization/summary/psd.png`]: "aaabbbccc222",
+            },
+        };
+        const [run] = parseQueueEntries([entry]);
+        const initial = buildInitialRun(run);
+        expect(initial.status).toBe("success"); // has_output flag only
+        expect(initial.failureStep).toBeNull(); // unknown until hydration
+        expect(initial.hydrated).toBe(false);
+        expect(initial.tasks).toEqual([]);
+        expect(initial.generatedBy).toEqual([]);
+        expect(initial.qualityControl).toBeNull();
+        expect(initial.logFiles).toContain("trace.txt");
+        expect(initial.vizData).toHaveLength(1);
+        expect(initial.vizData[0].images[0].name).toBe("psd.png");
     });
 });
