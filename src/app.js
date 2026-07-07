@@ -254,15 +254,23 @@ function deriveFlagStatus(run) {
 
 // Skeleton run for the immediate first render: flag-derived status plus
 // everything derivable synchronously from the entry's output_paths map
-// (visualization images, log-file listing). Trace-refined status, failureStep,
-// tasks, provenance, QC, and viz links arrive later via hydrateRun. failureStep
-// stays null (= "not yet known") rather than defaulting to "other" so
-// failure-step filters never transiently over-match before hydration.
+// (visualization images, log-file listing). The trace-refined status,
+// failureStep, tasks, provenance, QC, and viz links arrive later via the
+// hydration passes. failureStep stays null (= "not yet known") rather than
+// defaulting to "other" so failure-step filters never transiently over-match
+// before hydration.
+//
+// statusProvisional marks runs whose displayed status glyph could still change
+// once the trace lands: a run with output counts as "success" from flags alone,
+// but its trace may reveal failed tasks. Runs without output (or with an
+// authoritative upstream status) can only gain detail, never flip — their
+// badges are trustworthy immediately.
 function buildInitialRun(run) {
     return {
         ...run,
         status: deriveFlagStatus(run),
         failureStep: run.stateFailureStep ?? null,
+        statusProvisional: !run.stateStatus && !!(run.hasOutput && run.hasLogs),
         tasks: [],
         generatedBy: [],
         datasetDescription: null,
@@ -270,7 +278,10 @@ function buildInitialRun(run) {
         vizLinks: null,
         qualityControl: null,
         logFiles: runLogFiles(run),
-        hydrated: false,
+        traceLoaded: !run.hasLogs, // nothing to fetch for runs without logs
+        detailsLoaded: false,
+        qcLoaded: false,
+        qcQueued: false,
     };
 }
 
@@ -1928,7 +1939,7 @@ function renderRunEntry(run) {
     return `
 <div class="run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header">
-        <span class="status-badge ${sc}">${slbl}</span>
+        <span class="status-badge ${sc}${run.statusProvisional ? " status-provisional" : ""}"${run.statusProvisional ? ' title="Pass/fail pending trace confirmation"' : ""}>${slbl}</span>
         ${run.runDate ? `<span class="run-date">${e(run.runDate)}</span><span class="run-sep">·</span>` : ""}
         ${run.paramsProfile ? `<span class="run-sep">·</span><span class="run-params">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>` : ""}
         ${run.configHash ? `<span class="run-sep">·</span><span class="run-config">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
@@ -2523,10 +2534,14 @@ function renderGroupBadges(runs) {
     const u = runs.length - s - f - q;
     const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(runs);
+    // A success count is provisional while any counted run's trace could still
+    // flip it to failed — render it dimmed so an unconfirmed ✓ can't mislead.
+    // Failed counts never need this: hydration can only add failures.
+    const provisional = runs.some((r) => r.status === "success" && r.statusProvisional);
     const parts = [];
     if (s)
         parts.push(
-            `<span class="gbadge gbadge-success" title="${s} successful run${s !== 1 ? "s" : ""}">${s}&thinsp;✓</span>`
+            `<span class="gbadge gbadge-success${provisional ? " status-provisional" : ""}" title="${s} successful run${s !== 1 ? "s" : ""}${provisional ? " (pending trace confirmation)" : ""}">${s}&thinsp;✓</span>`
         );
     if (f)
         parts.push(
@@ -3465,7 +3480,7 @@ function renderFlatRunEntry(run) {
 <div class="run-entry flat-run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header flat-run-header">
         <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
-        <span class="status-badge ${sc}">${slbl}</span>
+        <span class="status-badge ${sc}${run.statusProvisional ? " status-provisional" : ""}"${run.statusProvisional ? ' title="Pass/fail pending trace confirmation"' : ""}>${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
             <span class="run-sep">·</span>
@@ -4553,22 +4568,33 @@ function loadLandingPage() {
 /* ─── Progressive hydration ─────────────────────────────────── */
 // The queue views render immediately from the state file alone (flag-derived
 // statuses plus the synchronously derivable visualization/log listings); the
-// per-run blob artifacts (trace.txt, dataset_description.json,
-// quality_control.json, visualization_output.json) are fetched afterwards by a
-// small background worker pool that folds results into the rendered page as
-// they land. Expanding a run's card (or a group containing it) promotes it to
-// the front of the queue. A generation counter lets a new load (page refresh,
+// per-run blob artifacts are fetched afterwards by a small background worker
+// pool that folds results into the rendered page as they land. Work is queued
+// as (run, kind) tasks in two eager passes plus one on-demand pass:
+//
+//   "status" — trace.txt only (a few KB per run). Runs FIRST for every run so
+//              the pass/fail glyphs on cards and group badges converge as fast
+//              as possible; until a run's status pass lands its optimistic ✓ is
+//              rendered as provisional (see statusProvisional).
+//   "detail" — dataset_description.json + visualization_output.json (small;
+//              provenance, source versions, figurl links, codebase filters).
+//   "qc"     — quality_control.json, by far the heaviest artifact. Never
+//              fetched in the background: enqueued only when the user expands
+//              one of the run's card sections.
+//
+// Expanding a run's card (or a group containing it) promotes its tasks to the
+// front of the queue. A generation counter lets a new load (page refresh,
 // ↺ Refresh) supersede in-flight hydration so stale results never touch the
 // fresh DOM.
 //
-// Concurrency: each run fans out up to 4 requests to the same S3 host and
-// browsers allow ~6 concurrent connections per host, so 3 workers keep the
-// connection pool saturated while a promoted run still starts quickly.
+// Concurrency: every task is a single request to the same S3 host and browsers
+// allow ~6 concurrent connections per host; 3 workers keep the pool busy while
+// a promoted task still starts quickly.
 const HYDRATION_CONCURRENCY = 3;
 const HYDRATION_FLUSH_MS = 400;
 
 let _hydrationGeneration = 0; // epoch: bumped whenever a load supersedes hydration
-let _hydrationPending = []; // runs awaiting hydration (front = next)
+let _hydrationPending = []; // { run, kind } tasks awaiting hydration (front = next)
 let _hydrationActiveCount = 0; // workers currently running
 let _hydrationDirtyKeys = new Set(); // run.path values hydrated since last flush
 let _hydrationFlushTimer = null;
@@ -4598,7 +4624,13 @@ function cancelHydration() {
 
 function startHydration(runs) {
     cancelHydration();
-    _hydrationPending = runs.filter((run) => !run.hydrated);
+    // Two eager passes: every run's status (trace) task first, then the detail
+    // tasks — pass/fail truth for the whole queue costs only the small traces.
+    // QC tasks are enqueued on demand by initHydrationPromotion.
+    _hydrationPending = [
+        ...runs.filter((run) => !run.traceLoaded).map((run) => ({ run, kind: "status" })),
+        ...runs.filter((run) => !run.detailsLoaded).map((run) => ({ run, kind: "detail" })),
+    ];
     const gen = _hydrationGeneration;
     const workers = Math.min(HYDRATION_CONCURRENCY, _hydrationPending.length);
     for (let i = 0; i < workers; i++) hydrationWorker(gen);
@@ -4608,14 +4640,14 @@ async function hydrationWorker(gen) {
     _hydrationActiveCount++;
     try {
         while (gen === _hydrationGeneration && _hydrationPending.length > 0) {
-            const run = _hydrationPending.shift();
+            const task = _hydrationPending.shift();
             try {
-                await hydrateRun(run);
+                await hydrateRunTask(task.run, task.kind);
             } catch {
-                run.hydrated = true; // never re-queued; render whatever landed
+                /* task never re-queued; render whatever landed */
             }
             if (gen !== _hydrationGeneration) return;
-            _hydrationDirtyKeys.add(run.path);
+            _hydrationDirtyKeys.add(task.run.path);
             scheduleHydrationFlush();
         }
     } finally {
@@ -4637,25 +4669,20 @@ async function hydrationWorker(gen) {
     }
 }
 
-// Fetch a run's blob-backed artifacts and fold them into the run object IN
-// PLACE. Mutation (rather than replacement) keeps _runsInScope, _filteredRuns,
-// and the pending queue sharing one object per run, so sort/layout re-renders
-// mid-hydration always show the latest data. Skip trace/dataset fetching for
-// queued runs (no logs yet).
-async function hydrateRun(run) {
-    const fetchIfLogs = (hasLogs, fn) => (hasLogs ? fn() : Promise.resolve(null));
-    const [text, datasetDesc, qualityControl, vizLinks] = await Promise.all([
-        fetchIfLogs(run.hasLogs, () => fetchTraceText(run)),
-        run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
-        run.hasOutput ? fetchQualityControl(run) : Promise.resolve(null),
-        run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
-    ]);
-    const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
-    // Move QC-referenced plots into the QC cards and drop them from the
-    // visualization gallery so each plot appears in one place.
-    const vizForDisplay = qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData;
+// All hydration mutates the run object IN PLACE: _runsInScope, _filteredRuns,
+// and the pending queue share one object per run, so sort/layout re-renders
+// mid-hydration always show the latest data.
+async function hydrateRunTask(run, kind) {
+    if (kind === "status") return hydrateRunStatus(run);
+    if (kind === "qc") return hydrateRunQc(run);
+    return hydrateRunDetails(run);
+}
+
+// Status pass: fetch the run's trace (skipped for runs without logs) and settle
+// its authoritative status, failure step, and task table.
+async function hydrateRunStatus(run) {
+    const text = run.hasLogs ? await fetchTraceText(run) : null;
     const parsed = parseTrace(text);
-    const generatedBy = Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [];
     // An explicit upstream status is authoritative; otherwise the trace refines
     // the flag-derived status (a run with output may still have failed tasks).
     const status = run.stateStatus
@@ -4669,23 +4696,69 @@ async function hydrateRun(run) {
         run.stateFailureStep ?? (isFailedStatus(status) ? runFailureStep({ status, tasks: parsed.tasks }) : null);
     Object.assign(run, {
         ...parsed,
-        generatedBy,
-        datasetDescription: datasetDesc ?? null,
-        vizData: vizForDisplay,
-        vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
-        qualityControl,
         status,
         failureStep,
-        logFiles: runLogFiles(run),
-        hydrated: true,
+        statusProvisional: false,
+        traceLoaded: true,
     });
 }
 
-// Move a pending run to the front of the hydration queue (no-op when the run
-// is already hydrated, in flight, or unknown).
-function prioritizeRun(runKey) {
-    const i = _hydrationPending.findIndex((run) => run.path === runKey);
-    if (i > 0) _hydrationPending.unshift(_hydrationPending.splice(i, 1)[0]);
+// Detail pass: provenance and interactive-viz links (both small artifacts).
+async function hydrateRunDetails(run) {
+    const [datasetDesc, vizLinks] = await Promise.all([
+        run.datasetDescriptionPath ? fetchDatasetDescription(run) : Promise.resolve(null),
+        run.hasOutput ? fetchVisualizationOutput(run) : Promise.resolve(null),
+    ]);
+    Object.assign(run, {
+        generatedBy: Array.isArray(datasetDesc?.GeneratedBy) ? datasetDesc.GeneratedBy : [],
+        datasetDescription: datasetDesc ?? null,
+        vizLinks: vizLinks && typeof vizLinks === "object" ? vizLinks : null,
+        detailsLoaded: true,
+    });
+}
+
+// On-demand pass: quality_control.json (the heaviest artifact), fetched only
+// once the user expands one of the run's card sections. QC-referenced plots
+// move out of the visualization gallery and into the QC cards when it lands.
+async function hydrateRunQc(run) {
+    const qualityControl = run.hasOutput ? await fetchQualityControl(run) : null;
+    const vizData = run.hasOutput ? fetchVisualizationData(run) : null;
+    Object.assign(run, {
+        qualityControl,
+        vizData: qualityControl ? partitionQcPlots(qualityControl, vizData) : vizData,
+        qcLoaded: true,
+    });
+}
+
+// Whether the run has a quality_control.json artifact to fetch (sync check
+// against the output_paths map — mirrors fetchVizArtifactJson's candidates).
+function runHasQualityControl(run) {
+    if (!run?.hasOutput || !run?.outputPaths) return false;
+    return (
+        `${run.path}/derivatives/visualization/quality_control.json` in run.outputPaths ||
+        `${run.path}/visualization/quality_control.json` in run.outputPaths
+    );
+}
+
+// Move a run's pending tasks to the front of the hydration queue, preserving
+// status-before-detail order (no-op for unknown or fully hydrated runs). With
+// { qc: true } (a card section was expanded) the run's quality_control.json is
+// also enqueued — QC is never fetched without such a reveal.
+function prioritizeRun(runKey, { qc = false } = {}) {
+    const mine = [];
+    const rest = [];
+    for (const task of _hydrationPending) (task.run.path === runKey ? mine : rest).push(task);
+    const run = mine[0]?.run ?? _runsInScope.find((r) => r.path === runKey);
+    if (qc && run && !run.qcLoaded && !run.qcQueued && runHasQualityControl(run)) {
+        run.qcQueued = true;
+        mine.push({ run, kind: "qc" });
+    }
+    if (mine.length === 0) return;
+    _hydrationPending = [...mine, ...rest];
+    // Revive workers if the queue had already drained (QC arrives on demand).
+    const gen = _hydrationGeneration;
+    const needed = Math.min(HYDRATION_CONCURRENCY, _hydrationPending.length) - _hydrationActiveCount;
+    for (let i = 0; i < needed; i++) hydrationWorker(gen);
 }
 
 // Promote runs the user reveals. 'toggle' does not bubble, so listen in the
@@ -4701,11 +4774,13 @@ function initHydrationPromotion() {
             if (!(details instanceof Element) || !details.open) return;
             const card = details.closest("[data-run-key]");
             if (card) {
-                prioritizeRun(card.dataset.runKey);
+                // A card section opened: full promotion, including QC.
+                prioritizeRun(card.dataset.runKey, { qc: true });
                 return;
             }
-            // A group opened: promote every run it reveals, iterating in
-            // reverse DOM order so the topmost visible card hydrates first.
+            // A group opened: promote the revealed runs' status/detail tasks
+            // (not QC — the heavy artifact waits for a card-level expand),
+            // iterating in reverse DOM order so the topmost card goes first.
             const cards = details.querySelectorAll("[data-run-key]");
             for (let i = cards.length - 1; i >= 0; i--) prioritizeRun(cards[i].dataset.runKey);
         },
@@ -5050,7 +5125,8 @@ if (typeof module !== "undefined" && module.exports) {
         fetchQueueConfig,
         fetchQueueState,
         flushHydrationUpdates,
-        hydrateRun,
+        hydrateRunStatus,
+        runHasQualityControl,
         hydrationIdle,
         initHydrationPromotion,
         isImmutableBlobUrl,

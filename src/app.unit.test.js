@@ -6,6 +6,7 @@ const {
     buildParamsCompareEntries,
     cachedFetch,
     deriveFlagStatus,
+    runHasQualityControl,
     classifyFailedTaskStep,
     clearQueueStateCache,
     collectJsonDiffs,
@@ -3093,12 +3094,45 @@ describe("progressive hydration helpers", () => {
         const initial = buildInitialRun(run);
         expect(initial.status).toBe("success"); // has_output flag only
         expect(initial.failureStep).toBeNull(); // unknown until hydration
-        expect(initial.hydrated).toBe(false);
+        expect(initial.traceLoaded).toBe(false);
+        expect(initial.detailsLoaded).toBe(false);
+        expect(initial.qcLoaded).toBe(false);
         expect(initial.tasks).toEqual([]);
         expect(initial.generatedBy).toEqual([]);
         expect(initial.qualityControl).toBeNull();
         expect(initial.logFiles).toContain("trace.txt");
         expect(initial.vizData).toHaveLength(1);
         expect(initial.vizData[0].images[0].name).toBe("psd.png");
+    });
+
+    it("marks only trace-refinable successes as provisional", () => {
+        // Output + logs: the ✓ could flip once the trace lands.
+        const [refinable] = parseQueueEntries([BASE_ENTRY]);
+        expect(buildInitialRun(refinable).statusProvisional).toBe(true);
+        // An explicit upstream status is already authoritative.
+        const [authoritative] = parseQueueEntries([{ ...BASE_ENTRY, status: "success" }]);
+        expect(buildInitialRun(authoritative).statusProvisional).toBe(false);
+        // No logs → no trace exists to refine anything.
+        const [running] = parseQueueEntries([{ ...BASE_ENTRY, has_output: false, has_logs: false }]);
+        expect(buildInitialRun(running).statusProvisional).toBe(false);
+        // Failed-by-flags runs can only gain detail, never flip optimistically.
+        const [failed] = parseQueueEntries([{ ...BASE_ENTRY, has_output: false, has_logs: true }]);
+        expect(buildInitialRun(failed).statusProvisional).toBe(false);
+    });
+
+    it("detects quality_control.json availability from output_paths", () => {
+        const [probe] = parseQueueEntries([BASE_ENTRY]);
+        const withQc = parseQueueEntries([
+            {
+                ...BASE_ENTRY,
+                output_paths: { [`${probe.path}/derivatives/visualization/quality_control.json`]: "abcdef123" },
+            },
+        ])[0];
+        const withoutQc = parseQueueEntries([
+            { ...BASE_ENTRY, output_paths: { [`${probe.path}/logs/trace.txt`]: "abcdef456" } },
+        ])[0];
+        expect(runHasQualityControl(withQc)).toBe(true);
+        expect(runHasQualityControl(withoutQc)).toBe(false);
+        expect(runHasQualityControl({ ...withQc, hasOutput: false })).toBe(false);
     });
 });

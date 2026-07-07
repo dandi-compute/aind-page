@@ -423,6 +423,18 @@ describe("progressive queue loading", () => {
             urls.trace = blobUrlFor(ids.trace);
         }
         if (ids.png) entry.output_paths[`${p}/derivatives/visualization/summary/psd.png`] = ids.png;
+        if (ids.qc) {
+            entry.output_paths[`${p}/derivatives/visualization/quality_control.json`] = ids.qc;
+            urls.qc = blobUrlFor(ids.qc);
+        }
+        if (ids.viz) {
+            entry.output_paths[`${p}/derivatives/visualization/visualization_output.json`] = ids.viz;
+            urls.viz = blobUrlFor(ids.viz);
+        }
+        if (ids.dd) {
+            entry.dataset_description_path = { [`${p}/dataset_description.json`]: ids.dd };
+            urls.dd = blobUrlFor(ids.dd);
+        }
         return { entry, urls, path: p };
     }
 
@@ -619,6 +631,90 @@ describe("progressive queue loading", () => {
 
         expect(document.getElementById("error").innerHTML).toContain("No pipeline runs match");
         expect(document.getElementById("runs").style.display).toBe("none");
+    });
+
+    it("fetches every trace before any detail artifact and never fetches QC eagerly", async () => {
+        const entries = [];
+        const meta = [];
+        const handlers = new Map();
+        for (let i = 0; i < 3; i++) {
+            const { entry, urls } = withArtifacts(makeEntry({ subject: `sub${i}` }), {
+                trace: newBlobId(),
+                dd: newBlobId(),
+                viz: newBlobId(),
+                qc: newBlobId(),
+            });
+            entries.push(entry);
+            meta.push(urls);
+            handlers.set(urls.trace, () => new Response(TRACE_OK, { status: 200 }));
+            handlers.set(urls.dd, () => new Response("{}", { status: 200 }));
+            handlers.set(urls.viz, () => new Response("{}", { status: 200 }));
+            handlers.set(urls.qc, () => new Response('{"metrics":[{"name":"drift","stage":"pre"}]}', { status: 200 }));
+        }
+        seedQueueState(entries);
+        installFetch(handlers);
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        const order = blobRequests();
+        const traceUrls = new Set(meta.map((m) => m.trace));
+        const lastTraceIdx = Math.max(...order.map((u, i) => (traceUrls.has(u) ? i : -1)));
+        const firstDetailIdx = order.findIndex((u) => !traceUrls.has(u));
+        expect(order.filter((u) => traceUrls.has(u))).toHaveLength(3);
+        expect(firstDetailIdx).toBeGreaterThan(lastTraceIdx); // status pass fully precedes details
+        expect(order.some((u) => meta.some((m) => m.qc === u))).toBe(false); // QC never in background
+    });
+
+    it("fetches QC only when a card section is expanded", async () => {
+        const { entry, urls } = withArtifacts(makeEntry(), {
+            trace: newBlobId(),
+            qc: newBlobId(),
+            png: newBlobId(),
+        });
+        seedQueueState([entry]);
+        installFetch(
+            new Map([
+                [urls.trace, () => new Response(TRACE_OK, { status: 200 })],
+                [urls.qc, () => new Response('{"metrics":[{"name":"drift","stage":"pre"}]}', { status: 200 })],
+            ])
+        );
+        initHydrationPromotion();
+
+        await loadQueueData();
+        await hydrationIdle();
+        expect(blobRequests()).not.toContain(urls.qc);
+        expect(document.querySelector('details[data-section="qc"]')).toBeNull();
+
+        // Expand a section on the card through the real toggle path.
+        const section = document.querySelector("#runs .run-entry details[data-section]");
+        section.open = true;
+        section.dispatchEvent(new Event("toggle"));
+        await hydrationIdle();
+
+        expect(blobRequests()).toContain(urls.qc);
+        expect(document.querySelector('details[data-section="qc"]')).not.toBeNull();
+    });
+
+    it("marks optimistic successes as provisional until the trace confirms them", async () => {
+        const { entry, urls } = withArtifacts(makeEntry(), { trace: newBlobId() });
+        seedQueueState([entry]);
+        const trace = deferred();
+        installFetch(new Map([[urls.trace, () => trace.promise]]));
+
+        await loadQueueData();
+
+        const badge = document.querySelector("#runs .run-entry .status-badge");
+        expect(badge.className).toContain("status-provisional");
+        expect(document.querySelector(".gbadge-success").className).toContain("status-provisional");
+
+        trace.resolve(new Response(TRACE_OK, { status: 200 }));
+        await hydrationIdle();
+
+        const confirmed = document.querySelector("#runs .run-entry .status-badge");
+        expect(confirmed.className).toContain("status-success");
+        expect(confirmed.className).not.toContain("status-provisional");
+        expect(document.querySelector(".gbadge-success").className).not.toContain("status-provisional");
     });
 
     it("supersedes stale hydration when the queue is reloaded mid-flight", async () => {

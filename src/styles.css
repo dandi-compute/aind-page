@@ -681,6 +681,15 @@ a.qp-asset-link:hover {
     color: var(--color-text-secondary);
 }
 
+/* Pass/fail glyphs whose trace has not yet confirmed them render dimmed so an
+   optimistic checkmark can't be mistaken for a verified one. Applies to run
+   card badges and group success badges until the status hydration pass lands. */
+.status-badge.status-provisional,
+.gbadge.status-provisional {
+    opacity: 0.55;
+    filter: saturate(0.6);
+}
+
 .run-meta {
     flex: 1;
     min-width: 0;
