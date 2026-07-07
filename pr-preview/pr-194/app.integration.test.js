@@ -711,17 +711,23 @@ describe("progressive queue loading", () => {
 
         await loadQueueData();
         await hydrationIdle();
+        // Before any expansion: no QC fetch yet, but the section is already
+        // discoverable as a collapsed loading placeholder.
         expect(blobRequests()).not.toContain(urls.qc);
-        expect(document.querySelector('details[data-section="qc"]')).toBeNull();
+        const placeholder = document.querySelector('details[data-section="qc"]');
+        expect(placeholder).not.toBeNull();
+        expect(placeholder.textContent).toContain("Loading quality control");
 
-        // Expand a section on the card through the real toggle path.
-        const section = document.querySelector("#runs .run-entry details[data-section]");
-        section.open = true;
-        section.dispatchEvent(new Event("toggle"));
+        // Expand the QC placeholder itself through the real toggle path.
+        placeholder.open = true;
+        placeholder.dispatchEvent(new Event("toggle"));
         await hydrationIdle();
 
         expect(blobRequests()).toContain(urls.qc);
-        expect(document.querySelector('details[data-section="qc"]')).not.toBeNull();
+        const section = document.querySelector('details[data-section="qc"]');
+        expect(section.textContent).not.toContain("Loading quality control");
+        expect(section.textContent).toContain("drift");
+        expect(section.hasAttribute("open")).toBe(true);
     });
 
     it("marks optimistic successes as provisional until the trace confirms them", async () => {

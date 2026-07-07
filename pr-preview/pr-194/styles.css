@@ -1404,6 +1404,14 @@ details[open] > .params-summary::before {
     background: var(--color-failed-bg);
     color: var(--color-failed);
 }
+.gbadge-running {
+    background: var(--color-running-bg);
+    color: var(--color-running);
+}
+.gbadge-stalled {
+    background: var(--color-stalled-bg);
+    color: var(--color-stalled);
+}
 .gbadge-queued {
     background: var(--color-queued-bg);
     color: var(--color-queued);
@@ -1558,22 +1566,52 @@ a.src-version-link:hover {
 }
 
 /* ─── Quality control ───────────────────────────────────────── */
+.qc-loading {
+    padding: 4px 20px 14px;
+    font-size: 0.85em;
+    color: var(--color-text-secondary);
+}
+
 .qc-stage {
-    padding: 8px 20px 14px;
+    padding: 0 20px 8px;
 }
 
 .qc-stage-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 0.8em;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--color-text-secondary);
-    margin-bottom: 10px;
+    padding: 6px 0;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+}
+.qc-stage-title::-webkit-details-marker {
+    display: none;
+}
+.qc-stage-title::before {
+    content: "›";
+    display: inline-block;
+    font-size: 1.1em;
+    transition: transform 0.2s;
+    width: 12px;
+    text-align: center;
+}
+details[open] > .qc-stage-title::before {
+    transform: rotate(90deg);
+}
+.qc-stage-title:hover {
+    color: var(--color-text);
 }
 
 .qc-metrics {
     display: grid;
     gap: 10px;
+    padding: 4px 0 6px;
 }
 
 .qc-metric {
@@ -1594,14 +1632,6 @@ a.src-version-link:hover {
     font-weight: 600;
     font-size: 0.9em;
     color: var(--color-text);
-}
-
-.qc-metric-modality {
-    font-size: 0.72em;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-text-secondary);
 }
 
 .qc-plot {
