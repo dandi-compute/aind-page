@@ -686,8 +686,8 @@ a.qp-asset-link:hover {
    card badges and group success badges until the status hydration pass lands. */
 .status-badge.status-provisional,
 .gbadge.status-provisional {
-    opacity: 0.55;
-    filter: saturate(0.6);
+    opacity: 0.78;
+    filter: saturate(0.8);
 }
 
 .run-meta {
