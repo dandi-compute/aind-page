@@ -1984,7 +1984,7 @@ function renderRunEntry(run) {
     ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
-    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderQcPlaceholderSection() : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
@@ -2392,12 +2392,14 @@ function renderVisualizationSection(recordings, vizLinks) {
 
 /* ─── Quality control rendering ─────────────────────────────────
    Renders the aind-data-schema QualityControl object (quality_control.json) as a
-   collapsible panel of per-metric cards grouped by processing stage, each
-   showing the metric's name, modality, description (with any markdown links),
-   the selected picker value(s), and a link to the referenced visualization
-   image when it can be matched to a known PNG. The object's Pass/Fail/Pending
-   statuses (per-metric status_history and the top-level status map) are
-   evaluation bookkeeping, not results of this run — they are not rendered.   */
+   collapsible panel of per-metric cards grouped into nested per-stage
+   dropdowns (Raw data, Processed data, …), each card showing the metric's
+   name, description (with any markdown links), the selected picker value(s),
+   and a link to the referenced visualization image when it can be matched to
+   a known PNG. The object's Pass/Fail/Pending statuses (per-metric
+   status_history and the top-level status map) are evaluation bookkeeping,
+   not results of this run — they are not rendered; nor is the modality
+   abbreviation, redundant for single-modality runs.                          */
 
 // Convert a description containing markdown links into safe HTML: escape first,
 // then turn [label](http…) into anchors.
@@ -2452,8 +2454,6 @@ function partitionQcPlots(qc, vizData) {
 }
 
 function renderQcMetric(metric) {
-    const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
-    const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
     const descHtml = metric?.description
         ? `<p class="qc-metric-desc">${qcLinkifyDescription(metric.description)}</p>`
         : "";
@@ -2485,7 +2485,6 @@ function renderQcMetric(metric) {
     return `<div class="qc-metric">
     <div class="qc-metric-head">
         <span class="qc-metric-name">${e(metric?.name ?? "Metric")}</span>
-        ${modalityHtml}
     </div>
     ${descHtml}
     ${plotHtml}
@@ -2497,15 +2496,18 @@ function renderQualityControlSection(qc) {
     const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
     if (metrics.length === 0) return "";
 
-    // Group metrics by processing stage, preserving first-seen order.
+    // Group metrics by processing stage (preserving first-seen order), each
+    // stage its own nested dropdown. The data-section key (stage name
+    // URI-encoded so it is safe inside an attribute selector) lets an open
+    // stage survive the in-place card re-renders of updateRunCard.
     const byStage = groupBy(metrics, (m) => m.stage || "Other");
     const stagesHtml = Array.from(byStage.entries())
         .map(([stage, stageMetrics]) => {
             const cards = stageMetrics.map((m) => renderQcMetric(m)).join("");
-            return `<div class="qc-stage">
-        <div class="qc-stage-title">${e(stage)}</div>
+            return `<details class="qc-stage" data-section="qc-stage-${encodeURIComponent(stage)}">
+        <summary class="qc-stage-title">${e(stage)}<span class="count-badge">${stageMetrics.length}</span></summary>
         <div class="qc-metrics">${cards}</div>
-    </div>`;
+    </details>`;
         })
         .join("");
 
@@ -2516,6 +2518,19 @@ function renderQualityControlSection(qc) {
         <span class="count-badge">${metrics.length}</span>
     </summary>
     ${stagesHtml}
+</details>`;
+}
+
+// Collapsed stand-in for the QC section rendered while quality_control.json
+// has not been fetched yet. Without it the section is invisible until some
+// other section's expand happens to trigger the QC hydration — expanding the
+// placeholder itself is the reveal that enqueues the fetch (see
+// initHydrationPromotion), and updateRunCard swaps in the real content.
+function renderQcPlaceholderSection() {
+    return `
+<details class="run-section" data-section="qc">
+    <summary class="run-section-title">Quality Control</summary>
+    <div class="qc-loading">Loading quality control…</div>
 </details>`;
 }
 
@@ -2534,7 +2549,9 @@ function renderGroupBadges(runs) {
     const s = runs.filter((r) => r.status === "success").length;
     const f = runs.filter((r) => r.status === "failed").length;
     const q = runs.filter((r) => r.status === "queued").length;
-    const u = runs.length - s - f - q;
+    const st = runs.filter(isStalled).length;
+    const r = runs.filter((run) => run.status === "running" && !isStalled(run)).length;
+    const u = runs.length - s - f - q - st - r;
     const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(runs);
     // A success count is provisional while any counted run's trace could still
@@ -2549,6 +2566,14 @@ function renderGroupBadges(runs) {
     if (f)
         parts.push(
             `<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
+        );
+    if (r)
+        parts.push(
+            `<span class="gbadge gbadge-running" title="${r} running run${r !== 1 ? "s" : ""}">${r}&thinsp;▶</span>`
+        );
+    if (st)
+        parts.push(
+            `<span class="gbadge gbadge-stalled" title="${st} stalled run${st !== 1 ? "s" : ""} (running for more than 24 hours)">${st}&thinsp;⚠</span>`
         );
     if (q)
         parts.push(
@@ -3547,7 +3572,7 @@ function renderFlatRunEntry(run) {
     ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
-    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderQcPlaceholderSection() : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
