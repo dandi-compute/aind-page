@@ -2558,30 +2558,32 @@ function renderGroupBadges(runs) {
     // flip it to failed — render it dimmed so an unconfirmed ✓ can't mislead.
     // Failed counts never need this: hydration can only add failures.
     const provisional = runs.some((r) => r.status === "success" && r.statusProvisional);
+    // Fixed left-to-right priority: running → queued → stalled → success →
+    // unknown, with failures always furthest right.
     const parts = [];
-    if (s)
-        parts.push(
-            `<span class="gbadge gbadge-success${provisional ? " status-provisional" : ""}" title="${s} successful run${s !== 1 ? "s" : ""}${provisional ? " (pending trace confirmation)" : ""}">${s}&thinsp;✓</span>`
-        );
-    if (f)
-        parts.push(
-            `<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
-        );
     if (r)
         parts.push(
             `<span class="gbadge gbadge-running" title="${r} running run${r !== 1 ? "s" : ""}">${r}&thinsp;▶</span>`
-        );
-    if (st)
-        parts.push(
-            `<span class="gbadge gbadge-stalled" title="${st} stalled run${st !== 1 ? "s" : ""} (running for more than 24 hours)">${st}&thinsp;⚠</span>`
         );
     if (q)
         parts.push(
             `<span class="gbadge gbadge-queued" title="${q} queued run${q !== 1 ? "s" : ""}">${q}&thinsp;⧗</span>`
         );
+    if (st)
+        parts.push(
+            `<span class="gbadge gbadge-stalled" title="${st} stalled run${st !== 1 ? "s" : ""} (running for more than 24 hours)">${st}&thinsp;⚠</span>`
+        );
+    if (s)
+        parts.push(
+            `<span class="gbadge gbadge-success${provisional ? " status-provisional" : ""}" title="${s} successful run${s !== 1 ? "s" : ""}${provisional ? " (pending trace confirmation)" : ""}">${s}&thinsp;✓</span>`
+        );
     if (u)
         parts.push(
             `<span class="gbadge gbadge-unknown" title="${u} unknown run${u !== 1 ? "s" : ""}">${u}&thinsp;?</span>`
+        );
+    if (f)
+        parts.push(
+            `<span class="gbadge gbadge-failed" title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
         );
     if (runsWithKnownByteCounts) {
         const totalBytesLabel = formatByteCount(totalBytes);

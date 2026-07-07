@@ -2051,6 +2051,51 @@ describe("renderDandisets", () => {
         expect(html).not.toContain("unknown run");
     });
 
+    it("orders group badges running → queued → stalled → success, failures furthest right", () => {
+        const base = {
+            attempt: 1,
+            runDate: null,
+            tasks: [],
+            generatedBy: [],
+            vizData: null,
+            hasLogs: false,
+            hasOutput: false,
+            hasCode: true,
+            dandisetId: "000696",
+            subject: "A",
+            session: "S1",
+            pipelineName: "ephys",
+            pipelineVersion: "v1",
+            paramsProfile: "fast",
+            configHash: "abc",
+            assetId: null,
+            inSourcedata: false,
+            failureStep: null,
+        };
+        const runs = [
+            { ...base, status: "success", hasOutput: true, session: "S1" },
+            { ...base, status: "failed", session: "S2" },
+            { ...base, status: "queued", session: "S3" },
+            { ...base, status: "running", createdAt: new Date().toISOString(), session: "S4" },
+            {
+                ...base,
+                status: "running",
+                createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+                session: "S5",
+            },
+        ].map((run, i) => ({
+            ...run,
+            path: `derivatives/dandiset-000696/sub-A/ses-S${i + 1}/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1`,
+        }));
+
+        const html = renderDandisets(runs);
+        const order = ["gbadge-running", "gbadge-queued", "gbadge-stalled", "gbadge-success", "gbadge-failed"].map(
+            (cls) => html.indexOf(cls)
+        );
+        expect(order.every((idx) => idx !== -1)).toBe(true);
+        expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
     it("orders tree groups by dandiset ID when that sort mode is selected", () => {
         document.body.innerHTML = '<div id="layout-bar"></div><div id="runs"></div>';
         initLayoutToggle();
