@@ -44,6 +44,8 @@ const {
     renderRegistryLink,
     renderFlatList,
     renderVisualizationSection,
+    renderQcMetric,
+    qcSelectedValue,
     runFailureStep,
     sortRuns,
     TEST_DANDISETS,
@@ -1430,6 +1432,109 @@ describe("renderVisualizationSection", () => {
 
         const html = renderVisualizationSection(recordings);
         expect(html).toContain(">3<"); // total image count badge
+    });
+});
+
+describe("qcSelectedValue", () => {
+    it("returns only the selected value for a dropdown selector, not its options/status", () => {
+        const value = {
+            value: "Noisy",
+            options: ["Normal", "No spikes", "Noisy"],
+            status: ["Pass", "Fail", "Fail"],
+            type: "dropdown",
+        };
+        expect(qcSelectedValue(value)).toBe("Noisy");
+    });
+
+    it("returns empty string for a dropdown with no selection made", () => {
+        const value = {
+            value: "",
+            options: ["Normal", "No spikes", "Noisy"],
+            status: ["Pass", "Fail", "Fail"],
+            type: "dropdown",
+        };
+        expect(qcSelectedValue(value)).toBe("");
+    });
+
+    it("joins a multi-select (checkbox) selected value", () => {
+        const value = {
+            value: ["Normal", "Noisy"],
+            options: ["Normal", "No spikes", "Noisy"],
+            status: ["Pass", "Fail", "Fail"],
+            type: "checkbox",
+        };
+        expect(qcSelectedValue(value)).toBe("Normal, Noisy");
+    });
+
+    it("renders scalar and boolean values as-is", () => {
+        expect(qcSelectedValue(0.98)).toBe("0.98");
+        expect(qcSelectedValue("clean")).toBe("clean");
+        expect(qcSelectedValue(true)).toBe("true");
+        expect(qcSelectedValue(false)).toBe("false");
+    });
+
+    it("returns empty string for null, undefined, or a bare object without a value", () => {
+        expect(qcSelectedValue(null)).toBe("");
+        expect(qcSelectedValue(undefined)).toBe("");
+        expect(qcSelectedValue({ options: ["a"], status: ["Pass"] })).toBe("");
+    });
+});
+
+describe("renderQcMetric", () => {
+    it("does not render the dropdown options/status legend", () => {
+        const metric = {
+            name: "Data quality",
+            stage: "Processing",
+            status_history: [{ status: "Pass" }],
+            value: {
+                value: "",
+                options: ["Normal", "No spikes", "Noisy"],
+                status: ["Pass", "Fail", "Fail"],
+                type: "dropdown",
+            },
+        };
+
+        const html = renderQcMetric(metric);
+
+        // The options and their Pass/Fail mappings are selector configuration and
+        // must not be dumped into the card (issue #298).
+        expect(html).not.toContain("No spikes");
+        expect(html).not.toContain("qc-option");
+        expect(html).not.toContain("qc-options");
+        // The metric's own name and latest status still render.
+        expect(html).toContain("Data quality");
+        expect(html).toContain("status-badge");
+        expect(html).toContain(">Pass<");
+    });
+
+    it("renders the selected dropdown value when one has been chosen", () => {
+        const metric = {
+            name: "Data quality",
+            status_history: [{ status: "Fail" }],
+            value: {
+                value: "Noisy",
+                options: ["Normal", "No spikes", "Noisy"],
+                status: ["Pass", "Fail", "Fail"],
+                type: "dropdown",
+            },
+        };
+
+        const html = renderQcMetric(metric);
+        expect(html).toContain("qc-value");
+        expect(html).toContain("Noisy");
+        expect(html).not.toContain("Normal");
+        expect(html).not.toContain("No spikes");
+    });
+
+    it("escapes HTML in the selected value", () => {
+        const metric = {
+            name: "Data quality",
+            value: { value: "<img src=x onerror=alert(1)>", type: "dropdown" },
+        };
+
+        const html = renderQcMetric(metric);
+        expect(html).not.toContain("<img src=x");
+        expect(html).toContain("&lt;img");
     });
 });
 

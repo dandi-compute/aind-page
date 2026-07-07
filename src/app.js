@@ -2370,6 +2370,24 @@ function qcLatestStatus(metric) {
     return last?.status ?? null;
 }
 
+// Human-facing value for a QC metric's `value`. Selector objects (dropdown,
+// checkbox, …) expose the curator's choice under `.value`, alongside sibling
+// `options`/`status` arrays that merely enumerate the selector's possible
+// inputs and their mapped outputs; only the chosen `.value` is a result, so the
+// arrays are ignored. Scalars are returned as-is; a bare object with no `.value`
+// (nor a selected value) yields an empty string so nothing is rendered.
+function qcSelectedValue(value) {
+    if (value === null || value === undefined) return "";
+    if (Array.isArray(value)) return value.join(", ");
+    if (typeof value === "object") {
+        const selected = value.value;
+        if (selected === null || selected === undefined || selected === "") return "";
+        return Array.isArray(selected) ? selected.join(", ") : String(selected);
+    }
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return String(value);
+}
+
 // Convert a description containing markdown links into safe HTML: escape first,
 // then turn [label](http…) into anchors.
 function qcLinkifyDescription(text) {
@@ -2440,20 +2458,12 @@ function renderQcMetric(metric) {
     </a>`
         : "";
 
-    // Dropdown option → Pass/Fail legend.
-    let optionsHtml = "";
-    const value = metric?.value;
-    if (value && Array.isArray(value.options)) {
-        const statuses = Array.isArray(value.status) ? value.status : [];
-        optionsHtml = `<div class="qc-options">${value.options
-            .map((opt, i) => {
-                const verdict = String(statuses[i] ?? "").toLowerCase();
-                const cls = verdict === "pass" ? "qc-option-pass" : verdict === "fail" ? "qc-option-fail" : "";
-                const suffix = statuses[i] ? ` · ${e(statuses[i])}` : "";
-                return `<span class="qc-option ${cls}">${e(opt)}${suffix}</span>`;
-            })
-            .join("")}</div>`;
-    }
+    // Actual selected value. Selector-type values (dropdown, checkbox, …) carry
+    // `options`/`status` arrays that only describe the selector's possible
+    // inputs and their mapped Pass/Fail outputs — configuration, not a result —
+    // so those are not rendered; only the value the curator actually chose is.
+    const selectedValue = qcSelectedValue(metric?.value);
+    const valueHtml = selectedValue ? `<div class="qc-value">${e(selectedValue)}</div>` : "";
 
     return `<div class="qc-metric">
     <div class="qc-metric-head">
@@ -2463,7 +2473,7 @@ function renderQcMetric(metric) {
     </div>
     ${descHtml}
     ${plotHtml}
-    ${optionsHtml}
+    ${valueHtml}
 </div>`;
 }
 
@@ -5094,6 +5104,8 @@ if (typeof module !== "undefined" && module.exports) {
         buildParamsCompareEntries,
         renderRegistryLink,
         renderVisualizationSection,
+        renderQcMetric,
+        qcSelectedValue,
         runFailureStep,
         sortRuns,
         uniquePipelineEntries,
