@@ -2394,7 +2394,7 @@ function renderVisualizationSection(recordings, vizLinks) {
    Renders the aind-data-schema QualityControl object (quality_control.json) as a
    collapsible panel: an overall status summary plus per-metric cards grouped by
    processing stage, each showing the latest status, modality, description (with
-   any markdown links), the dropdown option → Pass/Fail legend, and a link to the
+   any markdown links), the selected picker value(s), and a link to the
    referenced visualization image when it can be matched to a known PNG.        */
 const QC_STATUS_CLASS = {
     pass: "status-success",
@@ -2483,19 +2483,19 @@ function renderQcMetric(metric) {
     </a>`
         : "";
 
-    // Dropdown option → Pass/Fail legend.
-    let optionsHtml = "";
+    // Picker-style values (dropdown/checkbox) carry the widget's arguments —
+    // the selectable `options` and the status each choice maps to — alongside
+    // the actual selection in `value`. Only the selection is a result; show it
+    // as-is and leave the argument arrays unrendered.
+    let valueHtml = "";
     const value = metric?.value;
-    if (value && Array.isArray(value.options)) {
-        const statuses = Array.isArray(value.status) ? value.status : [];
-        optionsHtml = `<div class="qc-options">${value.options
-            .map((opt, i) => {
-                const verdict = String(statuses[i] ?? "").toLowerCase();
-                const cls = verdict === "pass" ? "qc-option-pass" : verdict === "fail" ? "qc-option-fail" : "";
-                const suffix = statuses[i] ? ` · ${e(statuses[i])}` : "";
-                return `<span class="qc-option ${cls}">${e(opt)}${suffix}</span>`;
-            })
-            .join("")}</div>`;
+    if (value && typeof value === "object" && Array.isArray(value.options)) {
+        const selections = (Array.isArray(value.value) ? value.value : [value.value]).filter(
+            (v) => v != null && String(v) !== ""
+        );
+        valueHtml = selections.length
+            ? `<div class="qc-values">${selections.map((v) => `<span class="qc-value">${e(String(v))}</span>`).join("")}</div>`
+            : "";
     }
 
     return `<div class="qc-metric">
@@ -2506,7 +2506,7 @@ function renderQcMetric(metric) {
     </div>
     ${descHtml}
     ${plotHtml}
-    ${optionsHtml}
+    ${valueHtml}
 </div>`;
 }
 
@@ -5352,6 +5352,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderFilterBanner,
         renderSummary,
         renderFlatList,
+        renderQualityControlSection,
         renderQueuePriorities,
         buildParamsCompareEntries,
         renderRegistryLink,

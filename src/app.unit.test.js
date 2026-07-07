@@ -44,6 +44,7 @@ const {
     renderQueuePriorities,
     renderRegistryLink,
     renderFlatList,
+    renderQualityControlSection,
     renderVisualizationSection,
     runFailureStep,
     sortRuns,
@@ -1431,6 +1432,55 @@ describe("renderVisualizationSection", () => {
 
         const html = renderVisualizationSection(recordings);
         expect(html).toContain(">3<"); // total image count badge
+    });
+});
+
+describe("renderQualityControlSection", () => {
+    const dropdownMetric = (value) => ({
+        name: "Probe noise",
+        stage: "Raw data",
+        value: {
+            value,
+            options: ["Normal", "No spikes", "Noisy"],
+            status: ["Pass", "Fail", "Fail"],
+            type: "dropdown",
+        },
+    });
+
+    it("renders only the selected picker value, not the widget's options/status arguments", () => {
+        const html = renderQualityControlSection({ metrics: [dropdownMetric("Normal")] });
+
+        expect(html).toContain('<span class="qc-value">Normal</span>');
+        expect(html).not.toContain("No spikes");
+        expect(html).not.toContain("Noisy");
+        expect(html).not.toContain("qc-option");
+    });
+
+    it("renders no value chips when nothing has been selected", () => {
+        const html = renderQualityControlSection({ metrics: [dropdownMetric("")] });
+
+        expect(html).not.toContain("qc-value");
+        expect(html).not.toContain("Normal");
+    });
+
+    it("renders every selection of a multi-select (checkbox) value", () => {
+        const html = renderQualityControlSection({
+            metrics: [
+                {
+                    name: "Artifacts",
+                    stage: "Raw data",
+                    value: {
+                        value: ["Line noise", "Drift"],
+                        options: ["Line noise", "Drift", "None"],
+                        type: "checkbox",
+                    },
+                },
+            ],
+        });
+
+        expect(html).toContain('<span class="qc-value">Line noise</span>');
+        expect(html).toContain('<span class="qc-value">Drift</span>');
+        expect(html).not.toContain(">None<");
     });
 });
 

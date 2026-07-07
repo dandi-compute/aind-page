@@ -1650,28 +1650,20 @@ a.src-version-link:hover {
     text-decoration: underline;
 }
 
-.qc-options {
+.qc-values {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     margin-top: 10px;
 }
 
-.qc-option {
+.qc-value {
     font-size: 0.75em;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     padding: 2px 8px;
     color: var(--color-text-secondary);
-}
-.qc-option-pass {
-    border-color: var(--color-success);
-    color: var(--color-success);
-}
-.qc-option-fail {
-    border-color: var(--color-failed);
-    color: var(--color-failed);
 }
 
 /* ─── Provenance (dataset_description.json) ─────────────────── */
