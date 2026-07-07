@@ -1,12 +1,12 @@
 ---
-name: verify
-description: Build, launch, and drive this static dashboard in a real browser to verify changes end-to-end. Use when confirming a change to src/app.js works in the running app, not just in vitest.
+name: run-dashboard
+description: Launch and drive this static dashboard in a real browser with stubbed external data. Use when running or screenshotting the app locally, or when verifying that a change to src/app.js works in the running app (not just in vitest).
 ---
 
-# Verifying aind-page changes in a running browser
+# Running and driving the aind-page dashboard in a browser
 
 The app is a static page (`src/index.html` + `src/app.js`, no build step). All data
-comes from external hosts fetched client-side, so verification = serve `src/`,
+comes from external hosts fetched client-side, so running it locally = serve `src/`,
 open it in Chromium, and stub the external endpoints at the network boundary.
 
 ## Recipe
