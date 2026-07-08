@@ -1501,6 +1501,10 @@ details[open] > .params-summary::before {
         border-color 0.15s,
         background 0.15s;
 }
+.run-entry-derivatives-link .dandi-icon {
+    margin-right: 0;
+    margin-left: 0.3em;
+}
 .run-entry-derivatives-link:hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
