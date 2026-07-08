@@ -1238,6 +1238,12 @@ details.dandiset-group[open] > .dandiset-summary::before {
     min-width: 0;
 }
 
+.neurosift-icon {
+    display: inline-block;
+    vertical-align: -2px;
+    margin-right: 0.3em;
+}
+
 .dandiset-link {
     color: var(--color-accent);
     text-decoration: none;

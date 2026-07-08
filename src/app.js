@@ -731,6 +731,9 @@ function applyTheme(theme, btn) {
 const MOON_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/></svg>`;
 const SUN_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.22 3.22l1.42 1.42M15.36 15.36l1.42 1.42M3.22 16.78l1.42-1.42M15.36 4.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`;
 
+// Marks links that open in Neurosift, so it's clear before clicking where they lead.
+const NEUROSIFT_ICON_HTML = `<img class="neurosift-icon" src="assets/neurosift-icon.png" alt="" aria-hidden="true" width="14" height="14" />`;
+
 /* ─── ETag-aware fetch cache ────────────────────────────────── */
 // Caches response bodies in sessionStorage keyed by URL together with the
 // server's ETag.  Subsequent requests send "If-None-Match" so the server can
@@ -1693,7 +1696,7 @@ function renderQueueAssetOverrides(overrides) {
         .map(([assetId, val]) => {
             const idShort = assetId.length > 16 ? `${assetId.slice(0, 8)}…${assetId.slice(-4)}` : assetId;
             const idHtml = QUEUE_UUID_PATTERN.test(assetId)
-                ? `<a class="qp-asset qp-asset-link" href="${e(neurosiftBlobUrl(assetId))}" target="_blank" rel="noopener" title="${e(assetId)} — open in Neurosift">${e(idShort)}</a>`
+                ? `<a class="qp-asset qp-asset-link" href="${e(neurosiftBlobUrl(assetId))}" target="_blank" rel="noopener" title="${e(assetId)} — open in Neurosift">${NEUROSIFT_ICON_HTML}${e(idShort)}</a>`
                 : `<code class="qp-asset" title="${e(assetId)}">${e(idShort)}</code>`;
             const valHtml =
                 val === null || val === undefined
@@ -3359,7 +3362,7 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
     <summary class="dandiset-summary">
         <span class="dandiset-summary-inner">
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
-               target="_blank" rel="noopener" onclick="event.stopPropagation()">Dandiset&nbsp;${e(dandisetId)}</a>
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">${NEUROSIFT_ICON_HTML}Dandiset&nbsp;${e(dandisetId)}</a>
             <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
                target="_blank" rel="noopener" onclick="event.stopPropagation()">Sourcedata&nbsp;↖</a>
             <span class="group-meta">
@@ -3436,7 +3439,7 @@ function renderSessionGroup(dandisetId, subject, session, runs, autoExpand = fal
     const sessionHref = neurosiftSessionUrl(dandisetId, rep.contentHash);
     const sessionLinkHtml = sessionHref
         ? `<a class="group-link" href="${e(sessionHref)}"
-              target="_blank" rel="noopener" onclick="event.stopPropagation()">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
+              target="_blank" rel="noopener" onclick="event.stopPropagation()">${NEUROSIFT_ICON_HTML}Ses:&nbsp;<strong>${e(sessionLabel)}</strong></a>`
         : `<span class="group-label">Ses:&nbsp;<strong>${e(sessionLabel)}</strong></span>`;
 
     const key = `e:${dandisetId}/${subject}/${session ?? ""}`;
@@ -3575,7 +3578,7 @@ function renderFlatRunEntry(run) {
         <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
         <span class="status-badge ${sc}${run.statusProvisional ? " status-provisional" : ""}"${run.statusProvisional ? ' title="Pass/fail pending trace confirmation"' : ""}>${slbl}</span>
         <span class="flat-run-context">
-            <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">Dandiset&nbsp;${e(run.dandisetId)}</a>
+            <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">${NEUROSIFT_ICON_HTML}Dandiset&nbsp;${e(run.dandisetId)}</a>
             <span class="run-sep">·</span>
             <a class="flat-ctx-link flat-ctx-path" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
             ${run.runDate ? `<span class="flat-ctx-break"></span><span class="flat-ctx-text flat-ctx-date">${e(run.runDate)}</span>` : ""}
