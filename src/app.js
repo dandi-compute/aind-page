@@ -73,10 +73,11 @@ let _openGroupKeys = new Set();
 const FLAT_RENDER_CHUNK = 200;
 let _flatRenderLimit = FLAT_RENDER_CHUNK;
 
+const ALLOWED_VIEW_MODES = new Set(["dashboard", "compare", "params", "tests", "archive"]);
+
 function parseViewMode() {
     const rawView = new URLSearchParams(window.location.search).get("view");
-    const allowedViews = new Set(["dashboard", "compare", "params", "tests", "archive"]);
-    return allowedViews.has(rawView) ? rawView : null;
+    return ALLOWED_VIEW_MODES.has(rawView) ? rawView : null;
 }
 
 function syncTopNav(viewMode = parseViewMode()) {
@@ -290,6 +291,10 @@ function buildInitialRun(run) {
         qualityControl: null,
         logFiles: runLogFiles(run),
         traceLoaded: !run.hasLogs, // nothing to fetch for runs without logs
+        // Whether a trace has confirmed status/failureStep at least once.
+        // Unlike traceLoaded this survives the filter-change soft reset, so a
+        // released run's badges stay truthful without a background refetch.
+        statusSettled: !run.hasLogs,
         detailsLoaded: false,
         detailQueued: false,
         qcLoaded: false,
@@ -822,6 +827,19 @@ function blobMemoryCachePut(url, entry) {
         _blobMemoryCache.delete(oldUrl);
         _blobMemoryCacheBytes -= oldEntry.body.length;
     }
+}
+
+// Release every retained blob body (used by the filter-change soft reset).
+// Only the in-memory layer is dropped: the persistent Cache API store (or its
+// sessionStorage fallback) keeps the bytes, so later reads are disk hits.
+function clearBlobMemoryCache() {
+    _blobMemoryCache.clear();
+    _blobMemoryCacheBytes = 0;
+}
+
+// Test hook: current retained-entry count and byte total of the memory layer.
+function blobMemoryCacheStats() {
+    return { entries: _blobMemoryCache.size, bytes: _blobMemoryCacheBytes };
 }
 
 function isImmutableBlobUrl(url) {
@@ -4853,6 +4871,7 @@ async function hydrateRunStatus(run) {
         failureStep,
         statusProvisional: false,
         traceLoaded: true,
+        statusSettled: true,
     });
 }
 
@@ -5128,6 +5147,194 @@ function flushHydrationUpdates() {
     if (!banner || !banner.contains(document.activeElement)) renderFilterBanner(filter, _runsInScope);
 }
 
+/* ─── In-page filter changes + memory soft reset ────────────── */
+// Filter changes historically navigated (the filter form is a plain GET form;
+// crumbs, clear links, summary stats, and narrow links are plain anchors), so
+// every change rebuilt the page from scratch. Same-view filter navigations are
+// instead applied in place via history.pushState: the queue state is already in
+// memory, so the new scope renders instantly — and the switch doubles as a
+// "soft reset" that reclaims what a long-lived tab accumulated for the old
+// scope (retained blob bodies, hydrated card payloads, materialized DOM).
+//
+// The soft reset never touches the durable layers: the Cache API blob store
+// (content-addressed, immutable), the sessionStorage queue-state ETag cache,
+// and the params/config registries all survive, so everything dropped here
+// re-reads from disk instead of the network when needed again.
+//
+// View switches (?view=...) still navigate for real — they load a different
+// page type — as does anything cross-origin, cross-path, or targeted.
+
+// JSON snapshot of the parseFilter() set the rendered queue reflects. Null
+// until a queue load succeeds, which keeps in-page interception off on the
+// landing/compare/params pages and after a failed load.
+let _activeFilterKey = null;
+let _inPageFilterNavInit = false;
+
+function filterStateKey(filter = parseFilter()) {
+    // A GET submit of the filter form serializes untouched inputs as empty
+    // params; applyFilter/isFilterActive treat "" and absent alike, so the
+    // snapshot must too.
+    return JSON.stringify(filter, (key, value) => (value === "" ? null : value));
+}
+
+// Test hook: the live run objects backing the current load.
+function getRunsInScope() {
+    return _runsInScope;
+}
+
+// Drop everything hydration attached to a run, resetting it to its
+// buildInitialRun shape except for the settled status fields: status,
+// failureStep, statusProvisional, and statusSettled survive so badges and
+// summary stats stay truthful without a refetch. The cleared queueing flags
+// make the run re-fetch once it matters again (re-entering the filtered set,
+// or a card reveal) — cheaply, via the persistent blob cache.
+function releaseRunHydration(run) {
+    run.tasks = [];
+    run.generatedBy = [];
+    run.datasetDescription = null;
+    run.vizData = run.hasOutput ? fetchVisualizationData(run) : null;
+    run.vizLinks = null;
+    run.qualityControl = null;
+    run.traceLoaded = !run.hasLogs;
+    run.detailsLoaded = false;
+    run.detailQueued = false;
+    run.qcLoaded = false;
+    run.qcQueued = false;
+}
+
+// Re-render the already-loaded queue for the filter set in the current URL,
+// reclaiming memory held for the previous scope.
+function softResetForFilterChange() {
+    const filter = parseFilter();
+    _activeFilterKey = filterStateKey(filter);
+
+    // Supersede in-flight hydration before mutating scope (existing generation
+    // bump — stale results must never touch the re-rendered DOM).
+    cancelHydration();
+    clearBlobMemoryCache();
+
+    const isFiltered = isFilterActive(filter);
+    const filteredRuns = applyFilter(sortRuns(_runsInScope), filter);
+    const keep = new Set(filteredRuns);
+    for (const run of _runsInScope) {
+        if (!keep.has(run)) releaseRunHydration(run);
+    }
+    _filteredRuns = filteredRuns;
+
+    // Collapse the tree and reset flat-layout chunking, exactly like a fresh
+    // load: the old scope's materialized group bodies are reclaimed with the
+    // re-render.
+    _openGroupKeys = new Set();
+    _flatRenderLimit = FLAT_RENDER_CHUNK;
+
+    if (isFiltered && filteredRuns.length === 0) {
+        // Possibly transient: the restarted hydration below may yet bring runs
+        // into the filtered set (see the matching branch in loadQueueData).
+        showError("No pipeline runs match the current filter.");
+        document.getElementById("summary").style.display = "none";
+        document.getElementById("runs").style.display = "none";
+    } else {
+        renderSummary(isFiltered ? filteredRuns : _runsInScope);
+        document.getElementById("runs").innerHTML =
+            _layoutMode === "flat" ? renderFlatList(filteredRuns) : renderDandisets(sortRuns(filteredRuns));
+        initInlineHtmlFrames();
+        initLayoutToggle();
+        document.getElementById("error").style.display = "none";
+        showResults();
+    }
+    renderFilterBanner(filter, _runsInScope);
+    window.scrollTo(0, 0);
+
+    // Restart hydration for the new scope, visible runs first (same ordering
+    // as loadQueueData). Out-of-scope runs whose status a trace already
+    // settled are deliberately NOT re-enqueued: re-reading their traces would
+    // repopulate the tasks arrays and the memory cache just dropped, and
+    // their retained status/failureStep already keeps the summary and filter
+    // membership truthful. They re-hydrate when a later filter change brings
+    // them back into the visible set. Never-settled runs stay queued so
+    // hydration-dependent filters keep converging via flushHydrationUpdates —
+    // and a codebase-hash filter hydrates the whole scope, since membership
+    // needs every run's provenance (see needsEagerDetails in startHydration).
+    const rest = _runsInScope.filter((run) => !keep.has(run));
+    const backgroundRuns = filter.dandiCodebaseHash ? rest : rest.filter((run) => !run.statusSettled);
+    startHydration([...filteredRuns, ...backgroundRuns]);
+}
+
+// Apply the current URL to the loaded queue without a navigation. In-page URLs
+// built by narrowUrl embed the live layout/sort values, so normally only the
+// filter set differs — but popstate can restore an entry carrying older
+// layout/sort params, so those re-sync too.
+function handleInPageFilterUrlChange() {
+    const layoutChanged =
+        _layoutMode !== parseLayoutMode() || _sortMode !== parseSortMode() || _sortDirection !== parseSortDirection();
+    _layoutMode = parseLayoutMode();
+    _sortMode = parseSortMode();
+    _sortDirection = parseSortDirection();
+    if (filterStateKey() !== _activeFilterKey) {
+        softResetForFilterChange();
+    } else if (layoutChanged) {
+        initLayoutToggle();
+        rerenderRuns();
+    }
+}
+
+// Whether a URL can be applied in place: same origin and path, no fragment,
+// and staying on the view the page rendered (view switches load a different
+// page type and keep navigating for real).
+function isInPageFilterUrl(url) {
+    if (url.origin !== window.location.origin || url.pathname !== window.location.pathname || url.hash) return false;
+    const rawView = new URLSearchParams(url.search).get("view");
+    return (ALLOWED_VIEW_MODES.has(rawView) ? rawView : null) === _viewMode;
+}
+
+function initInPageFilterNavigation() {
+    if (_inPageFilterNavInit) return;
+    _inPageFilterNavInit = true;
+
+    // Filter links (crumbs, clear links, summary stats, narrow links, priority
+    // chips) — delegated so links from every re-render are covered, and in the
+    // capture phase because the ⊕ Narrow links inside group summaries stop
+    // propagation inline (to keep the click from toggling their group), which
+    // would never let a bubble listener see them. Modified clicks (new tab,
+    // download) keep their native behavior.
+    document.addEventListener(
+        "click",
+        (evt) => {
+            if (_activeFilterKey === null || evt.defaultPrevented) return;
+            if (evt.button !== 0 || evt.metaKey || evt.ctrlKey || evt.shiftKey || evt.altKey) return;
+            if (!(evt.target instanceof Element)) return;
+            const anchor = evt.target.closest("a[href]");
+            if (!anchor || anchor.hasAttribute("download")) return;
+            if (anchor.target && anchor.target !== "_self") return;
+            const url = new URL(anchor.getAttribute("href"), window.location.href);
+            if (!isInPageFilterUrl(url)) return;
+            evt.preventDefault();
+            window.history.pushState(null, "", `${url.pathname}${url.search}`);
+            handleInPageFilterUrlChange();
+        },
+        true
+    );
+
+    // The filter form (Apply / Enter in an input). Mirrors the native GET
+    // serialization so the resulting URL matches what a full-page submit would
+    // have produced.
+    document.addEventListener("submit", (evt) => {
+        if (_activeFilterKey === null || evt.defaultPrevented) return;
+        const form = evt.target;
+        if (!(form instanceof Element) || !form.classList.contains("filter-form")) return;
+        const qs = new URLSearchParams(new FormData(form)).toString();
+        evt.preventDefault();
+        window.history.pushState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+        handleInPageFilterUrlChange();
+    });
+
+    // Back/forward across pushState entries stays in-page too.
+    window.addEventListener("popstate", () => {
+        if (_activeFilterKey === null) return;
+        handleInPageFilterUrlChange();
+    });
+}
+
 /* ─── Queue data loader ─────────────────────────────────────── */
 // Fetches, processes, and renders the queue state for the current view.
 // Only applies to the dashboard queue views ("main", "tests", and "archive");
@@ -5140,6 +5347,9 @@ async function loadQueueData() {
     // Supersede any in-flight hydration from a previous load before the new
     // state fetch begins (stale results must never touch the fresh DOM).
     cancelHydration();
+    // In-page filter application stays off until this load succeeds (the
+    // in-memory scope it would re-render is about to be replaced).
+    _activeFilterKey = null;
     // Fresh load: collapse the tree and reset flat-layout chunking, matching
     // the pre-lazy-rendering behavior of a full reload.
     _openGroupKeys = new Set();
@@ -5188,6 +5398,7 @@ async function loadQueueData() {
 
         _runsInScope = runsInScope;
         _filteredRuns = filteredRuns;
+        _activeFilterKey = filterStateKey(filter);
         _layoutMode = parseLayoutMode();
         _sortMode = parseSortMode();
         _sortDirection = parseSortDirection();
@@ -5231,6 +5442,7 @@ async function init() {
     initModal();
     initHydrationPromotion();
     initFlatShowMore();
+    initInPageFilterNavigation();
     syncTopNav(_viewMode);
 
     // The landing page is the default view (no `view` param). It has no queue
@@ -5321,10 +5533,15 @@ document.addEventListener("DOMContentLoaded", init);
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         applyFilter,
+        blobMemoryCacheStats,
         buildInitialRun,
         buildRunPath,
         cachedFetch,
         cancelHydration,
+        clearBlobMemoryCache,
+        getRunsInScope,
+        initInPageFilterNavigation,
+        softResetForFilterChange,
         classifyFailedTaskStep,
         clearQueueStateCache,
         deriveFlagStatus,

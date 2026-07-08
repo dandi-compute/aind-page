@@ -1,8 +1,11 @@
 const {
+    blobMemoryCacheStats,
     cancelHydration,
+    getRunsInScope,
     hydrationIdle,
     initFlatShowMore,
     initHydrationPromotion,
+    initInPageFilterNavigation,
     loadQueueData,
     parseQueueEntries,
     queueStateCacheKey,
@@ -12,6 +15,7 @@ const {
     showError,
     showLoading,
     showResults,
+    softResetForFilterChange,
 } = require("./app");
 
 beforeEach(() => {
@@ -887,5 +891,187 @@ describe("progressive queue loading", () => {
         staleTrace.resolve(new Response(TRACE_FAILED_PRE, { status: 200 }));
         await new Promise((r) => setTimeout(r, 0));
         expect(document.querySelector("#runs .run-entry").className).toContain("status-success");
+    });
+
+    describe("soft reset on in-page filter changes", () => {
+        // Two-dandiset fixture: run A (000777) succeeds, run B (000888) fails
+        // in pre-processing and carries every card-detail artifact.
+        function seedTwoDandisets({ layout = "tree" } = {}) {
+            window.history.replaceState(null, "", layout === "flat" ? "/?layout=flat" : "/");
+            const a = withArtifacts(makeEntry({ dandiset_id: "000777" }), { trace: newBlobId() });
+            const b = withArtifacts(makeEntry({ dandiset_id: "000888" }), {
+                trace: newBlobId(),
+                dd: newBlobId(),
+                viz: newBlobId(),
+                qc: newBlobId(),
+                png: newBlobId(),
+            });
+            seedQueueState([a.entry, b.entry]);
+            installFetch(
+                new Map([
+                    [a.urls.trace, () => new Response(TRACE_OK, { status: 200 })],
+                    [b.urls.trace, () => new Response(TRACE_FAILED_PRE, { status: 200 })],
+                    [b.urls.dd, () => new Response('{"GeneratedBy":[]}', { status: 200 })],
+                    [b.urls.viz, () => new Response("{}", { status: 200 })],
+                    [b.urls.qc, () => new Response('{"metrics":[{"name":"drift","stage":"pre"}]}', { status: 200 })],
+                ])
+            );
+            initHydrationPromotion();
+            initInPageFilterNavigation();
+            return { a, b };
+        }
+
+        it("applies summary-stat filter links in place and clears the blob memory cache", async () => {
+            seedTwoDandisets();
+            await loadQueueData();
+            await hydrationIdle();
+            expect(blobMemoryCacheStats().entries).toBeGreaterThan(0);
+
+            const failedLink = document.querySelector("#summary a.stat-failed");
+            failedLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+            // Applied via pushState, no navigation: URL carries the filter and
+            // the page re-rendered synchronously for the narrowed scope.
+            expect(window.location.search).toContain("status=failed");
+            expect(blobMemoryCacheStats()).toEqual({ entries: 0, bytes: 0 });
+            expect(document.getElementById("filter-banner").innerHTML).toContain("Filtered view:");
+            expect(document.querySelector("#summary .stat-value").textContent).toBe("1"); // Total Runs
+            await hydrationIdle();
+
+            // Back returns to the unfiltered view in place as well.
+            window.history.replaceState(null, "", "/");
+            window.dispatchEvent(new Event("popstate"));
+            expect(document.querySelector("#summary .stat-value").textContent).toBe("2");
+            await hydrationIdle();
+        });
+
+        it("drops payloads and flags of runs leaving the filtered set, keeps settled statuses, and re-hydrates", async () => {
+            const { b } = seedTwoDandisets({ layout: "flat" });
+            await loadQueueData();
+            await hydrationIdle();
+
+            // Reveal run B's card so its detail + QC artifacts hydrate.
+            const card = Array.from(document.querySelectorAll("[data-run-key]")).find(
+                (el) => el.dataset.runKey === b.path
+            );
+            const section = card.querySelector("details");
+            section.open = true;
+            section.dispatchEvent(new Event("toggle"));
+            await hydrationIdle();
+
+            const runB = getRunsInScope().find((run) => run.dandisetId === "000888");
+            const runA = getRunsInScope().find((run) => run.dandisetId === "000777");
+            expect(runB.qualityControl).not.toBeNull();
+            expect(runB.detailsLoaded).toBe(true);
+            expect(runB.tasks.length).toBeGreaterThan(0);
+
+            // Narrow to dandiset 000777: B leaves the filtered set.
+            window.history.replaceState(null, "", "/?layout=flat&dandiset=000777");
+            softResetForFilterChange();
+
+            // B's hydrated payloads are dropped and its flags reset so a later
+            // reveal re-fetches (from the persistent cache)…
+            expect(runB.tasks).toEqual([]);
+            expect(runB.datasetDescription).toBeNull();
+            expect(runB.qualityControl).toBeNull();
+            expect(runB.vizLinks).toBeNull();
+            expect(runB.detailsLoaded).toBe(false);
+            expect(runB.detailQueued).toBe(false);
+            expect(runB.qcLoaded).toBe(false);
+            expect(runB.qcQueued).toBe(false);
+            expect(runB.traceLoaded).toBe(false);
+            // …while its settled status stays truthful without a refetch.
+            expect(runB.status).toBe("failed");
+            expect(runB.failureStep).toBe("pre-processing");
+            expect(runB.statusProvisional).toBe(false);
+
+            // A stays fully hydrated: still in scope, nothing re-enqueued.
+            expect(runA.traceLoaded).toBe(true);
+            expect(runA.status).toBe("success");
+            expect(runA.tasks.length).toBeGreaterThan(0);
+            expect(document.querySelectorAll("#runs .run-entry")).toHaveLength(1);
+
+            // B's status is already settled, so background hydration must NOT
+            // re-read its trace while it stays out of scope — that would
+            // repopulate the memory just reclaimed.
+            await hydrationIdle();
+            expect(runB.traceLoaded).toBe(false);
+            expect(runB.tasks).toEqual([]);
+
+            // Broadening the filter brings B back into the visible set, and
+            // the restarted hydration re-reads its trace (from the persistent
+            // cache) so its task table returns.
+            window.history.replaceState(null, "", "/?layout=flat");
+            softResetForFilterChange();
+            await hydrationIdle();
+            expect(runB.traceLoaded).toBe(true);
+            expect(runB.tasks.length).toBeGreaterThan(0);
+        });
+
+        it("keeps hydrating never-settled out-of-scope runs so hydration-dependent filters converge", async () => {
+            window.history.replaceState(null, "", "/");
+            const a = withArtifacts(makeEntry({ dandiset_id: "000777" }), { trace: newBlobId() });
+            const b = withArtifacts(makeEntry({ dandiset_id: "000888", has_output: false }), { trace: newBlobId() });
+            seedQueueState([a.entry, b.entry]);
+            const gatedTrace = deferred();
+            installFetch(
+                new Map([
+                    [a.urls.trace, () => new Response(TRACE_OK, { status: 200 })],
+                    // Fresh Response per call: the superseded generation and the
+                    // restarted one both read this URL.
+                    [b.urls.trace, () => gatedTrace.promise.then((body) => new Response(body, { status: 200 }))],
+                ])
+            );
+            initInPageFilterNavigation();
+
+            await loadQueueData();
+
+            // Filter to pre-processing failures while B's trace is still in
+            // flight: nothing matches yet, and B's status is unsettled.
+            window.history.replaceState(null, "", "/?failureStep=pre-processing");
+            softResetForFilterChange();
+            expect(document.getElementById("error").innerHTML).toContain("No pipeline runs match");
+
+            // B stayed in the restarted hydration queue; when its trace lands
+            // it enters the filtered set via flushHydrationUpdates.
+            gatedTrace.resolve(TRACE_FAILED_PRE);
+            await hydrationIdle();
+            expect(document.getElementById("error").style.display).toBe("none");
+            expect(document.querySelector("#runs .run-entry, details.dandiset-group")).not.toBeNull();
+            const runB = getRunsInScope().find((run) => run.dandisetId === "000888");
+            expect(runB.status).toBe("failed");
+            expect(runB.failureStep).toBe("pre-processing");
+        });
+
+        it("applies the filter form in place via the Apply submit path", async () => {
+            seedTwoDandisets();
+            await loadQueueData();
+            await hydrationIdle();
+
+            const form = document.querySelector(".filter-form");
+            form.querySelector('input[name="dandiset"]').value = "000888";
+            form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+            expect(window.location.search).toContain("dandiset=000888");
+            expect(document.querySelector("#summary .stat-value").textContent).toBe("1");
+            expect(document.querySelector("#summary .stat-failed .stat-value").textContent.trim()).toBe("1");
+            await hydrationIdle();
+        });
+
+        it("leaves view switches to real navigation", async () => {
+            seedTwoDandisets();
+            await loadQueueData();
+            await hydrationIdle();
+
+            const link = document.createElement("a");
+            link.href = "?view=archive";
+            document.getElementById("runs").append(link);
+            const evt = new MouseEvent("click", { bubbles: true, cancelable: true });
+            link.dispatchEvent(evt);
+
+            // Not intercepted: the browser would navigate (jsdom just no-ops).
+            expect(evt.defaultPrevented).toBe(false);
+            expect(window.location.search).not.toContain("view=archive");
+        });
     });
 });
