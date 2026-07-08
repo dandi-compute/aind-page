@@ -1981,10 +1981,10 @@ function renderRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
-    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : !run.detailsLoaded && run.datasetDescriptionPath ? renderSectionPlaceholder("provenance", "Provenance") : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
-    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderSectionPlaceholder("qc", "Quality Control") : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
@@ -2392,26 +2392,14 @@ function renderVisualizationSection(recordings, vizLinks) {
 
 /* ─── Quality control rendering ─────────────────────────────────
    Renders the aind-data-schema QualityControl object (quality_control.json) as a
-   collapsible panel: an overall status summary plus per-metric cards grouped by
-   processing stage, each showing the latest status, modality, description (with
-   any markdown links), the dropdown option → Pass/Fail legend, and a link to the
-   referenced visualization image when it can be matched to a known PNG.        */
-const QC_STATUS_CLASS = {
-    pass: "status-success",
-    fail: "status-failed",
-    pending: "status-queued",
-};
-
-function qcStatusClass(status) {
-    return QC_STATUS_CLASS[String(status ?? "").toLowerCase()] ?? "status-unknown";
-}
-
-// Latest status from a metric's status_history (the last recorded entry).
-function qcLatestStatus(metric) {
-    const history = Array.isArray(metric?.status_history) ? metric.status_history : [];
-    const last = history[history.length - 1];
-    return last?.status ?? null;
-}
+   collapsible panel of per-metric cards grouped into nested per-stage
+   dropdowns (Raw data, Processed data, …), each card showing the metric's
+   name, description (with any markdown links), the selected picker value(s),
+   and a link to the referenced visualization image when it can be matched to
+   a known PNG. The object's Pass/Fail/Pending statuses (per-metric
+   status_history and the top-level status map) are evaluation bookkeeping,
+   not results of this run — they are not rendered; nor is the modality
+   abbreviation, redundant for single-modality runs.                          */
 
 // Convert a description containing markdown links into safe HTML: escape first,
 // then turn [label](http…) into anchors.
@@ -2466,10 +2454,6 @@ function partitionQcPlots(qc, vizData) {
 }
 
 function renderQcMetric(metric) {
-    const status = qcLatestStatus(metric);
-    const statusBadge = status ? `<span class="status-badge ${qcStatusClass(status)}">${e(status)}</span>` : "";
-    const modality = metric?.modality?.abbreviation || metric?.modality?.name || "";
-    const modalityHtml = modality ? `<span class="qc-metric-modality">${e(modality)}</span>` : "";
     const descHtml = metric?.description
         ? `<p class="qc-metric-desc">${qcLinkifyDescription(metric.description)}</p>`
         : "";
@@ -2483,30 +2467,28 @@ function renderQcMetric(metric) {
     </a>`
         : "";
 
-    // Dropdown option → Pass/Fail legend.
-    let optionsHtml = "";
+    // Picker-style values (dropdown/checkbox) carry the widget's arguments —
+    // the selectable `options` and the status each choice maps to — alongside
+    // the actual selection in `value`. Only the selection is a result; show it
+    // as-is and leave the argument arrays unrendered.
+    let valueHtml = "";
     const value = metric?.value;
-    if (value && Array.isArray(value.options)) {
-        const statuses = Array.isArray(value.status) ? value.status : [];
-        optionsHtml = `<div class="qc-options">${value.options
-            .map((opt, i) => {
-                const verdict = String(statuses[i] ?? "").toLowerCase();
-                const cls = verdict === "pass" ? "qc-option-pass" : verdict === "fail" ? "qc-option-fail" : "";
-                const suffix = statuses[i] ? ` · ${e(statuses[i])}` : "";
-                return `<span class="qc-option ${cls}">${e(opt)}${suffix}</span>`;
-            })
-            .join("")}</div>`;
+    if (value && typeof value === "object" && Array.isArray(value.options)) {
+        const selections = (Array.isArray(value.value) ? value.value : [value.value]).filter(
+            (v) => v != null && String(v) !== ""
+        );
+        valueHtml = selections.length
+            ? `<div class="qc-values">${selections.map((v) => `<span class="qc-value">${e(String(v))}</span>`).join("")}</div>`
+            : "";
     }
 
     return `<div class="qc-metric">
     <div class="qc-metric-head">
-        ${statusBadge}
         <span class="qc-metric-name">${e(metric?.name ?? "Metric")}</span>
-        ${modalityHtml}
     </div>
     ${descHtml}
     ${plotHtml}
-    ${optionsHtml}
+    ${valueHtml}
 </div>`;
 }
 
@@ -2514,26 +2496,18 @@ function renderQualityControlSection(qc) {
     const metrics = Array.isArray(qc?.metrics) ? qc.metrics : [];
     if (metrics.length === 0) return "";
 
-    // Overall status summary (top-level `status` map: grouping key → status).
-    const summaryEntries = qc?.status && typeof qc.status === "object" ? Object.entries(qc.status) : [];
-    const summaryHtml = summaryEntries.length
-        ? `<div class="qc-status-summary">${summaryEntries
-              .map(([key, value]) => {
-                  const label = key.includes(":") ? key.slice(key.indexOf(":") + 1) : key;
-                  return `<span class="status-badge ${qcStatusClass(value)}" title="${e(key)}">${e(label)}: ${e(value)}</span>`;
-              })
-              .join("")}</div>`
-        : "";
-
-    // Group metrics by processing stage, preserving first-seen order.
+    // Group metrics by processing stage (preserving first-seen order), each
+    // stage its own nested dropdown. The data-section key (stage name
+    // URI-encoded so it is safe inside an attribute selector) lets an open
+    // stage survive the in-place card re-renders of updateRunCard.
     const byStage = groupBy(metrics, (m) => m.stage || "Other");
     const stagesHtml = Array.from(byStage.entries())
         .map(([stage, stageMetrics]) => {
             const cards = stageMetrics.map((m) => renderQcMetric(m)).join("");
-            return `<div class="qc-stage">
-        <div class="qc-stage-title">${e(stage)}</div>
+            return `<details class="qc-stage" data-section="qc-stage-${encodeURIComponent(stage)}">
+        <summary class="qc-stage-title">${e(stage)}<span class="count-badge">${stageMetrics.length}</span></summary>
         <div class="qc-metrics">${cards}</div>
-    </div>`;
+    </details>`;
         })
         .join("");
 
@@ -2543,8 +2517,27 @@ function renderQualityControlSection(qc) {
         Quality Control
         <span class="count-badge">${metrics.length}</span>
     </summary>
-    ${summaryHtml}
     ${stagesHtml}
+</details>`;
+}
+
+// Collapsed stand-in for a section whose backing artifact has not been
+// fetched yet (quality_control.json, dataset_description.json). Without it
+// the section is invisible until some other section's expand happens to
+// trigger the on-demand hydration and it pops in out of nowhere — expanding
+// the placeholder itself is the reveal that enqueues the fetch (see
+// initHydrationPromotion), and updateRunCard swaps in the real content. The
+// "…" count badge is a geometry stand-in for the real count: without it the
+// summary row is a few pixels shorter than the loaded section's, so the page
+// would shift when the content lands.
+function renderSectionPlaceholder(section, title) {
+    return `
+<details class="run-section" data-section="${e(section)}">
+    <summary class="run-section-title">
+        ${e(title)}
+        <span class="count-badge">…</span>
+    </summary>
+    <div class="section-loading">Loading ${e(title.toLowerCase())}…</div>
 </details>`;
 }
 
@@ -2563,29 +2556,41 @@ function renderGroupBadges(runs) {
     const s = runs.filter((r) => r.status === "success").length;
     const f = runs.filter((r) => r.status === "failed").length;
     const q = runs.filter((r) => r.status === "queued").length;
-    const u = runs.length - s - f - q;
+    const st = runs.filter(isStalled).length;
+    const r = runs.filter((run) => run.status === "running" && !isStalled(run)).length;
+    const u = runs.length - s - f - q - st - r;
     const runsWithKnownByteCounts = runs.filter((run) => runByteCount(run) !== null).length;
     const totalBytes = sumRunByteCounts(runs);
     // A success count is provisional while any counted run's trace could still
     // flip it to failed — render it dimmed so an unconfirmed ✓ can't mislead.
     // Failed counts never need this: hydration can only add failures.
     const provisional = runs.some((r) => r.status === "success" && r.statusProvisional);
+    // Fixed left-to-right priority: running → queued → stalled → success →
+    // unknown, with failures always furthest right.
     const parts = [];
-    if (s)
+    if (r)
         parts.push(
-            `<span class="gbadge gbadge-success${provisional ? " status-provisional" : ""}" title="${s} successful run${s !== 1 ? "s" : ""}${provisional ? " (pending trace confirmation)" : ""}">${s}&thinsp;✓</span>`
-        );
-    if (f)
-        parts.push(
-            `<span class="gbadge gbadge-failed"  title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
+            `<span class="gbadge gbadge-running" title="${r} running run${r !== 1 ? "s" : ""}">${r}&thinsp;▶</span>`
         );
     if (q)
         parts.push(
             `<span class="gbadge gbadge-queued" title="${q} queued run${q !== 1 ? "s" : ""}">${q}&thinsp;⧗</span>`
         );
+    if (st)
+        parts.push(
+            `<span class="gbadge gbadge-stalled" title="${st} stalled run${st !== 1 ? "s" : ""} (running for more than 24 hours)">${st}&thinsp;⚠</span>`
+        );
+    if (s)
+        parts.push(
+            `<span class="gbadge gbadge-success${provisional ? " status-provisional" : ""}" title="${s} successful run${s !== 1 ? "s" : ""}${provisional ? " (pending trace confirmation)" : ""}">${s}&thinsp;✓</span>`
+        );
     if (u)
         parts.push(
             `<span class="gbadge gbadge-unknown" title="${u} unknown run${u !== 1 ? "s" : ""}">${u}&thinsp;?</span>`
+        );
+    if (f)
+        parts.push(
+            `<span class="gbadge gbadge-failed" title="${f} failed run${f !== 1 ? "s" : ""}">${f}&thinsp;✗</span>`
         );
     if (runsWithKnownByteCounts) {
         const totalBytesLabel = formatByteCount(totalBytes);
@@ -3573,10 +3578,10 @@ function renderFlatRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
-    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : !run.detailsLoaded && run.datasetDescriptionPath ? renderSectionPlaceholder("provenance", "Provenance") : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
-    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderSectionPlaceholder("qc", "Quality Control") : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
@@ -5352,6 +5357,7 @@ if (typeof module !== "undefined" && module.exports) {
         renderFilterBanner,
         renderSummary,
         renderFlatList,
+        renderQualityControlSection,
         renderQueuePriorities,
         buildParamsCompareEntries,
         renderRegistryLink,

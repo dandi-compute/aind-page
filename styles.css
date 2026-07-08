@@ -1404,6 +1404,14 @@ details[open] > .params-summary::before {
     background: var(--color-failed-bg);
     color: var(--color-failed);
 }
+.gbadge-running {
+    background: var(--color-running-bg);
+    color: var(--color-running);
+}
+.gbadge-stalled {
+    background: var(--color-stalled-bg);
+    color: var(--color-stalled);
+}
 .gbadge-queued {
     background: var(--color-queued-bg);
     color: var(--color-queued);
@@ -1557,30 +1565,57 @@ a.src-version-link:hover {
     text-decoration: underline;
 }
 
-/* ─── Quality control ───────────────────────────────────────── */
-.qc-status-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 10px 20px 4px;
+/* Placeholder body for sections whose artifact is still loading. */
+.section-loading {
+    padding: 4px 20px 14px;
+    font-size: 0.85em;
+    color: var(--color-text-secondary);
 }
 
+/* ─── Quality control ───────────────────────────────────────── */
+
 .qc-stage {
-    padding: 8px 20px 14px;
+    /* Indented past the section title (20px) so the stage reads as nested. */
+    padding: 0 20px 8px 40px;
 }
 
 .qc-stage-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 0.8em;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--color-text-secondary);
-    margin-bottom: 10px;
+    padding: 6px 0;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+}
+.qc-stage-title::-webkit-details-marker {
+    display: none;
+}
+.qc-stage-title::before {
+    content: "›";
+    display: inline-block;
+    font-size: 1.1em;
+    transition: transform 0.2s;
+    width: 12px;
+    text-align: center;
+}
+details[open] > .qc-stage-title::before {
+    transform: rotate(90deg);
+}
+.qc-stage-title:hover {
+    color: var(--color-text);
 }
 
 .qc-metrics {
     display: grid;
     gap: 10px;
+    /* One more level of indent under the stage title. */
+    padding: 4px 0 6px 20px;
 }
 
 .qc-metric {
@@ -1601,14 +1636,6 @@ a.src-version-link:hover {
     font-weight: 600;
     font-size: 0.9em;
     color: var(--color-text);
-}
-
-.qc-metric-modality {
-    font-size: 0.72em;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-text-secondary);
 }
 
 .qc-plot {
@@ -1650,28 +1677,20 @@ a.src-version-link:hover {
     text-decoration: underline;
 }
 
-.qc-options {
+.qc-values {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     margin-top: 10px;
 }
 
-.qc-option {
+.qc-value {
     font-size: 0.75em;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     padding: 2px 8px;
     color: var(--color-text-secondary);
-}
-.qc-option-pass {
-    border-color: var(--color-success);
-    color: var(--color-success);
-}
-.qc-option-fail {
-    border-color: var(--color-failed);
-    color: var(--color-failed);
 }
 
 /* ─── Provenance (dataset_description.json) ─────────────────── */
