@@ -602,7 +602,7 @@ function renderFilterBanner(filter, availableRuns = []) {
 </div>`
         : "";
 
-    const viewHiddenInput = scopedBanner ? `<input type="hidden" name="view" value="${_viewMode}">` : "";
+    const viewHiddenInput = _viewMode ? `<input type="hidden" name="view" value="${_viewMode}">` : "";
     const layoutHiddenInput = `<input type="hidden" name="layout" value="${layoutMode}">`;
     const sortHiddenInput = `<input type="hidden" name="sort" value="${sortMode}">`;
     const sortDirectionHiddenInput = `<input type="hidden" name="sortDir" value="${sortDirection}">`;
