@@ -4950,6 +4950,21 @@ function runsForGroupKey(groupKey) {
     return sortRuns(_filteredRuns).filter((run) => runGroupKeys(run).includes(groupKey));
 }
 
+// Reclaim a closed tree group's materialized body. Bodies used to linger
+// until the next full re-render; over a long browsing session the accumulated
+// cards — and the decoded images their <img> elements keep alive — dominate
+// the tab's memory, so drop them eagerly. Reopening rebuilds the body from
+// the live (possibly further-hydrated) run objects via renderLazyGroupBody,
+// exactly like a first open; descendant groups keep their _openGroupKeys
+// entries, so their expansion state is restored by that rebuild.
+function releaseGroupBody(details) {
+    if (!details.dataset.bodyRendered) return;
+    const body = details.querySelector(":scope > [data-group-body]");
+    if (!body) return;
+    delete details.dataset.bodyRendered;
+    body.innerHTML = "";
+}
+
 // Build a lazily deferred group body on first open. No-op for groups whose
 // body was already rendered (data-body-rendered) or non-tree groups.
 function renderLazyGroupBody(details) {
@@ -4980,11 +4995,13 @@ function initHydrationPromotion() {
             if (!(details instanceof Element)) return;
             const groupKey = details.dataset?.groupKey;
             if (groupKey) {
-                // Track expansion state for lazy re-renders; a group closing
-                // needs no further work (its body stays until a full re-render
-                // reclaims it).
+                // Track expansion state for lazy re-renders. A closing group
+                // releases its materialized body immediately so a long
+                // open-browse-close session doesn't accumulate card DOM (and
+                // pinned images) for groups no longer on screen.
                 if (!details.open) {
                     _openGroupKeys.delete(groupKey);
+                    releaseGroupBody(details);
                     return;
                 }
                 _openGroupKeys.add(groupKey);
