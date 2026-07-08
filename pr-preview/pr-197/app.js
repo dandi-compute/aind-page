@@ -1,5 +1,8 @@
 /* ─── Configuration ─────────────────────────────────────────── */
-/* Keep in sync with the "version" field in package.json. */
+/* Keep in sync with the "version" field in package.json.
+   TODO: once this project migrates to TS + Vite, source this from
+   package.json directly (e.g. via Vite's `define`) instead of duplicating
+   it here. */
 const APP_VERSION = "1.0.1";
 const OWNER = "dandi-compute";
 const REPO = "001697";
