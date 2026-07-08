@@ -2977,3 +2977,40 @@ a.prov-hash-link:hover {
     margin: 14px auto 0;
     padding: 8px 22px;
 }
+
+/* ─── Site footer ───────────────────────────────────────────── */
+.site-footer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 12px 20px 20px;
+    margin-top: 24px;
+    border-top: 1px solid var(--color-border);
+}
+
+.site-version {
+    color: var(--color-text-secondary);
+    font-size: 0.8em;
+    font-family: monospace;
+    align-self: flex-end;
+}
+
+.con-brand {
+    display: flex;
+    align-items: center;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+.con-brand:hover {
+    opacity: 1;
+}
+
+.con-logo {
+    height: 64px;
+    width: auto;
+    filter: brightness(0) invert(1);
+}
+
+[data-theme="light"] .con-logo {
+    filter: none;
+}
