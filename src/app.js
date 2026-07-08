@@ -1,4 +1,9 @@
 /* ─── Configuration ─────────────────────────────────────────── */
+/* Keep in sync with the "version" field in package.json.
+   TODO: once this project migrates to TS + Vite, source this from
+   package.json directly (e.g. via Vite's `define`) instead of duplicating
+   it here. */
+const APP_VERSION = "1.0.1";
 const OWNER = "dandi-compute";
 const REPO = "001697";
 const BRANCH = "draft";
@@ -701,6 +706,12 @@ function initTheme() {
         applyTheme(next, btn);
         localStorage.setItem("theme", next);
     });
+}
+
+/* ─── Footer ────────────────────────────────────────────────── */
+function initVersion() {
+    const el = document.getElementById("site_version");
+    if (el) el.textContent = `v${APP_VERSION}`;
 }
 
 function applyTheme(theme, btn) {
@@ -5211,6 +5222,7 @@ async function loadQueueData() {
 async function init() {
     _viewMode = parseViewMode();
     initTheme();
+    initVersion();
     initModal();
     initHydrationPromotion();
     initFlatShowMore();
