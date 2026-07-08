@@ -733,6 +733,8 @@ const SUN_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy
 
 // Marks links that open in Neurosift, so it's clear before clicking where they lead.
 const NEUROSIFT_ICON_HTML = `<img class="neurosift-icon" src="assets/neurosift-icon.png" alt="" aria-hidden="true" width="14" height="14" />`;
+// Marks links that open in the DANDI archive, so it's clear before clicking where they lead.
+const DANDI_ICON_HTML = `<img class="dandi-icon" src="assets/dandi-icon.png" alt="" aria-hidden="true" width="14" height="14" />`;
 
 /* ─── ETag-aware fetch cache ────────────────────────────────── */
 // Caches response bodies in sessionStorage keyed by URL together with the
@@ -1991,7 +1993,7 @@ function renderRunEntry(run) {
         ${run.configHash ? `<span class="run-sep">·</span><span class="run-config">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives${DANDI_ICON_HTML}</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -3364,7 +3366,7 @@ function renderDandisetGroup(dandisetId, runs, autoExpand = false) {
             <a class="dandiset-link" href="${e(neurosiftDandisetUrl(dandisetId))}"
                target="_blank" rel="noopener" onclick="event.stopPropagation()">${NEUROSIFT_ICON_HTML}Dandiset&nbsp;${e(dandisetId)}</a>
             <a class="dandi-view-link" href="${dandiBaseUrl(dandisetId)}/dandiset/${e(dandisetId)}"
-               target="_blank" rel="noopener" onclick="event.stopPropagation()">Sourcedata&nbsp;↖</a>
+               target="_blank" rel="noopener" onclick="event.stopPropagation()">${DANDI_ICON_HTML}Sourcedata&nbsp;↖</a>
             <span class="group-meta">
                 <span class="group-count">${subjects.length}&nbsp;subject${subjects.length !== 1 ? "s" : ""}</span>
                 <span class="run-sep">·</span>
@@ -3414,7 +3416,7 @@ function renderSubjectGroup(dandisetId, subject, runs, autoExpand = false) {
     <summary class="subject-summary">
         <span class="group-summary-inner">
             <a class="group-link" href="${e(subjectUrl)}" target="_blank" rel="noopener"
-               onclick="event.stopPropagation()">Sub:&nbsp;<strong>${e(subject)}</strong></a>
+               onclick="event.stopPropagation()">${DANDI_ICON_HTML}Sub:&nbsp;<strong>${e(subject)}</strong></a>
             <span class="group-meta">
                 <span class="group-count">${sessions.length}&nbsp;session${sessions.length !== 1 ? "s" : ""}</span>
             </span>
@@ -3575,12 +3577,12 @@ function renderFlatRunEntry(run) {
     return `
 <div class="run-entry flat-run-entry ${sc}" data-run-key="${e(run.path)}">
     <div class="run-entry-header flat-run-header">
-        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">Sourcedata&nbsp;↖</a>
+        <a class="dandi-view-link" href="${dandiBaseUrl(run.dandisetId)}/dandiset/${e(run.dandisetId)}" target="_blank" rel="noopener">${DANDI_ICON_HTML}Sourcedata&nbsp;↖</a>
         <span class="status-badge ${sc}${run.statusProvisional ? " status-provisional" : ""}"${run.statusProvisional ? ' title="Pass/fail pending trace confirmation"' : ""}>${slbl}</span>
         <span class="flat-run-context">
             <a class="flat-ctx-link" href="${e(neurosiftDandisetUrl(run.dandisetId))}" target="_blank" rel="noopener">${NEUROSIFT_ICON_HTML}Dandiset&nbsp;${e(run.dandisetId)}</a>
             <span class="run-sep">·</span>
-            <a class="flat-ctx-link flat-ctx-path" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
+            <a class="flat-ctx-link flat-ctx-path" href="${e(dandiPathUrl)}" target="_blank" rel="noopener">${DANDI_ICON_HTML}Path:&nbsp;<strong>${e(dandiPathLabel)}</strong></a>
             ${run.runDate ? `<span class="flat-ctx-break"></span><span class="flat-ctx-text flat-ctx-date">${e(run.runDate)}</span>` : ""}
             <span class="run-sep">·</span>
             <span class="flat-ctx-text">${renderRegistryLink("Params", run.paramsProfile, PARAMS_REGISTRY, "params")}</span>
@@ -3588,7 +3590,7 @@ function renderFlatRunEntry(run) {
         </span>
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives${DANDI_ICON_HTML}</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
