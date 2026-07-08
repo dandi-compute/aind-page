@@ -1565,12 +1565,14 @@ a.src-version-link:hover {
     text-decoration: underline;
 }
 
-/* ─── Quality control ───────────────────────────────────────── */
-.qc-loading {
+/* Placeholder body for sections whose artifact is still loading. */
+.section-loading {
     padding: 4px 20px 14px;
     font-size: 0.85em;
     color: var(--color-text-secondary);
 }
+
+/* ─── Quality control ───────────────────────────────────────── */
 
 .qc-stage {
     /* Indented past the section title (20px) so the stage reads as nested. */
