@@ -44,6 +44,7 @@ const {
     renderQueuePriorities,
     renderRegistryLink,
     renderFlatList,
+    renderQualityControlSection,
     renderVisualizationSection,
     runFailureStep,
     sortRuns,
@@ -1434,6 +1435,156 @@ describe("renderVisualizationSection", () => {
     });
 });
 
+describe("renderQualityControlSection", () => {
+    const dropdownMetric = (value) => ({
+        name: "Probe noise",
+        stage: "Raw data",
+        modality: { abbreviation: "ecephys", name: "Extracellular electrophysiology" },
+        value: {
+            value,
+            options: ["Normal", "No spikes", "Noisy"],
+            status: ["Pass", "Fail", "Fail"],
+            type: "dropdown",
+        },
+    });
+
+    it("renders only the selected picker value, not the widget's options/status arguments", () => {
+        const html = renderQualityControlSection({ metrics: [dropdownMetric("Normal")] });
+
+        expect(html).toContain('<span class="qc-value">Normal</span>');
+        expect(html).not.toContain("No spikes");
+        expect(html).not.toContain("Noisy");
+        expect(html).not.toContain("qc-option");
+    });
+
+    it("does not render Pass/Pending evaluation statuses (per-metric or overall)", () => {
+        const html = renderQualityControlSection({
+            status: { "Raw data": "Pass", "ecephys:Curation": "Pending" },
+            metrics: [
+                {
+                    ...dropdownMetric("Normal"),
+                    status_history: [{ evaluator: "automated", status: "Pending", timestamp: "2026-06-01T00:00:00Z" }],
+                },
+            ],
+        });
+
+        expect(html).not.toContain("status-badge");
+        expect(html).not.toContain("qc-status-summary");
+        expect(html).not.toContain("Pending");
+        expect(html).not.toContain("Pass");
+    });
+
+    it("renders no value chips when nothing has been selected", () => {
+        const html = renderQualityControlSection({ metrics: [dropdownMetric("")] });
+
+        expect(html).not.toContain("qc-value");
+        expect(html).not.toContain("Normal");
+    });
+
+    it("renders every selection of a multi-select (checkbox) value", () => {
+        const html = renderQualityControlSection({
+            metrics: [
+                {
+                    name: "Artifacts",
+                    stage: "Raw data",
+                    value: {
+                        value: ["Line noise", "Drift"],
+                        options: ["Line noise", "Drift", "None"],
+                        type: "checkbox",
+                    },
+                },
+            ],
+        });
+
+        expect(html).toContain('<span class="qc-value">Line noise</span>');
+        expect(html).toContain('<span class="qc-value">Drift</span>');
+        expect(html).not.toContain(">None<");
+    });
+
+    it("does not render the metric's modality abbreviation", () => {
+        const html = renderQualityControlSection({ metrics: [dropdownMetric("Normal")] });
+
+        expect(html).not.toContain("qc-metric-modality");
+        expect(html).not.toContain("ecephys");
+    });
+
+    it("renders each processing stage as its own nested dropdown with a metric count", () => {
+        const html = renderQualityControlSection({
+            metrics: [
+                dropdownMetric("Normal"),
+                { ...dropdownMetric(""), name: "PSD" },
+                { ...dropdownMetric(""), name: "Unit yield", stage: "Processed data" },
+            ],
+        });
+
+        expect(html).toContain('<details class="qc-stage" data-section="qc-stage-Raw%20data">');
+        expect(html).toContain('<details class="qc-stage" data-section="qc-stage-Processed%20data">');
+        expect(html).toContain('<summary class="qc-stage-title">Raw data<span class="count-badge">2</span></summary>');
+        expect(html).toContain(
+            '<summary class="qc-stage-title">Processed data<span class="count-badge">1</span></summary>'
+        );
+    });
+});
+
+describe("QC section placeholder before hydration", () => {
+    const ENTRY = {
+        dandiset_id: "000696",
+        subject: "subQ",
+        session: "sesQ",
+        pipeline: "aind+ephys",
+        version: "v1.2.4",
+        params: "1cbdbee",
+        config: "7940dfd",
+        attempt: 1,
+        has_code: true,
+        has_been_submitted: true,
+        has_output: true,
+        has_logs: true,
+    };
+
+    it("renders a collapsed loading QC section for runs with an unfetched quality_control.json", () => {
+        const [probe] = parseQueueEntries([ENTRY]);
+        const [run] = parseQueueEntries([
+            {
+                ...ENTRY,
+                output_paths: { [`${probe.path}/derivatives/visualization/quality_control.json`]: "abcdef123" },
+            },
+        ]);
+        const html = renderFlatList([buildInitialRun(run)]);
+
+        expect(html).toContain('data-section="qc"');
+        expect(html).toContain("Loading quality control");
+    });
+
+    it("renders no QC section for runs without a quality_control.json artifact", () => {
+        const [run] = parseQueueEntries([ENTRY]);
+        const html = renderFlatList([buildInitialRun(run)]);
+
+        expect(html).not.toContain('data-section="qc"');
+    });
+
+    it("renders a collapsed loading Provenance section for runs with an unfetched dataset_description.json", () => {
+        const [probe] = parseQueueEntries([ENTRY]);
+        const [run] = parseQueueEntries([
+            {
+                ...ENTRY,
+                dataset_description_path: { [`${probe.path}/dataset_description.json`]: "abcdef789" },
+            },
+        ]);
+        const html = renderFlatList([buildInitialRun(run)]);
+
+        expect(html).toContain('data-section="provenance"');
+        expect(html).toContain("Loading provenance");
+    });
+
+    it("renders no Provenance section for runs without a dataset_description.json artifact", () => {
+        const [run] = parseQueueEntries([ENTRY]);
+        const html = renderFlatList([buildInitialRun(run)]);
+
+        expect(html).not.toContain('data-section="provenance"');
+    });
+});
+
 describe("fetchVisualizationData", () => {
     it("returns null when no visualization data is present", async () => {
         const result = await fetchVisualizationData({
@@ -1875,6 +2026,95 @@ describe("renderDandisets", () => {
         expect(html).not.toContain("pipeline-version-group");
         expect(html).not.toContain("params-group");
         expect((html.match(/class="run-entry status-/g) || []).length).toBe(2);
+    });
+
+    it("counts running and stalled runs in group badges instead of lumping them into unknown", () => {
+        const base = {
+            attempt: 1,
+            runDate: null,
+            tasks: [],
+            generatedBy: [],
+            vizData: null,
+            hasLogs: false,
+            hasOutput: false,
+            hasCode: true,
+            dandisetId: "000696",
+            subject: "TR15-512ch",
+            session: "S1",
+            pipelineName: "ephys",
+            pipelineVersion: "v1",
+            paramsProfile: "fast",
+            configHash: "abc",
+            assetId: null,
+            inSourcedata: false,
+            failureStep: null,
+        };
+        const running = {
+            ...base,
+            status: "running",
+            createdAt: new Date().toISOString(),
+            path: "derivatives/dandiset-000696/sub-TR15-512ch/ses-S1/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+        };
+        const stalled = {
+            ...base,
+            status: "running",
+            createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+            path: "derivatives/dandiset-000696/sub-TR15-512ch/ses-S2/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1",
+            session: "S2",
+        };
+
+        const html = renderDandisets([running, stalled]);
+        expect(html).toContain("gbadge-running");
+        expect(html).toContain("1 running run");
+        expect(html).toContain("gbadge-stalled");
+        expect(html).toContain("1 stalled run");
+        expect(html).not.toContain("gbadge-unknown");
+        expect(html).not.toContain("unknown run");
+    });
+
+    it("orders group badges running → queued → stalled → success, failures furthest right", () => {
+        const base = {
+            attempt: 1,
+            runDate: null,
+            tasks: [],
+            generatedBy: [],
+            vizData: null,
+            hasLogs: false,
+            hasOutput: false,
+            hasCode: true,
+            dandisetId: "000696",
+            subject: "A",
+            session: "S1",
+            pipelineName: "ephys",
+            pipelineVersion: "v1",
+            paramsProfile: "fast",
+            configHash: "abc",
+            assetId: null,
+            inSourcedata: false,
+            failureStep: null,
+        };
+        const runs = [
+            { ...base, status: "success", hasOutput: true, session: "S1" },
+            { ...base, status: "failed", session: "S2" },
+            { ...base, status: "queued", session: "S3" },
+            { ...base, status: "running", createdAt: new Date().toISOString(), session: "S4" },
+            {
+                ...base,
+                status: "running",
+                createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+                session: "S5",
+            },
+        ].map((run, i) => ({
+            ...run,
+            path: `derivatives/dandiset-000696/sub-A/ses-S${i + 1}/pipeline-ephys/version-v1/params-fast_config-abc_attempt-1`,
+        }));
+
+        const html = renderDandisets(runs);
+        const order = ["gbadge-running", "gbadge-queued", "gbadge-stalled", "gbadge-success", "gbadge-failed"].map(
+            (cls) => html.indexOf(cls)
+        );
+        expect(order.every((idx) => idx !== -1)).toBe(true);
+        expect([...order].sort((a, b) => a - b)).toEqual(order);
     });
 
     it("orders tree groups by dandiset ID when that sort mode is selected", () => {
