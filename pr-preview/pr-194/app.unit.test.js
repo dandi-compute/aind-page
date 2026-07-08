@@ -1562,6 +1562,27 @@ describe("QC section placeholder before hydration", () => {
 
         expect(html).not.toContain('data-section="qc"');
     });
+
+    it("renders a collapsed loading Provenance section for runs with an unfetched dataset_description.json", () => {
+        const [probe] = parseQueueEntries([ENTRY]);
+        const [run] = parseQueueEntries([
+            {
+                ...ENTRY,
+                dataset_description_path: { [`${probe.path}/dataset_description.json`]: "abcdef789" },
+            },
+        ]);
+        const html = renderFlatList([buildInitialRun(run)]);
+
+        expect(html).toContain('data-section="provenance"');
+        expect(html).toContain("Loading provenance");
+    });
+
+    it("renders no Provenance section for runs without a dataset_description.json artifact", () => {
+        const [run] = parseQueueEntries([ENTRY]);
+        const html = renderFlatList([buildInitialRun(run)]);
+
+        expect(html).not.toContain('data-section="provenance"');
+    });
 });
 
 describe("fetchVisualizationData", () => {

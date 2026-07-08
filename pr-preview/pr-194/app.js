@@ -1981,10 +1981,10 @@ function renderRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
-    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : !run.detailsLoaded && run.datasetDescriptionPath ? renderSectionPlaceholder("provenance", "Provenance") : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
-    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderQcPlaceholderSection() : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderSectionPlaceholder("qc", "Quality Control") : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
@@ -2521,22 +2521,23 @@ function renderQualityControlSection(qc) {
 </details>`;
 }
 
-// Collapsed stand-in for the QC section rendered while quality_control.json
-// has not been fetched yet. Without it the section is invisible until some
-// other section's expand happens to trigger the QC hydration — expanding the
-// placeholder itself is the reveal that enqueues the fetch (see
-// initHydrationPromotion), and updateRunCard swaps in the real content.
-function renderQcPlaceholderSection() {
-    // The "…" count badge is a geometry stand-in for the metric count: without
-    // it the summary row is a few pixels shorter than the loaded section's, so
-    // the page would shift when the real content swaps in.
+// Collapsed stand-in for a section whose backing artifact has not been
+// fetched yet (quality_control.json, dataset_description.json). Without it
+// the section is invisible until some other section's expand happens to
+// trigger the on-demand hydration and it pops in out of nowhere — expanding
+// the placeholder itself is the reveal that enqueues the fetch (see
+// initHydrationPromotion), and updateRunCard swaps in the real content. The
+// "…" count badge is a geometry stand-in for the real count: without it the
+// summary row is a few pixels shorter than the loaded section's, so the page
+// would shift when the content lands.
+function renderSectionPlaceholder(section, title) {
     return `
-<details class="run-section" data-section="qc">
+<details class="run-section" data-section="${e(section)}">
     <summary class="run-section-title">
-        Quality Control
+        ${e(title)}
         <span class="count-badge">…</span>
     </summary>
-    <div class="qc-loading">Loading quality control…</div>
+    <div class="section-loading">Loading ${e(title.toLowerCase())}…</div>
 </details>`;
 }
 
@@ -3577,10 +3578,10 @@ function renderFlatRunEntry(run) {
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
-    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : ""}
+    ${run.datasetDescription ? renderProvenanceSection(run.datasetDescription) : !run.detailsLoaded && run.datasetDescriptionPath ? renderSectionPlaceholder("provenance", "Provenance") : ""}
     ${hasTasks ? renderTraceSection(run.tasks) : ""}
     ${hasViz ? renderVisualizationSection(run.vizData, run.vizLinks) : ""}
-    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderQcPlaceholderSection() : ""}
+    ${run.qualityControl ? renderQualityControlSection(run.qualityControl) : !run.qcLoaded && runHasQualityControl(run) ? renderSectionPlaceholder("qc", "Quality Control") : ""}
     ${hasLogs ? renderLogSection(run, buttonLogs) : ""}
     ${hasInline ? renderReportSection(run, inlineLogs) : ""}
 </div>`;
