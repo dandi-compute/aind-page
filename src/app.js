@@ -1993,7 +1993,7 @@ function renderRunEntry(run) {
         ${run.configHash ? `<span class="run-sep">·</span><span class="run-config">${renderRegistryLink("Config", run.configHash, CONFIG_REGISTRY, "configs")}</span>` : ""}
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives${DANDI_ICON_HTML}</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
@@ -3590,7 +3590,7 @@ function renderFlatRunEntry(run) {
         </span>
         ${bytesHtml}
         <span class="run-attempt">Attempt&nbsp;${e(String(run.attempt))}</span>
-        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives</a>
+        <a class="run-entry-derivatives-link" href="${e(derivativesUrl(run.path))}" target="_blank" rel="noopener">↗ Derivatives${DANDI_ICON_HTML}</a>
     </div>
 
     ${hasSourceVersions ? renderSourceVersionsSection(run.generatedBy) : ""}
