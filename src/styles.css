@@ -1238,7 +1238,8 @@ details.dandiset-group[open] > .dandiset-summary::before {
     min-width: 0;
 }
 
-.neurosift-icon {
+.neurosift-icon,
+.dandi-icon {
     display: inline-block;
     vertical-align: -2px;
     margin-right: 0.3em;
