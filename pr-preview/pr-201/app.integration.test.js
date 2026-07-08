@@ -840,6 +840,45 @@ describe("progressive queue loading", () => {
         expect(cards[0].className).toContain("status-failed");
     });
 
+    it("releases a group's materialized body when it closes and rebuilds it on reopen", async () => {
+        const handlers = new Map();
+        const entries = [];
+        for (let i = 0; i < 3; i++) {
+            const { entry, urls } = withArtifacts(makeEntry({ subject: `sub${i}` }), { trace: newBlobId() });
+            entries.push(entry);
+            handlers.set(urls.trace, () => new Response(TRACE_FAILED_PRE, { status: 200 }));
+        }
+        seedQueueState(entries);
+        installFetch(handlers);
+        initHydrationPromotion();
+
+        await loadQueueData();
+        await hydrationIdle();
+
+        const subject = document.querySelector("details.subject-group");
+        subject.open = true;
+        subject.dispatchEvent(new Event("toggle"));
+        const session = subject.querySelector("details.session-group");
+        session.open = true;
+        session.dispatchEvent(new Event("toggle"));
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(1);
+
+        // Closing the subject group reclaims its card DOM immediately (it used
+        // to linger until the next full re-render).
+        subject.open = false;
+        subject.dispatchEvent(new Event("toggle"));
+        expect(subject.dataset.bodyRendered).toBeUndefined();
+        expect(document.querySelectorAll(".run-entry")).toHaveLength(0);
+
+        // Reopening rebuilds the body from the live run objects — with the
+        // still-open session group's expansion state restored.
+        subject.open = true;
+        subject.dispatchEvent(new Event("toggle"));
+        const cards = document.querySelectorAll(".run-entry");
+        expect(cards).toHaveLength(1);
+        expect(cards[0].className).toContain("status-failed");
+    });
+
     it("materializes flat-layout cards in chunks behind a Show more button", async () => {
         window.history.replaceState(null, "", "/?layout=flat");
         const entries = [];
