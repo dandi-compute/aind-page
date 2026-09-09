@@ -1576,6 +1576,7 @@ function parseTrace(text) {
 
 /* ─── Rendering ─────────────────────────────────────────────── */
 function renderSummary(runs) {
+    const isArchive = _viewMode === "archive";
     const total = runs.length;
     const success = runs.filter((r) => r.status === "success").length;
     const failed = runs.filter((r) => r.status === "failed").length;
@@ -1598,28 +1599,36 @@ function renderSummary(runs) {
                 <span class="stat-value">${total}</span>
                 <span class="stat-label">Total Runs</span>
             </div>
-            <a class="stat-item stat-running" href="${e(runningHref)}" title="Show only running runs">
+            ${
+                isArchive
+                    ? ""
+                    : `<a class="stat-item stat-running" href="${e(runningHref)}" title="Show only running runs">
                 <span class="stat-value">${running}</span>
                 <span class="stat-label">Running</span>
-            </a>
+            </a>`
+            }
             ${
-                stalled
+                !isArchive && stalled
                     ? `<a class="stat-item stat-stalled" href="${e(stalledHref)}" title="Show only stalled runs (running for more than 24 hours)">
                 <span class="stat-value">⚠ ${stalled}</span>
                 <span class="stat-label">Stalled</span>
             </a>`
                     : ""
             }
-            <a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
+            ${
+                isArchive
+                    ? ""
+                    : `<a class="stat-item stat-success" href="${e(successHref)}" title="Show only successful runs">
                 <span class="stat-value">${success}</span>
                 <span class="stat-label">Successful</span>
-            </a>
+            </a>`
+            }
             <a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
                 <span class="stat-value">${failed}</span>
                 <span class="stat-label">Failed</span>
             </a>
             ${
-                queued
+                !isArchive && queued
                     ? `<div class="stat-item stat-queued">
                 <span class="stat-value">${queued}</span>
                 <span class="stat-label">Queued</span>
