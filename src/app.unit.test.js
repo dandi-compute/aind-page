@@ -82,6 +82,13 @@ const STATE_TSV_FIELD_NAMES = [
 ];
 
 /** Serialise entry dicts into a tab-separated `state.tsv` table (header + one row each). */
+/** Mirror Python csv.DictWriter's QUOTE_MINIMAL: quote-wrap (doubling inner quotes)
+ * only when a cell contains the delimiter, a quote, or a newline. */
+function tsvQuote(cell) {
+    if (!/[\t"\n]/.test(cell)) return cell;
+    return `"${cell.replace(/"/g, '""')}"`;
+}
+
 function makeStateTsv(entries) {
     const lines = [STATE_TSV_FIELD_NAMES.join("\t")];
     for (const entry of entries) {
@@ -89,8 +96,8 @@ function makeStateTsv(entries) {
             const value = entry[key];
             if (value === undefined || value === null) return "";
             if (typeof value === "boolean") return value ? "True" : "False";
-            if (typeof value === "object") return JSON.stringify(value);
-            return String(value);
+            if (typeof value === "object") return tsvQuote(JSON.stringify(value));
+            return tsvQuote(String(value));
         });
         lines.push(row.join("\t"));
     }
@@ -1208,6 +1215,33 @@ describe("fetchQueueState ETag caching", () => {
     it("throws generic error on other HTTP failures", async () => {
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
         await expect(fetchQueueState()).rejects.toThrow("HTTP 500");
+    });
+
+    it("returns an empty array for an empty state.tsv", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+        expect(await fetchQueueState()).toEqual([]);
+    });
+
+    it("returns an empty array for a header-only state.tsv", async () => {
+        global.fetch = vi.fn().mockResolvedValue(new Response(makeStateTsv([]), { status: 200 }));
+        expect(await fetchQueueState()).toEqual([]);
+    });
+
+    it("parses RFC4180-quoted cells (JSON path maps containing embedded quotes)", async () => {
+        const entry = {
+            ...SAMPLE_ENTRY,
+            content_id: null,
+            created_at: null,
+            job_completion_time: null,
+            output_paths: { 'a/b "with quotes".json': "blob-1" },
+        };
+        global.fetch = vi.fn().mockResolvedValue(new Response(makeStateTsv([entry]), { status: 200 }));
+
+        const [result] = await fetchQueueState();
+
+        expect(result.output_paths).toEqual({ 'a/b "with quotes".json': "blob-1" });
+        expect(result.content_id).toBeNull();
+        expect(result.created_at).toBeNull();
     });
 });
 

@@ -447,6 +447,13 @@ describe("progressive queue loading", () => {
     // keys across all entries), matching how fetchQueueState/parseStateTsv reads
     // a real state.tsv: object-valued cells (output_paths, dataset_description_path)
     // are JSON strings, booleans are Python's `str(bool)` ("True"/"False").
+    // Mirror Python csv.DictWriter's QUOTE_MINIMAL: quote-wrap (doubling inner
+    // quotes) only when a cell contains the delimiter, a quote, or a newline.
+    function tsvQuote(cell) {
+        if (!/[\t"\n]/.test(cell)) return cell;
+        return `"${cell.replace(/"/g, '""')}"`;
+    }
+
     function entriesToTsv(entries) {
         const header = [...new Set(entries.flatMap((entry) => Object.keys(entry)))];
         const lines = [header.join("\t")];
@@ -455,8 +462,8 @@ describe("progressive queue loading", () => {
                 const value = entry[key];
                 if (value === undefined || value === null) return "";
                 if (typeof value === "boolean") return value ? "True" : "False";
-                if (typeof value === "object") return JSON.stringify(value);
-                return String(value);
+                if (typeof value === "object") return tsvQuote(JSON.stringify(value));
+                return tsvQuote(String(value));
             });
             lines.push(row.join("\t"));
         }
