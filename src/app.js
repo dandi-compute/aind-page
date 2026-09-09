@@ -10,13 +10,23 @@ const BRANCH = "draft";
 const DERIVATIVES_DANDISET_ID = "001697";
 const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
-const QUEUE_CDN_BASE = `https://raw.githubusercontent.com/dandi-compute/queue/compressed`;
-/* Archived failing runs live in a separate, uncompressed state file on the
-   queue repo's main branch, surfaced on the dedicated Archive page
+/* Queue state is published as a plain-text `derivatives/state.tsv` table
+   inside the Dandiset it describes (no separate queue repo/compression
+   anymore). The job-capsules Dandiset (001697, same as CDN_BASE) carries the
+   main queue state; archived failing runs live in the same-shaped table
+   inside a dedicated archive Dandiset, surfaced on the Archive page
    (?view=archive) to keep them out of the main queue. */
-const ARCHIVE_STATE_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/archive_state.jsonl";
-const QUEUE_CONFIG_URL = "https://raw.githubusercontent.com/dandi-compute/queue/main/queue_config.json";
-const QUEUE_CONFIG_SOURCE_URL = "https://github.com/dandi-compute/queue/blob/main/queue_config.json";
+const ARCHIVE_DANDISET_ID = "001873";
+const ARCHIVE_CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${ARCHIVE_DANDISET_ID}/${BRANCH}`;
+const STATE_TSV_RELATIVE_PATH = "derivatives/state.tsv";
+const STATE_TSV_URL = `${CDN_BASE}/${STATE_TSV_RELATIVE_PATH}`;
+const ARCHIVE_STATE_TSV_URL = `${ARCHIVE_CDN_BASE}/${STATE_TSV_RELATIVE_PATH}`;
+/* Pipeline scheduling config, packaged with dandi-compute/code (formerly a
+   queue_config.json living only in the now-retired dandi-compute/queue repo). */
+const PIPELINE_CONFIGS_URL =
+    "https://raw.githubusercontent.com/dandi-compute/code/main/src/dandi_compute_code/queue/pipeline_configs.json";
+const PIPELINE_CONFIGS_SOURCE_URL =
+    "https://github.com/dandi-compute/code/blob/main/src/dandi_compute_code/queue/pipeline_configs.json";
 
 const GITHUB_API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
@@ -1001,18 +1011,107 @@ function ensureRegistriesLoaded() {
 
 /* ─── Data fetching ─────────────────────────────────────────── */
 function queueStateCacheKey() {
-    return ETAG_CACHE_PREFIX + `${QUEUE_CDN_BASE}/state.jsonl.gz`;
+    return ETAG_CACHE_PREFIX + STATE_TSV_URL;
 }
 
 function archiveStateCacheKey() {
-    return ETAG_CACHE_PREFIX + ARCHIVE_STATE_URL;
+    return ETAG_CACHE_PREFIX + ARCHIVE_STATE_TSV_URL;
 }
 
-// Fetch and parse a JSONL queue state file with ETag-based session caching.
-// Defaults to the gzip-compressed main queue state; pass { url, compressed,
-// cacheKey } to fetch a different source (e.g. the uncompressed archive state).
+// Row fields serialised as compact JSON objects (path/content-id maps) rather
+// than plain scalars — matches QueueState.to_tsv_string's column order/typing
+// on the Python side (dandi_compute_code.queue._queue_state.JobEntry).
+const STATE_TSV_JSON_FIELDS = new Set(["dataset_description_path", "output_paths", "log_paths"]);
+// Row fields written via Python's `str(bool)` ("True"/"False") rather than "true"/"false".
+const STATE_TSV_BOOLEAN_FIELDS = new Set(["has_code", "has_been_submitted", "has_output", "has_logs"]);
+
+// Minimal RFC4180-style tab-delimited parser matching Python's csv module
+// (the writer used to produce state.tsv): fields are unquoted unless they
+// contain the delimiter, a quote, or a newline, in which case they're
+// wrapped in double quotes with embedded quotes doubled.
+function parseTsvRows(text) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (inQuotes) {
+            if (char === '"') {
+                if (text[i + 1] === '"') {
+                    field += '"';
+                    i++;
+                } else {
+                    inQuotes = false;
+                }
+            } else {
+                field += char;
+            }
+            continue;
+        }
+        if (char === '"' && field === "") {
+            inQuotes = true;
+        } else if (char === "\t") {
+            row.push(field);
+            field = "";
+        } else if (char === "\r") {
+            // ignore; paired \n below terminates the row
+        } else if (char === "\n") {
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = "";
+        } else {
+            field += char;
+        }
+    }
+    if (field !== "" || row.length > 0) {
+        row.push(field);
+        rows.push(row);
+    }
+    return rows;
+}
+
+// Coerce one parsed TSV row (array of raw string cells) into the same shape
+// JSON.parse produced for a state.jsonl line: JSON-decoded path maps, real
+// booleans, numeric attempt/asset_size_bytes, and null for empty cells.
+function coerceStateTsvRow(cols, header) {
+    const raw = {};
+    header.forEach((key, i) => {
+        raw[key] = cols[i] ?? "";
+    });
+    const entry = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (STATE_TSV_JSON_FIELDS.has(key)) {
+            entry[key] = value ? JSON.parse(value) : {};
+        } else if (STATE_TSV_BOOLEAN_FIELDS.has(key)) {
+            entry[key] = value === "True";
+        } else if (key === "attempt") {
+            entry[key] = value === "" ? null : parseInt(value, 10);
+        } else if (key === "asset_size_bytes") {
+            entry[key] = value === "" ? null : Number(value);
+        } else {
+            entry[key] = value === "" ? null : value;
+        }
+    }
+    return entry;
+}
+
+// Parse a full `state.tsv` table (header + one row per attempt capsule) into
+// the same array-of-entry-dicts shape the app previously got from state.jsonl.
+function parseStateTsv(text) {
+    if (!text || !text.trim()) return [];
+    const rows = parseTsvRows(text);
+    if (!rows.length) return [];
+    const [header, ...dataRows] = rows;
+    return dataRows.filter((cols) => cols.some((cell) => cell !== "")).map((cols) => coerceStateTsvRow(cols, header));
+}
+
+// Fetch and parse a `derivatives/state.tsv` queue state table with ETag-based
+// session caching. Defaults to the main queue state; pass { url, cacheKey }
+// to fetch a different source (e.g. the archive Dandiset's state.tsv).
 async function fetchQueueState(options = {}) {
-    const { url = `${QUEUE_CDN_BASE}/state.jsonl.gz`, compressed = true, cacheKey = queueStateCacheKey() } = options;
+    const { url = STATE_TSV_URL, cacheKey = queueStateCacheKey() } = options;
 
     let cached = null;
     try {
@@ -1033,18 +1132,7 @@ async function fetchQueueState(options = {}) {
     if (resp.status === 304 && cached) {
         text = cached.body;
     } else if (resp.ok) {
-        if (compressed) {
-            if (typeof DecompressionStream === "undefined") {
-                throw new Error(
-                    "Your browser does not support DecompressionStream. Please upgrade to a modern browser (Chrome 80+, Firefox 113+, Safari 16.4+, or Edge 80+)."
-                );
-            }
-            const ds = new DecompressionStream("gzip");
-            const decompressed = resp.body.pipeThrough(ds);
-            text = await new Response(decompressed).text();
-        } else {
-            text = await resp.text();
-        }
+        text = await resp.text();
 
         const etag = resp.headers.get("ETag");
         if (etag) {
@@ -1061,19 +1149,14 @@ async function fetchQueueState(options = {}) {
         throw new Error(`Failed to load queue state (HTTP ${resp.status}).`);
     }
 
-    return text
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
+    return parseStateTsv(text);
 }
 
-// Fetch the archived failing runs from the queue repo's uncompressed
-// archive_state.jsonl (shares the same JSONL schema as the main queue state).
+// Fetch the archived failing runs from the archive Dandiset's state.tsv
+// (shares the same table schema as the main queue state.tsv).
 async function fetchArchiveState() {
     return fetchQueueState({
-        url: ARCHIVE_STATE_URL,
-        compressed: false,
+        url: ARCHIVE_STATE_TSV_URL,
         cacheKey: archiveStateCacheKey(),
     });
 }
@@ -1547,14 +1630,14 @@ function renderSummary(runs) {
 }
 
 /* ─── Queue priorities (top display) ─────────────────────────────
-   Fetches dandi-compute/queue's queue_config.json from the raw GitHub CDN and
-   renders the current scheduling priorities at the top of the dashboard. The
-   config schema isn't fixed here, so rendering adapts: an ordered priority list
-   (with any scalar settings) when one can be detected, otherwise a generic
+   Fetches dandi-compute/code's pipeline_configs.json from the raw GitHub CDN
+   and renders the current scheduling priorities at the top of the dashboard.
+   The config schema isn't fixed here, so rendering adapts: an ordered priority
+   list (with any scalar settings) when one can be detected, otherwise a generic
    key/value view. Dandiset-id entries link into the filtered dashboard.       */
 async function fetchQueueConfig() {
     try {
-        const resp = await cachedFetch(QUEUE_CONFIG_URL);
+        const resp = await cachedFetch(PIPELINE_CONFIGS_URL);
         if (!resp.ok) return null;
         return await resp.json();
     } catch {
@@ -1803,7 +1886,7 @@ function renderQueueAdaptiveBody(config) {
 
 function renderQueuePriorities(config) {
     if (config === null || config === undefined) return "";
-    const source = `<a class="qp-source" href="${e(QUEUE_CONFIG_SOURCE_URL)}" target="_blank" rel="noopener">queue_config.json ↗</a>`;
+    const source = `<a class="qp-source" href="${e(PIPELINE_CONFIGS_SOURCE_URL)}" target="_blank" rel="noopener">pipeline_configs.json ↗</a>`;
 
     const body =
         config.pipelines && typeof config.pipelines === "object" && !Array.isArray(config.pipelines)
@@ -5488,7 +5571,7 @@ async function init() {
     if (_viewMode === "archive") {
         setPageCopy(
             "Archived Pipeline Runs",
-            'Failing runs that have been archived from the main queue, sourced from <a href="https://github.com/dandi-compute/queue/blob/main/archive_state.jsonl" target="_blank" rel="noopener">archive_state.jsonl</a>.'
+            `Failing runs that have been archived from the main queue, sourced from <a href="https://github.com/${OWNER}/${ARCHIVE_DANDISET_ID}/blob/${BRANCH}/${STATE_TSV_RELATIVE_PATH}" target="_blank" rel="noopener">Dandiset ${ARCHIVE_DANDISET_ID}'s state.tsv</a>.`
         );
     }
 

@@ -21,9 +21,13 @@ open it in Chromium, and stub the external endpoints at the network boundary.
      to test cross-session persistence (Cache API, localStorage).
 3. Stub external hosts with `page.route(/raw\.githubusercontent\.com|dandiarchive\.s3\.amazonaws\.com|api\.github\.com/, handler)`
    and `route.fulfill(...)`. Endpoints the queue dashboard hits:
-   - `.../queue/compressed/state.jsonl.gz` — gzip JSONL (`zlib.gzipSync` of newline-joined entries).
-   - `.../queue/main/archive_state.jsonl` — plain JSONL (archive view).
-   - `.../queue/main/queue_config.json` — priorities banner.
+   - `.../001697/draft/derivatives/state.tsv` — plain tab-separated table, one row per
+     attempt capsule (main queue view). Header row + rows matching
+     `_STATE_TSV_FIELD_NAMES` in dandi-compute/code's `_queue_state.py`; nested
+     path/content-id maps (`dataset_description_path`, `output_paths`, `log_paths`) are
+     compact-JSON cells, booleans are Python's `str(bool)` (`"True"`/`"False"`).
+   - `.../001873/draft/derivatives/state.tsv` — same schema, archive Dandiset (archive view).
+   - `.../code/main/src/dandi_compute_code/queue/pipeline_configs.json` — priorities banner.
    - `.../code/main/...registered_params.json` / `registered_configs.json` — registries.
    - `https://dandiarchive.s3.amazonaws.com/blobs/<3>/<3>/<id>` — per-run artifacts
      (trace.txt, dataset_description.json, quality_control.json, visualization_output.json).
@@ -34,7 +38,7 @@ open it in Chromium, and stub the external endpoints at the network boundary.
 ## Fixture gotchas (cost real debugging time)
 
 - The queue view is `?view=dashboard` — `view=main` silently falls back to the landing page.
-- A JSONL entry's blob lookups go through `run.path` built by `buildRunPath(entry)`
+- A `state.tsv` row's blob lookups go through `run.path` built by `buildRunPath(entry)`
   from `dandiset_id`/`subject`/`pipeline`/`version`/`params`/`config`/`attempt`.
   The keys in `output_paths` MUST match that computed path exactly
   (`derivatives/dandiset-<id>/sub-<subject>/pipeline-<pipeline>/version-<version>_params-<params>_config-<config>_attempt-<n>/...`)

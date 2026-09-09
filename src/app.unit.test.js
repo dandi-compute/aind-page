@@ -58,23 +58,43 @@ const {
 
 const QUEUE_STATE_CACHE_KEY = queueStateCacheKey();
 
-/** A passthrough TransformStream that stands in for DecompressionStream in tests. */
-class MockDecompressionStream {
-    constructor() {
-        const ts = new TransformStream();
-        this.readable = ts.readable;
-        this.writable = ts.writable;
-    }
-}
+/** Column order for the `state.tsv` table (mirrors _STATE_TSV_FIELD_NAMES on the Python side). */
+const STATE_TSV_FIELD_NAMES = [
+    "dandiset_id",
+    "dandi_path",
+    "pipeline",
+    "version",
+    "params",
+    "config",
+    "attempt",
+    "codebase",
+    "content_id",
+    "asset_size_bytes",
+    "has_code",
+    "has_been_submitted",
+    "has_output",
+    "has_logs",
+    "dataset_description_path",
+    "output_paths",
+    "log_paths",
+    "created_at",
+    "job_completion_time",
+];
 
-/** Wrap plain text in a ReadableStream so it can be used as a Response body. */
-function makeReadableStream(text) {
-    return new ReadableStream({
-        start(controller) {
-            controller.enqueue(new TextEncoder().encode(text));
-            controller.close();
-        },
-    });
+/** Serialise entry dicts into a tab-separated `state.tsv` table (header + one row each). */
+function makeStateTsv(entries) {
+    const lines = [STATE_TSV_FIELD_NAMES.join("\t")];
+    for (const entry of entries) {
+        const row = STATE_TSV_FIELD_NAMES.map((key) => {
+            const value = entry[key];
+            if (value === undefined || value === null) return "";
+            if (typeof value === "boolean") return value ? "True" : "False";
+            if (typeof value === "object") return JSON.stringify(value);
+            return String(value);
+        });
+        lines.push(row.join("\t"));
+    }
+    return lines.join("\n") + "\n";
 }
 
 const REGISTERED_PARAMS_FIXTURE = {
@@ -1110,8 +1130,7 @@ describe("Neurosift URL helpers", () => {
 describe("fetchQueueState ETag caching", () => {
     const SAMPLE_ENTRY = {
         dandiset_id: "001697",
-        subject: "sub1",
-        session: "ses1",
+        dandi_path: "sub-1/sub-1_ses-1_ecephys.nwb",
         pipeline: "ephys",
         version: "v1",
         params: "abc",
@@ -1121,25 +1140,23 @@ describe("fetchQueueState ETag caching", () => {
         has_output: false,
         has_logs: false,
     };
-    const JSONL_TEXT = JSON.stringify(SAMPLE_ENTRY);
+    const TSV_TEXT = makeStateTsv([SAMPLE_ENTRY]);
 
     let originalFetch;
 
     beforeEach(() => {
         sessionStorage.clear();
         originalFetch = global.fetch;
-        global.DecompressionStream = MockDecompressionStream;
     });
 
     afterEach(() => {
         global.fetch = originalFetch;
-        delete global.DecompressionStream;
         sessionStorage.clear();
     });
 
-    it("fetches, decompresses, parses, and caches ETag on first load", async () => {
+    it("fetches, parses, and caches ETag on first load", async () => {
         global.fetch = vi.fn().mockResolvedValue(
-            new Response(makeReadableStream(JSONL_TEXT), {
+            new Response(TSV_TEXT, {
                 status: 200,
                 headers: { ETag: '"etag-v1"' },
             })
@@ -1149,11 +1166,14 @@ describe("fetchQueueState ETag caching", () => {
 
         expect(result).toHaveLength(1);
         expect(result[0].dandiset_id).toBe("001697");
+        expect(result[0].attempt).toBe(1);
+        expect(result[0].has_code).toBe(true);
+        expect(result[0].has_output).toBe(false);
 
-        // ETag and decompressed body must be stored in sessionStorage
+        // ETag and body must be stored in sessionStorage
         const stored = JSON.parse(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY));
         expect(stored.etag).toBe('"etag-v1"');
-        expect(stored.body).toBe(JSONL_TEXT);
+        expect(stored.body).toBe(TSV_TEXT);
 
         // First request must not include If-None-Match
         const [, init] = global.fetch.mock.calls[0];
@@ -1161,7 +1181,7 @@ describe("fetchQueueState ETag caching", () => {
     });
 
     it("sends If-None-Match and returns cached body on 304", async () => {
-        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: JSONL_TEXT }));
+        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: TSV_TEXT }));
 
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
 
@@ -1173,18 +1193,6 @@ describe("fetchQueueState ETag caching", () => {
         // Must send the cached ETag
         const [, init] = global.fetch.mock.calls[0];
         expect(init.headers.get("If-None-Match")).toBe('"etag-v1"');
-    });
-
-    it("skips DecompressionStream entirely on 304 cache hit", async () => {
-        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: JSONL_TEXT }));
-
-        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
-        const decompressionSpy = vi.fn();
-        global.DecompressionStream = decompressionSpy;
-
-        await fetchQueueState();
-
-        expect(decompressionSpy).not.toHaveBeenCalled();
     });
 
     it("throws rate-limit error on HTTP 403", async () => {
@@ -1201,18 +1209,12 @@ describe("fetchQueueState ETag caching", () => {
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
         await expect(fetchQueueState()).rejects.toThrow("HTTP 500");
     });
-
-    it("throws when DecompressionStream is unavailable", async () => {
-        delete global.DecompressionStream;
-        global.fetch = vi.fn().mockResolvedValue(new Response(makeReadableStream(JSONL_TEXT), { status: 200 }));
-        await expect(fetchQueueState()).rejects.toThrow("DecompressionStream");
-    });
 });
 
 describe("fetchArchiveState", () => {
     const SAMPLE_ENTRY = {
         dandiset_id: "000409",
-        subject: "SWC-038",
+        dandi_path: "sub-SWC-038/sub-SWC-038_ecephys.nwb",
         pipeline: "aind+ephys",
         version: "v1.2.4",
         params: "1cbdbee",
@@ -1223,7 +1225,7 @@ describe("fetchArchiveState", () => {
         has_output: false,
         has_logs: true,
     };
-    const JSONL_TEXT = JSON.stringify(SAMPLE_ENTRY);
+    const TSV_TEXT = makeStateTsv([SAMPLE_ENTRY]);
     const ARCHIVE_CACHE_KEY = archiveStateCacheKey();
 
     let originalFetch;
@@ -1238,10 +1240,9 @@ describe("fetchArchiveState", () => {
         sessionStorage.clear();
     });
 
-    it("fetches the uncompressed archive_state.jsonl without DecompressionStream", async () => {
-        delete global.DecompressionStream;
+    it("fetches the archive Dandiset's state.tsv", async () => {
         global.fetch = vi.fn().mockResolvedValue(
-            new Response(JSONL_TEXT, {
+            new Response(TSV_TEXT, {
                 status: 200,
                 headers: { ETag: '"archive-v1"' },
             })
@@ -1252,15 +1253,15 @@ describe("fetchArchiveState", () => {
         expect(result).toHaveLength(1);
         expect(result[0].dandiset_id).toBe("000409");
 
-        // Must request the archive URL, not the main compressed state file.
+        // Must request the archive Dandiset's state.tsv, not the main queue state.
         const [url] = global.fetch.mock.calls[0];
-        expect(url).toContain("archive_state.jsonl");
-        expect(url).not.toContain(".gz");
+        expect(url).toContain("derivatives/state.tsv");
+        expect(url).not.toBe(queueStateCacheKey());
 
         // ETag/body cached under the archive-specific key.
         const stored = JSON.parse(sessionStorage.getItem(ARCHIVE_CACHE_KEY));
         expect(stored.etag).toBe('"archive-v1"');
-        expect(stored.body).toBe(JSONL_TEXT);
+        expect(stored.body).toBe(TSV_TEXT);
     });
 
     it("uses a cache key distinct from the main queue state", () => {
@@ -1395,7 +1396,7 @@ describe("renderVisualizationSection", () => {
         });
 
         expect(html).toContain("Queue priorities");
-        expect(html).toContain("queue_config.json ↗");
+        expect(html).toContain("pipeline_configs.json ↗");
         expect(html).toContain("Version priority");
         expect(html).toContain("Params priority");
         expect(html).toContain("version=v1");

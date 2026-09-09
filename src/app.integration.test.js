@@ -443,11 +443,28 @@ describe("progressive queue loading", () => {
         return { entry, urls, path: p };
     }
 
+    // Serialise entries to a tab-separated `state.tsv` table (header = union of
+    // keys across all entries), matching how fetchQueueState/parseStateTsv reads
+    // a real state.tsv: object-valued cells (output_paths, dataset_description_path)
+    // are JSON strings, booleans are Python's `str(bool)` ("True"/"False").
+    function entriesToTsv(entries) {
+        const header = [...new Set(entries.flatMap((entry) => Object.keys(entry)))];
+        const lines = [header.join("\t")];
+        for (const entry of entries) {
+            const row = header.map((key) => {
+                const value = entry[key];
+                if (value === undefined || value === null) return "";
+                if (typeof value === "boolean") return value ? "True" : "False";
+                if (typeof value === "object") return JSON.stringify(value);
+                return String(value);
+            });
+            lines.push(row.join("\t"));
+        }
+        return lines.join("\n") + "\n";
+    }
+
     function seedQueueState(entries) {
-        sessionStorage.setItem(
-            QUEUE_KEY,
-            JSON.stringify({ etag: '"state-etag"', body: entries.map((x) => JSON.stringify(x)).join("\n") })
-        );
+        sessionStorage.setItem(QUEUE_KEY, JSON.stringify({ etag: '"state-etag"', body: entriesToTsv(entries) }));
     }
 
     // Route the app's fetches: queue state revalidates against the seeded
@@ -456,7 +473,7 @@ describe("progressive queue loading", () => {
     function installFetch(blobHandlers) {
         global.fetch = vi.fn(async (url) => {
             const u = String(url);
-            if (u.includes("state.jsonl.gz")) return new Response(null, { status: 304 });
+            if (u.includes("derivatives/state.tsv")) return new Response(null, { status: 304 });
             if (u.includes("registered_params.json") || u.includes("registered_configs.json")) {
                 return new Response(
                     JSON.stringify({ default: { path: "p.json", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" } }),
