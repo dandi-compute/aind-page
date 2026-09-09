@@ -8,7 +8,6 @@ const {
     initInPageFilterNavigation,
     loadQueueData,
     parseQueueEntries,
-    queueStateCacheKey,
     renderFilterBanner,
     renderSummary,
     showDiffResults,
@@ -385,7 +384,10 @@ describe("app integration behavior", () => {
 });
 
 describe("progressive queue loading", () => {
-    const QUEUE_KEY = queueStateCacheKey();
+    // state.tsv isn't referenced by a known content-id, so fetchQueueState resolves
+    // it in two hops: the job-capsules Dandiset's assets.jsonld manifest, then the
+    // blob URL it points at (see resolveAssetBlobUrl / STATE_MANIFEST_URL below).
+    const STATE_MANIFEST_URL = "https://dandiarchive.s3.amazonaws.com/dandisets/001697/draft/assets.jsonld";
     let blobCounter = 0;
     let originalFetch;
 
@@ -470,17 +472,29 @@ describe("progressive queue loading", () => {
         return lines.join("\n") + "\n";
     }
 
+    // A fresh blob URL each call, so a later test's/reload's manifest lookup can
+    // never be served stale content out of the cross-test blob memory cache.
+    let _seededStateManifest = null;
+    let _seededStateTsv = null;
     function seedQueueState(entries) {
-        sessionStorage.setItem(QUEUE_KEY, JSON.stringify({ etag: '"state-etag"', body: entriesToTsv(entries) }));
+        const blobUrl = blobUrlFor(newBlobId());
+        _seededStateManifest = JSON.stringify([
+            { path: "derivatives/state.tsv", contentUrl: ["https://api.dandiarchive.org/ignored", blobUrl] },
+        ]);
+        _seededStateTsv = entriesToTsv(entries);
     }
 
-    // Route the app's fetches: queue state revalidates against the seeded
-    // sessionStorage entry (304), registries resolve to a minimal fixture, and
-    // S3 blob URLs are served by the per-test handler map.
+    // Route the app's fetches: the assets.jsonld manifest and the state.tsv blob
+    // it points at are served from whatever seedQueueState last set up (no ETag,
+    // so a reseed-and-reload mid-test always picks up the fresh manifest/blob),
+    // registries resolve to a minimal fixture, and S3 blob URLs are served by the
+    // per-test handler map.
     function installFetch(blobHandlers) {
         global.fetch = vi.fn(async (url) => {
             const u = String(url);
-            if (u.includes("derivatives/state.tsv")) return new Response(null, { status: 304 });
+            if (u === STATE_MANIFEST_URL) return new Response(_seededStateManifest, { status: 200 });
+            const blobUrl = JSON.parse(_seededStateManifest)[0].contentUrl[1];
+            if (u === blobUrl) return new Response(_seededStateTsv, { status: 200 });
             if (u.includes("registered_params.json") || u.includes("registered_configs.json")) {
                 return new Response(
                     JSON.stringify({ default: { path: "p.json", md5: "0d4bf36ddb61418ae7714e7d6e5ff8b8" } }),
@@ -493,10 +507,15 @@ describe("progressive queue loading", () => {
         });
     }
 
-    const blobRequests = () =>
-        global.fetch.mock.calls
+    // Per-run artifact blob requests only -- excludes the state.tsv manifest lookup
+    // and its resolved blob, which share the same S3 host as real artifact blobs.
+    const blobRequests = () => {
+        const stateBlobUrl = _seededStateManifest ? JSON.parse(_seededStateManifest)[0].contentUrl[1] : null;
+        return global.fetch.mock.calls
             .map(([u]) => String(u))
-            .filter((u) => new URL(u).hostname === "dandiarchive.s3.amazonaws.com");
+            .filter((u) => new URL(u).hostname === "dandiarchive.s3.amazonaws.com")
+            .filter((u) => u !== STATE_MANIFEST_URL && u !== stateBlobUrl);
+    };
 
     const TRACE_OK =
         "task_id\tname\tstatus\texit\n1\tjob_dispatch (1)\tCOMPLETED\t0\n2\tpreprocessing (1)\tCOMPLETED\t0";

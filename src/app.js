@@ -15,12 +15,17 @@ const CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
    anymore). The job-capsules Dandiset (001697, same as CDN_BASE) carries the
    main queue state; archived failing runs live in the same-shaped table
    inside a dedicated archive Dandiset, surfaced on the Archive page
-   (?view=archive) to keep them out of the main queue. */
+   (?view=archive) to keep them out of the main queue.
+   The 001697/001873 GitHub mirrors are retired for asset content (see the S3
+   blob helpers below), so state.tsv can't be fetched by a predictable raw.
+   githubusercontent.com URL the way it used to be. Unlike a run's output
+   artifacts, it also isn't referenced by any content-id the app already
+   knows -- so its current S3 blob has to be looked up by path against the
+   Dandiset's own `assets.jsonld` manifest (the same one
+   dandi_compute_code.dandiset.load_assets_jsonld_metadata reads on the
+   backend) before it can be fetched. See resolveAssetBlobUrl below. */
 const ARCHIVE_DANDISET_ID = "001873";
-const ARCHIVE_CDN_BASE = `https://raw.githubusercontent.com/${OWNER}/${ARCHIVE_DANDISET_ID}/${BRANCH}`;
 const STATE_TSV_RELATIVE_PATH = "derivatives/state.tsv";
-const STATE_TSV_URL = `${CDN_BASE}/${STATE_TSV_RELATIVE_PATH}`;
-const ARCHIVE_STATE_TSV_URL = `${ARCHIVE_CDN_BASE}/${STATE_TSV_RELATIVE_PATH}`;
 /* Pipeline scheduling config, packaged with dandi-compute/code (formerly a
    queue_config.json living only in the now-retired dandi-compute/queue repo). */
 const PIPELINE_CONFIGS_URL =
@@ -1010,12 +1015,22 @@ function ensureRegistriesLoaded() {
 }
 
 /* ─── Data fetching ─────────────────────────────────────────── */
+// Every draft Dandiset version publishes a bulk `assets.jsonld` manifest
+// (path + contentUrl per asset) directly on the public DANDI S3 bucket -- the
+// same manifest dandi_compute_code.dandiset.load_assets_jsonld_metadata reads
+// on the backend. It's the only way to resolve state.tsv's current S3 blob
+// URL, since (unlike a run's output artifacts) nothing else in the queue data
+// already carries its content-id.
+function assetsJsonldUrl(dandisetId) {
+    return `https://dandiarchive.s3.amazonaws.com/dandisets/${dandisetId}/draft/assets.jsonld`;
+}
+
 function queueStateCacheKey() {
-    return ETAG_CACHE_PREFIX + STATE_TSV_URL;
+    return ETAG_CACHE_PREFIX + assetsJsonldUrl(DERIVATIVES_DANDISET_ID);
 }
 
 function archiveStateCacheKey() {
-    return ETAG_CACHE_PREFIX + ARCHIVE_STATE_TSV_URL;
+    return ETAG_CACHE_PREFIX + assetsJsonldUrl(ARCHIVE_DANDISET_ID);
 }
 
 // Row fields serialised as compact JSON objects (path/content-id maps) rather
@@ -1107,60 +1122,61 @@ function parseStateTsv(text) {
     return dataRows.filter((cols) => cols.some((cell) => cell !== "")).map((cols) => coerceStateTsvRow(cols, header));
 }
 
-// Fetch and parse a `derivatives/state.tsv` queue state table with ETag-based
-// session caching. Defaults to the main queue state; pass { url, cacheKey }
-// to fetch a different source (e.g. the archive Dandiset's state.tsv).
-async function fetchQueueState(options = {}) {
-    const { url = STATE_TSV_URL, cacheKey = queueStateCacheKey() } = options;
+// Shared error mapping for both the assets.jsonld lookup and the resolved
+// blob fetch below: cachedFetch already handles ETag/immutable-blob caching,
+// this just turns a non-ok Response into a descriptive Error.
+async function fetchDandiText(url, context) {
+    const resp = await cachedFetch(url);
+    if (resp.ok) return resp.text();
+    if (resp.status === 403) {
+        throw new Error(`Access denied while loading ${context} (HTTP 403) — the Dandiset may be embargoed or restricted.`);
+    }
+    if (resp.status === 429) {
+        throw new Error("DANDI archive rate limit exceeded. Please try again in a few minutes.");
+    }
+    throw new Error(`Failed to load ${context} (HTTP ${resp.status}).`);
+}
 
-    let cached = null;
+// Look up *path*'s current S3 blob URL within *dandisetId*'s draft
+// assets.jsonld manifest. Content-addressed, so once resolved the blob itself
+// is fetched via cachedFetch's immutable-blob path (see isImmutableBlobUrl) --
+// only this manifest lookup needs revalidating each session.
+async function resolveAssetBlobUrl(dandisetId, path) {
+    const text = await fetchDandiText(assetsJsonldUrl(dandisetId), `asset metadata for Dandiset ${dandisetId}`);
+    let assets;
     try {
-        const raw = sessionStorage.getItem(cacheKey);
-        if (raw) cached = JSON.parse(raw);
+        assets = JSON.parse(text);
     } catch {
-        /* sessionStorage unavailable or parse error; proceed without cache */
+        throw new Error(`Asset metadata for Dandiset ${dandisetId} is not valid JSON.`);
     }
-
-    const headers = new Headers();
-    if (cached?.etag) {
-        headers.set("If-None-Match", cached.etag);
+    const asset = Array.isArray(assets) ? assets.find((a) => a && a.path === path) : null;
+    const contentUrls = Array.isArray(asset?.contentUrl) ? asset.contentUrl : [];
+    const blobUrl = contentUrls.find((u) => typeof u === "string" && u.includes("/blobs/"));
+    if (!blobUrl) {
+        throw new Error(`${path} not found in Dandiset ${dandisetId}'s asset listing.`);
     }
+    return blobUrl;
+}
 
-    const resp = await fetch(url, { headers });
-
-    let text;
-    if (resp.status === 304 && cached) {
-        text = cached.body;
-    } else if (resp.ok) {
-        text = await resp.text();
-
-        const etag = resp.headers.get("ETag");
-        if (etag) {
-            try {
-                sessionStorage.setItem(cacheKey, JSON.stringify({ etag, body: text }));
-            } catch {
-                /* Ignore storage errors (e.g., quota exceeded) */
-            }
-        }
-    } else {
-        if (resp.status === 403 || resp.status === 429) {
-            throw new Error("GitHub CDN rate limit exceeded. Please try again in a few minutes.");
-        }
-        throw new Error(`Failed to load queue state (HTTP ${resp.status}).`);
-    }
-
+// Fetch and parse a Dandiset's `derivatives/state.tsv` queue state table.
+// Defaults to the main queue state; pass { dandisetId } to fetch a different
+// source (e.g. the archive Dandiset's state.tsv).
+async function fetchQueueState(options = {}) {
+    const { dandisetId = DERIVATIVES_DANDISET_ID } = options;
+    const blobUrl = await resolveAssetBlobUrl(dandisetId, STATE_TSV_RELATIVE_PATH);
+    const text = await fetchDandiText(blobUrl, "queue state");
     return parseStateTsv(text);
 }
 
 // Fetch the archived failing runs from the archive Dandiset's state.tsv
 // (shares the same table schema as the main queue state.tsv).
 async function fetchArchiveState() {
-    return fetchQueueState({
-        url: ARCHIVE_STATE_TSV_URL,
-        cacheKey: archiveStateCacheKey(),
-    });
+    return fetchQueueState({ dandisetId: ARCHIVE_DANDISET_ID });
 }
 
+// Only the assets.jsonld manifest lookups are cleared: the resolved state.tsv
+// blob itself is content-addressed (immutable), and per-run S3 blobs already
+// always arrive as new blob URLs in a freshly resolved state.
 function clearQueueStateCache() {
     try {
         sessionStorage.removeItem(queueStateCacheKey());
@@ -5571,7 +5587,7 @@ async function init() {
     if (_viewMode === "archive") {
         setPageCopy(
             "Archived Pipeline Runs",
-            `Failing runs that have been archived from the main queue, sourced from <a href="https://github.com/${OWNER}/${ARCHIVE_DANDISET_ID}/blob/${BRANCH}/${STATE_TSV_RELATIVE_PATH}" target="_blank" rel="noopener">Dandiset ${ARCHIVE_DANDISET_ID}'s state.tsv</a>.`
+            `Failing runs that have been archived from the main queue, sourced from <a href="${dandiBaseUrl(ARCHIVE_DANDISET_ID)}/dandiset/${ARCHIVE_DANDISET_ID}/draft/files?location=${encodeURIComponent(STATE_TSV_RELATIVE_PATH)}" target="_blank" rel="noopener">Dandiset ${ARCHIVE_DANDISET_ID}'s state.tsv</a>.`
         );
     }
 

@@ -21,16 +21,25 @@ open it in Chromium, and stub the external endpoints at the network boundary.
      to test cross-session persistence (Cache API, localStorage).
 3. Stub external hosts with `page.route(/raw\.githubusercontent\.com|dandiarchive\.s3\.amazonaws\.com|api\.github\.com/, handler)`
    and `route.fulfill(...)`. Endpoints the queue dashboard hits:
-   - `.../001697/draft/derivatives/state.tsv` — plain tab-separated table, one row per
-     attempt capsule (main queue view). Header row + rows matching
-     `_STATE_TSV_FIELD_NAMES` in dandi-compute/code's `_queue_state.py`; nested
-     path/content-id maps (`dataset_description_path`, `output_paths`, `log_paths`) are
-     compact-JSON cells, booleans are Python's `str(bool)` (`"True"`/`"False"`).
-   - `.../001873/draft/derivatives/state.tsv` — same schema, archive Dandiset (archive view).
+   - `https://dandiarchive.s3.amazonaws.com/dandisets/001697/draft/assets.jsonld` — the
+     job-capsules Dandiset's bulk asset manifest (main queue view). `state.tsv` isn't
+     referenced by a known content-id, so `fetchQueueState` looks it up here first: find
+     the entry whose `path` is `derivatives/state.tsv`, then fetch its `contentUrl` blob
+     entry (a `.../blobs/<3>/<3>/<id>` URL) for the actual table. Stub both hops: the
+     manifest response is `[{"path": "derivatives/state.tsv", "contentUrl": [..., "<blob
+     url>"]}]`, and the blob URL response is the table itself — plain tab-separated, one
+     row per attempt capsule, header + rows matching `_STATE_TSV_FIELD_NAMES` in
+     dandi-compute/code's `_queue_state.py`; nested path/content-id maps
+     (`dataset_description_path`, `output_paths`, `log_paths`) are compact-JSON cells,
+     booleans are Python's `str(bool)` (`"True"`/`"False"`).
+   - `https://dandiarchive.s3.amazonaws.com/dandisets/001873/draft/assets.jsonld` — same
+     two-hop lookup, archive Dandiset (archive view).
    - `.../code/main/src/dandi_compute_code/queue/pipeline_configs.json` — priorities banner.
    - `.../code/main/...registered_params.json` / `registered_configs.json` — registries.
    - `https://dandiarchive.s3.amazonaws.com/blobs/<3>/<3>/<id>` — per-run artifacts
-     (trace.txt, dataset_description.json, quality_control.json, visualization_output.json).
+     (trace.txt, dataset_description.json, quality_control.json, visualization_output.json)
+     as well as the resolved `state.tsv` blob itself (same URL shape, so route by exact
+     URL match on that specific blob id, not just path prefix).
 4. Load `http://localhost:8123/?view=dashboard` and wait for `#summary .summary-stats`;
    run cards are `.run-entry`. Count/inspect stubbed requests in the route handler
    to assert network behavior (e.g. blob requests are cache-hits on reload).
