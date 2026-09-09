@@ -58,23 +58,50 @@ const {
 
 const QUEUE_STATE_CACHE_KEY = queueStateCacheKey();
 
-/** A passthrough TransformStream that stands in for DecompressionStream in tests. */
-class MockDecompressionStream {
-    constructor() {
-        const ts = new TransformStream();
-        this.readable = ts.readable;
-        this.writable = ts.writable;
-    }
+/** Column order for the `state.tsv` table (mirrors _STATE_TSV_FIELD_NAMES on the Python side). */
+const STATE_TSV_FIELD_NAMES = [
+    "dandiset_id",
+    "dandi_path",
+    "pipeline",
+    "version",
+    "params",
+    "config",
+    "attempt",
+    "codebase",
+    "content_id",
+    "asset_size_bytes",
+    "has_code",
+    "has_been_submitted",
+    "has_output",
+    "has_logs",
+    "dataset_description_path",
+    "output_paths",
+    "log_paths",
+    "created_at",
+    "job_completion_time",
+];
+
+/** Serialise entry dicts into a tab-separated `state.tsv` table (header + one row each). */
+/** Mirror Python csv.DictWriter's QUOTE_MINIMAL: quote-wrap (doubling inner quotes)
+ * only when a cell contains the delimiter, a quote, or a newline. */
+function tsvQuote(cell) {
+    if (!/[\t"\n]/.test(cell)) return cell;
+    return `"${cell.replace(/"/g, '""')}"`;
 }
 
-/** Wrap plain text in a ReadableStream so it can be used as a Response body. */
-function makeReadableStream(text) {
-    return new ReadableStream({
-        start(controller) {
-            controller.enqueue(new TextEncoder().encode(text));
-            controller.close();
-        },
-    });
+function makeStateTsv(entries) {
+    const lines = [STATE_TSV_FIELD_NAMES.join("\t")];
+    for (const entry of entries) {
+        const row = STATE_TSV_FIELD_NAMES.map((key) => {
+            const value = entry[key];
+            if (value === undefined || value === null) return "";
+            if (typeof value === "boolean") return value ? "True" : "False";
+            if (typeof value === "object") return tsvQuote(JSON.stringify(value));
+            return tsvQuote(String(value));
+        });
+        lines.push(row.join("\t"));
+    }
+    return lines.join("\n") + "\n";
 }
 
 const REGISTERED_PARAMS_FIXTURE = {
@@ -1107,11 +1134,60 @@ describe("Neurosift URL helpers", () => {
     });
 });
 
-describe("fetchQueueState ETag caching", () => {
+// state.tsv isn't referenced by a known content-id (unlike a run's output
+// artifacts), so fetchQueueState/fetchArchiveState resolve it in two steps:
+// (1) fetch the Dandiset's `assets.jsonld` manifest and find the entry whose
+// `path` is "derivatives/state.tsv", (2) fetch its S3 blob contentUrl. These
+// helpers build fixtures/mocks for both steps.
+// Blob URLs are cached forever in a module-level, cross-test in-memory map
+// (see clearBlobMemoryCache's docstring in app.js), so each call defaults to
+// a fresh content id -- reusing one across tests would make a later test's
+// "fetch" a stale cache hit from an earlier test's fixture.
+let _stateTsvBlobCounter = 0;
+function stateTsvBlobUrl(contentId = `sv${String(_stateTsvBlobCounter++).padStart(38, "0")}`) {
+    return `https://dandiarchive.s3.amazonaws.com/blobs/${contentId.slice(0, 3)}/${contentId.slice(3, 6)}/${contentId}`;
+}
+
+function assetsJsonldManifest(blobUrl) {
+    return JSON.stringify([
+        {
+            path: "derivatives/state.tsv",
+            contentUrl: ["https://api.dandiarchive.org/api/assets/some-id/download/", blobUrl],
+        },
+    ]);
+}
+
+function assetsJsonldUrlFor(dandisetId) {
+    return `https://dandiarchive.s3.amazonaws.com/dandisets/${dandisetId}/draft/assets.jsonld`;
+}
+
+// Route a mock fetch: the manifest URL for *dandisetId* serves *manifestBody*
+// (default: pointing at *blobUrl*), and *blobUrl* serves *tsvText*. Anything
+// else 404s. Returns the mock so callers can inspect its call log.
+function installStateTsvFetch({
+    dandisetId,
+    tsvText,
+    blobUrl = stateTsvBlobUrl(),
+    manifestBody,
+    manifestHeaders = { ETag: '"manifest-etag"' },
+}) {
+    const manifest = manifestBody ?? assetsJsonldManifest(blobUrl);
+    const mock = vi.fn(async (url) => {
+        const u = String(url);
+        if (u === assetsJsonldUrlFor(dandisetId)) {
+            return new Response(manifest, { status: 200, headers: manifestHeaders });
+        }
+        if (u === blobUrl) return new Response(tsvText, { status: 200 });
+        return new Response(null, { status: 404 });
+    });
+    global.fetch = mock;
+    return { mock, blobUrl };
+}
+
+describe("fetchQueueState", () => {
     const SAMPLE_ENTRY = {
         dandiset_id: "001697",
-        subject: "sub1",
-        session: "ses1",
+        dandi_path: "sub-1/sub-1_ses-1_ecephys.nwb",
         pipeline: "ephys",
         version: "v1",
         params: "abc",
@@ -1121,98 +1197,123 @@ describe("fetchQueueState ETag caching", () => {
         has_output: false,
         has_logs: false,
     };
-    const JSONL_TEXT = JSON.stringify(SAMPLE_ENTRY);
+    const TSV_TEXT = makeStateTsv([SAMPLE_ENTRY]);
 
     let originalFetch;
 
     beforeEach(() => {
         sessionStorage.clear();
         originalFetch = global.fetch;
-        global.DecompressionStream = MockDecompressionStream;
     });
 
     afterEach(() => {
         global.fetch = originalFetch;
-        delete global.DecompressionStream;
         sessionStorage.clear();
     });
 
-    it("fetches, decompresses, parses, and caches ETag on first load", async () => {
-        global.fetch = vi.fn().mockResolvedValue(
-            new Response(makeReadableStream(JSONL_TEXT), {
-                status: 200,
-                headers: { ETag: '"etag-v1"' },
-            })
+    it("resolves state.tsv's blob URL via assets.jsonld, then fetches and parses it", async () => {
+        installStateTsvFetch({ dandisetId: "001697", tsvText: TSV_TEXT });
+
+        const result = await fetchQueueState();
+
+        expect(result).toHaveLength(1);
+        expect(result[0].dandiset_id).toBe("001697");
+        expect(result[0].attempt).toBe(1);
+        expect(result[0].has_code).toBe(true);
+        expect(result[0].has_output).toBe(false);
+    });
+
+    it("caches the assets.jsonld manifest lookup with ETag-based revalidation", async () => {
+        const { mock, blobUrl } = installStateTsvFetch({ dandisetId: "001697", tsvText: TSV_TEXT });
+        mock.mockImplementationOnce(async () =>
+            new Response(assetsJsonldManifest(blobUrl), { status: 200, headers: { ETag: '"manifest-v1"' } })
         );
-
-        const result = await fetchQueueState();
-
-        expect(result).toHaveLength(1);
-        expect(result[0].dandiset_id).toBe("001697");
-
-        // ETag and decompressed body must be stored in sessionStorage
-        const stored = JSON.parse(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY));
-        expect(stored.etag).toBe('"etag-v1"');
-        expect(stored.body).toBe(JSONL_TEXT);
-
-        // First request must not include If-None-Match
-        const [, init] = global.fetch.mock.calls[0];
-        expect(init.headers.get("If-None-Match")).toBeNull();
-    });
-
-    it("sends If-None-Match and returns cached body on 304", async () => {
-        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: JSONL_TEXT }));
-
-        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
-
-        const result = await fetchQueueState();
-
-        expect(result).toHaveLength(1);
-        expect(result[0].dandiset_id).toBe("001697");
-
-        // Must send the cached ETag
-        const [, init] = global.fetch.mock.calls[0];
-        expect(init.headers.get("If-None-Match")).toBe('"etag-v1"');
-    });
-
-    it("skips DecompressionStream entirely on 304 cache hit", async () => {
-        sessionStorage.setItem(QUEUE_STATE_CACHE_KEY, JSON.stringify({ etag: '"etag-v1"', body: JSONL_TEXT }));
-
-        global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 304 }));
-        const decompressionSpy = vi.fn();
-        global.DecompressionStream = decompressionSpy;
 
         await fetchQueueState();
 
-        expect(decompressionSpy).not.toHaveBeenCalled();
+        // Manifest ETag/body must be stored under queueStateCacheKey.
+        const stored = JSON.parse(sessionStorage.getItem(QUEUE_STATE_CACHE_KEY));
+        expect(stored.etag).toBe('"manifest-v1"');
+
+        // A second call must revalidate the manifest with If-None-Match...
+        const manifestUrl = assetsJsonldUrlFor("001697");
+        mock.mockImplementationOnce(async (url, init) => {
+            expect(String(url)).toBe(manifestUrl);
+            expect(init.headers.get("If-None-Match")).toBe('"manifest-v1"');
+            return new Response(null, { status: 304 });
+        });
+
+        const result = await fetchQueueState();
+        expect(result).toHaveLength(1);
+
+        // ...and must not re-fetch the (content-addressed, already-cached) blob body.
+        const blobCallCount = mock.mock.calls.filter(([url]) => String(url) === blobUrl).length;
+        expect(blobCallCount).toBe(1);
     });
 
-    it("throws rate-limit error on HTTP 403", async () => {
+    it("throws when derivatives/state.tsv is absent from the manifest", async () => {
+        installStateTsvFetch({ dandisetId: "001697", tsvText: TSV_TEXT, manifestBody: JSON.stringify([]) });
+        await expect(fetchQueueState()).rejects.toThrow("not found in Dandiset 001697's asset listing");
+    });
+
+    it("throws an access-denied error when the manifest fetch returns 403", async () => {
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 403 }));
-        await expect(fetchQueueState()).rejects.toThrow("rate limit");
+        await expect(fetchQueueState()).rejects.toThrow("Access denied");
     });
 
-    it("throws rate-limit error on HTTP 429", async () => {
+    it("throws a rate-limit error when the manifest fetch returns 429", async () => {
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 429 }));
         await expect(fetchQueueState()).rejects.toThrow("rate limit");
     });
 
-    it("throws generic error on other HTTP failures", async () => {
+    it("throws a generic error on other manifest HTTP failures", async () => {
         global.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
         await expect(fetchQueueState()).rejects.toThrow("HTTP 500");
     });
 
-    it("throws when DecompressionStream is unavailable", async () => {
-        delete global.DecompressionStream;
-        global.fetch = vi.fn().mockResolvedValue(new Response(makeReadableStream(JSONL_TEXT), { status: 200 }));
-        await expect(fetchQueueState()).rejects.toThrow("DecompressionStream");
+    it("throws when the resolved blob itself fails to load", async () => {
+        const blobUrl = stateTsvBlobUrl();
+        global.fetch = vi.fn(async (url) => {
+            if (String(url) === assetsJsonldUrlFor("001697")) {
+                return new Response(assetsJsonldManifest(blobUrl), { status: 200 });
+            }
+            return new Response(null, { status: 500 });
+        });
+        await expect(fetchQueueState()).rejects.toThrow("HTTP 500");
+    });
+
+    it("returns an empty array for an empty state.tsv", async () => {
+        installStateTsvFetch({ dandisetId: "001697", tsvText: "" });
+        expect(await fetchQueueState()).toEqual([]);
+    });
+
+    it("returns an empty array for a header-only state.tsv", async () => {
+        installStateTsvFetch({ dandisetId: "001697", tsvText: makeStateTsv([]) });
+        expect(await fetchQueueState()).toEqual([]);
+    });
+
+    it("parses RFC4180-quoted cells (JSON path maps containing embedded quotes)", async () => {
+        const entry = {
+            ...SAMPLE_ENTRY,
+            content_id: null,
+            created_at: null,
+            job_completion_time: null,
+            output_paths: { 'a/b "with quotes".json': "blob-1" },
+        };
+        installStateTsvFetch({ dandisetId: "001697", tsvText: makeStateTsv([entry]) });
+
+        const [result] = await fetchQueueState();
+
+        expect(result.output_paths).toEqual({ 'a/b "with quotes".json': "blob-1" });
+        expect(result.content_id).toBeNull();
+        expect(result.created_at).toBeNull();
     });
 });
 
 describe("fetchArchiveState", () => {
     const SAMPLE_ENTRY = {
         dandiset_id: "000409",
-        subject: "SWC-038",
+        dandi_path: "sub-SWC-038/sub-SWC-038_ecephys.nwb",
         pipeline: "aind+ephys",
         version: "v1.2.4",
         params: "1cbdbee",
@@ -1223,7 +1324,7 @@ describe("fetchArchiveState", () => {
         has_output: false,
         has_logs: true,
     };
-    const JSONL_TEXT = JSON.stringify(SAMPLE_ENTRY);
+    const TSV_TEXT = makeStateTsv([SAMPLE_ENTRY]);
     const ARCHIVE_CACHE_KEY = archiveStateCacheKey();
 
     let originalFetch;
@@ -1238,33 +1339,41 @@ describe("fetchArchiveState", () => {
         sessionStorage.clear();
     });
 
-    it("fetches the uncompressed archive_state.jsonl without DecompressionStream", async () => {
-        delete global.DecompressionStream;
-        global.fetch = vi.fn().mockResolvedValue(
-            new Response(JSONL_TEXT, {
-                status: 200,
-                headers: { ETag: '"archive-v1"' },
-            })
-        );
+    it("resolves against the archive Dandiset's assets.jsonld, not the main queue's", async () => {
+        const { mock } = installStateTsvFetch({ dandisetId: "001873", tsvText: TSV_TEXT });
 
         const result = await fetchArchiveState();
 
         expect(result).toHaveLength(1);
         expect(result[0].dandiset_id).toBe("000409");
 
-        // Must request the archive URL, not the main compressed state file.
-        const [url] = global.fetch.mock.calls[0];
-        expect(url).toContain("archive_state.jsonl");
-        expect(url).not.toContain(".gz");
+        // Must request the archive Dandiset's manifest, not the main one's.
+        const requestedUrls = mock.mock.calls.map(([url]) => String(url));
+        expect(requestedUrls).toContain(assetsJsonldUrlFor("001873"));
+        expect(requestedUrls).not.toContain(assetsJsonldUrlFor("001697"));
 
-        // ETag/body cached under the archive-specific key.
-        const stored = JSON.parse(sessionStorage.getItem(ARCHIVE_CACHE_KEY));
-        expect(stored.etag).toBe('"archive-v1"');
-        expect(stored.body).toBe(JSONL_TEXT);
+        // Manifest cached under the archive-specific key.
+        expect(sessionStorage.getItem(ARCHIVE_CACHE_KEY)).not.toBeNull();
     });
 
     it("uses a cache key distinct from the main queue state", () => {
         expect(archiveStateCacheKey()).not.toBe(QUEUE_STATE_CACHE_KEY);
+    });
+});
+
+describe("clearQueueStateCache", () => {
+    afterEach(() => {
+        sessionStorage.clear();
+    });
+
+    it("removes both the main and archive assets.jsonld manifest caches", () => {
+        sessionStorage.setItem(queueStateCacheKey(), JSON.stringify({ etag: '"a"', body: "[]" }));
+        sessionStorage.setItem(archiveStateCacheKey(), JSON.stringify({ etag: '"b"', body: "[]" }));
+
+        clearQueueStateCache();
+
+        expect(sessionStorage.getItem(queueStateCacheKey())).toBeNull();
+        expect(sessionStorage.getItem(archiveStateCacheKey())).toBeNull();
     });
 });
 
@@ -1395,7 +1504,7 @@ describe("renderVisualizationSection", () => {
         });
 
         expect(html).toContain("Queue priorities");
-        expect(html).toContain("queue_config.json ↗");
+        expect(html).toContain("pipeline_configs.json ↗");
         expect(html).toContain("Version priority");
         expect(html).toContain("Params priority");
         expect(html).toContain("version=v1");
