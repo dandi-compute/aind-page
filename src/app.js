@@ -1623,10 +1623,14 @@ function renderSummary(runs) {
                 <span class="stat-label">Successful</span>
             </a>`
             }
-            <a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
+            ${
+                isArchive
+                    ? ""
+                    : `<a class="stat-item stat-failed" href="${e(failedHref)}" title="Show only failed runs">
                 <span class="stat-value">${failed}</span>
                 <span class="stat-label">Failed</span>
-            </a>
+            </a>`
+            }
             ${
                 !isArchive && queued
                     ? `<div class="stat-item stat-queued">
